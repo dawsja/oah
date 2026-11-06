@@ -18,8 +18,11 @@ jobs:
       fail-fast: false
       matrix:
         shell: [powershell, pwsh]
+    # A step's `shell:` can't use expressions; the job's default can.
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@v4
       - name: Test Windows installer
-        shell: ${{ matrix.shell }}
         run: ./test/install.test.ps1
