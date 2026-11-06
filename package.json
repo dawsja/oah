@@ -1,6 +1,6 @@
 {
   "name": "oah",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A full-screen AI coding agent for your terminal, built on OpenTUI and the AI SDK",
   "type": "module",
   "license": "MIT",
