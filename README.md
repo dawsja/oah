@@ -146,6 +146,7 @@ from GitHub with `NUR_DOWNLOAD_URL=https://github.com/dawsja/nar/releases/downlo
 ## Develop
 
 ```sh
+git clone --recursive https://github.com/dawsja/nar && cd nar
 bun install
 bun run dev            # run from source
 bun test && bun run typecheck
@@ -154,6 +155,26 @@ bun run build          # dist/nur-<os>-<arch>.tar.gz for this machine
 
 Each binary is the Bun runtime plus nur plus OpenTUI's prebuilt native library (compiled from Zig), so
 users need nothing else installed.
+
+### AI SDK skills
+
+The repo ships the AI SDK's agent skills (installed with `npx skills add vercel/ai`, pinned in
+`skills-lock.json`): `ai-sdk` and `migrate-ai-sdk-v6-to-v7` in `.agents/skills/`, symlinked into
+`.claude/skills/`. Coding agents working on this repo — including nur itself, which reads both folders — use
+them to check AI SDK APIs against the version-matched docs in `node_modules/ai/docs`. Update with
+`npx skills update`.
+
+### Rust wrapper
+
+`crates/opentui` is a standalone Rust binding to OpenTUI's native C ABI (`opentui.h`, v0.8.2): host-owned
+raw mode and event loop, immediate-mode drawing, Kitty keyboard / SGR mouse / paste parsing, OSC 52. It
+builds the Zig core from the `vendor/opentui` submodule (Zig 0.17), or links an existing library with
+`OPENTUI_LIB_DIR`:
+
+```sh
+cargo test
+cargo run --example hello
+```
 
 ## License
 

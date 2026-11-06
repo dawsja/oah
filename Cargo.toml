@@ -1,0 +1,11 @@
+# Rust bindings to OpenTUI's native (Zig) C ABI. The nur app itself is
+# TypeScript (src/); this crate is a standalone wrapper over the same core.
+[workspace]
+resolver = "2"
+members = ["crates/opentui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/dawsja/nar"
