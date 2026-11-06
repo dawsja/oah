@@ -61,6 +61,8 @@ export async function fetchRelease(version?: string, signal?: AbortSignal): Prom
 
 /** The running oah binary, or null when running from source (bun src/index.tsx). */
 export function installedBinary(): string | null {
+  // The engine inside the desktop app updates with the app, never in place.
+  if (process.env.OAH_BUNDLED_ENGINE) return null
   const exe = process.execPath
   const name = basename(exe).toLowerCase()
   if (!name.startsWith("oah")) return null
@@ -83,6 +85,7 @@ export type UpdateResult = { status: "updated"; from: string; to: string; path: 
 export async function update(o: { version?: string; force?: boolean; onStatus?: (s: string) => void; signal?: AbortSignal } = {}): Promise<UpdateResult> {
   const say = o.onStatus ?? (() => {})
   const exe = installedBinary()
+  if (process.env.OAH_BUNDLED_ENGINE) throw new Error("this oah engine ships with the desktop app and updates with it — to update the terminal CLI, run `oah update` in a terminal")
   if (!exe) throw new Error("oah is running from source — update with git pull instead")
   say("checking for updates")
   const rel = await fetchRelease(o.version, o.signal)

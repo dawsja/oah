@@ -1,0 +1,18 @@
+# The oah desktop app (Tauri 2). Its own workspace: the root workspace builds
+# without WebKit/GTK, and `cargo test -p oah-desktop-core` runs anywhere.
+[workspace]
+resolver = "2"
+members = ["core", "src-tauri"]
+
+[workspace.package]
+version = "0.1.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/dawsja/oah"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

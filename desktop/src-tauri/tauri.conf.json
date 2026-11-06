@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "oah",
+  "mainBinaryName": "oah-desktop",
+  "version": "../package.json",
+  "identifier": "dev.oah.desktop",
+  "build": {
+    "beforeDevCommand": "bun run web",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run vite:build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "oah",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 720,
+        "minHeight": 520,
+        "center": true,
+        "decorations": false,
+        "backgroundColor": "#0e0e0f",
+        "theme": "Dark",
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: asset:; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "oah \u2014 open agent harness",
+    "longDescription": "An AI coding agent for your projects: the oah CLI's engine with a desktop interface. Shares sessions, settings and sign-ins with the oah terminal app.",
+    "copyright": "MIT License",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3NkI4Nzg1MUU0RDJEMjIKUldRaUxVMGVoWWRyZDc1TEYyQkVzQVd1YzdCQzUzMUJQNjhtTThiUTZQWHpaM3Nlb1NWNWZsZG8K",
+      "endpoints": [
+        "https://dl.oah.dev/desktop/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

@@ -1,0 +1,187 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* oah is always dark: shadcn's tokens carry the CLI's palette (src/ui/theme.ts). */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+
+  --background: #0e0e0f;
+  --foreground: #ececec;
+  --card: #121214;
+  --card-foreground: #ececec;
+  --popover: #161617;
+  --popover-foreground: #ececec;
+  --primary: #ffd43b;
+  --primary-foreground: #0e0e0f;
+  --secondary: #1f1f21;
+  --secondary-foreground: #ececec;
+  --muted: #1c1c1f;
+  --muted-foreground: #9a9a9f;
+  --accent: #1f1f21;
+  --accent-foreground: #ececec;
+  --destructive: #ff6b7d;
+  --border: #26262a;
+  --input: #2c2c2f;
+  --ring: #ffd43b;
+
+  --sidebar: #08080a;
+  --sidebar-foreground: #ececec;
+  --sidebar-primary: #ffd43b;
+  --sidebar-primary-foreground: #0e0e0f;
+  --sidebar-accent: #18181b;
+  --sidebar-accent-foreground: #ececec;
+  --sidebar-border: #1a1a1c;
+  --sidebar-ring: #ffd43b;
+
+  /* The CLI's accents */
+  --oah-deep: #08080a;
+  --oah-rail: #0b0b0c;
+  --oah-faint: #5c5c62;
+  --oah-brand: #e6edf3;
+  --oah-cyan: #6cc7ff;
+  --oah-green: #63d297;
+  --oah-red: #ff6b7d;
+  --oah-yellow: #ffa94d;
+  --oah-orange: #ff8a4c;
+  --oah-code: #ffe08a;
+  --oah-add-bg: #14261d;
+  --oah-del-bg: #2b161b;
+  --oah-user: #1c1c1f;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-deep: var(--oah-deep);
+  --color-rail: var(--oah-rail);
+  --color-faint: var(--oah-faint);
+  --color-brand: var(--oah-brand);
+  --color-cyan: var(--oah-cyan);
+  --color-green: var(--oah-green);
+  --color-red: var(--oah-red);
+  --color-warn: var(--oah-yellow);
+  --color-orange: var(--oah-orange);
+  --color-code: var(--oah-code);
+  --color-add: var(--oah-add-bg);
+  --color-del: var(--oah-del-bg);
+  --color-user: var(--oah-user);
+
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  @keyframes shimmer {
+    from { background-position: 100% 0; }
+    to { background-position: -100% 0; }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html, body, #root {
+    @apply h-full;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased overflow-hidden select-none cursor-default;
+    font-size: 14px;
+  }
+  ::selection { background: rgb(255 212 59 / 0.28); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #26262a; border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #424246; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  /* Text that sweeps while something is in progress (the TUI's Shimmer). */
+  .shimmer {
+    background: linear-gradient(90deg, var(--muted-foreground) 0%, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%, var(--muted-foreground) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: var(--animate-shimmer);
+  }
+
+  /* Diffs and tool output: the CLI's add/delete colors. */
+  .diff { font: 12.5px/1.7 var(--font-mono); user-select: text; cursor: text; }
+  .diff > div { white-space: pre; padding: 0 12px; color: var(--muted-foreground); min-width: max-content; }
+  .diff > .a { background: var(--oah-add-bg); color: var(--oah-green); }
+  .diff > .d { background: var(--oah-del-bg); color: var(--oah-red); }
+  .diff > .e { color: var(--oah-faint); }
+
+  /* The model's markdown. */
+  .md { overflow-wrap: anywhere; user-select: text; cursor: auto; line-height: 1.65; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p { margin: 0 0 10px; }
+  .md h1, .md h2, .md h3, .md h4 { color: var(--primary); margin: 18px 0 8px; line-height: 1.3; font-weight: 700; }
+  .md h1 { font-size: 20px; }
+  .md h2 { font-size: 17px; }
+  .md h3, .md h4 { font-size: 15px; }
+  .md strong { color: #fff; font-weight: 650; }
+  .md a { color: var(--oah-cyan); text-decoration: underline; text-underline-offset: 2px; }
+  .md ul, .md ol { margin: 0 0 10px; padding-left: 22px; }
+  .md ul { list-style: disc; }
+  .md ol { list-style: decimal; }
+  .md li { margin: 3px 0; }
+  .md li::marker { color: var(--primary); }
+  .md blockquote { margin: 0 0 10px; padding-left: 12px; border-left: 2px solid #424246; color: var(--muted-foreground); font-style: italic; }
+  .md code { font: 13px var(--font-mono); color: var(--oah-code); background: #19191b; padding: 1px 5px; border-radius: 4px; }
+  .md pre { margin: 0 0 12px; background: var(--card); border: 1px solid #1f1f22; border-radius: 8px; padding: 12px 14px; overflow: auto; position: relative; }
+  .md pre code { background: transparent; padding: 0; color: #c9d4f6; font-size: 12.5px; line-height: 1.65; }
+  .md table { border-collapse: collapse; margin: 0 0 12px; font-size: 13px; display: block; overflow-x: auto; }
+  .md th, .md td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; }
+  .md th { background: var(--popover); }
+  .md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+  .md del { color: var(--muted-foreground); }
+  .md.dim, .md.dim strong { color: var(--muted-foreground); }
+
+  /* Syntax colors from the TUI's markdown style. */
+  .hljs-keyword, .hljs-selector-tag, .hljs-built_in { color: #c792ea; }
+  .hljs-string, .hljs-attr-value, .hljs-template-string { color: #c3e88d; }
+  .hljs-comment, .hljs-quote { color: var(--oah-faint); font-style: italic; }
+  .hljs-number, .hljs-literal, .hljs-meta, .hljs-symbol { color: #f78c6c; }
+  .hljs-title, .hljs-title.function_, .hljs-function, .hljs-section, .hljs-name, .hljs-selector-class, .hljs-selector-id { color: #82aaff; }
+  .hljs-type, .hljs-title.class_ { color: #ffcb6b; }
+  .hljs-attr, .hljs-property, .hljs-attribute { color: #89ddff; }
+  .hljs-variable, .hljs-params { color: var(--foreground); }
+  .hljs-addition { color: var(--oah-green); background: var(--oah-add-bg); }
+  .hljs-deletion { color: var(--oah-red); background: var(--oah-del-bg); }
+}
