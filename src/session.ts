@@ -1,10 +1,10 @@
 // Saved sessions (~/.config/oah/sessions/<id>.json), the transcript model and
 // prompt history.
-import { appendFileSync, readdirSync, readFileSync } from "node:fs"
+import { appendFileSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import type { ModelMessage } from "ai"
 import type { Checkpoint } from "./checkpoints"
-import { ensureDir, paths, writeFileAtomic, type Effort, type Mode } from "./config"
+import { ensureDir, paths, readJson, writeFileAtomic, type Effort, type Mode } from "./config"
 
 export type ToolStatus = "running" | "ok" | "failed" | "denied"
 
@@ -65,11 +65,27 @@ export function newSession(model: string, effort: Effort, mode: Mode): SessionDa
 }
 
 const file = (id: string) => join(paths.sessions, `${id}.json`)
+const metaFile = (id: string) => join(paths.sessions, "meta", `${id}.json`)
+
+/** Sidecar summary so listing doesn't parse every full session. `mtime`/`size` are the session file's when written. */
+interface SessionMeta extends SessionSummary {
+  mtime: number
+  size: number
+}
+
+function writeMeta(s: Pick<SessionData, "id" | "title" | "cwd" | "updated">) {
+  try {
+    const st = statSync(file(s.id))
+    const meta: SessionMeta = { id: s.id, title: s.title, cwd: s.cwd, updated: s.updated, mtime: st.mtimeMs, size: st.size }
+    writeFileAtomic(metaFile(s.id), JSON.stringify(meta), true)
+  } catch {}
+}
 
 export function saveSession(s: SessionData) {
   if (!s.messages.length) return
   s.updated = Date.now()
   writeFileAtomic(file(s.id), JSON.stringify(s), true)
+  writeMeta(s)
 }
 
 export function loadSession(idOrPrefix: string): SessionData | undefined {
@@ -90,17 +106,34 @@ export interface SessionSummary {
   updated: number
 }
 
+/**
+ * Summaries of every saved session, newest first. Reads each session's small meta
+ * file; a missing or stale one (older sessions, files written by /import) falls back
+ * to parsing the full session and is rewritten.
+ */
 export function listSessions(): SessionSummary[] {
   const out: SessionSummary[] = []
+  let files: string[]
   try {
-    for (const f of readdirSync(paths.sessions)) {
-      if (!f.endsWith(".json")) continue
-      try {
-        const s = JSON.parse(readFileSync(join(paths.sessions, f), "utf8")) as SessionData
-        out.push({ id: s.id, title: s.title, cwd: s.cwd, updated: s.updated })
-      } catch {}
-    }
-  } catch {}
+    files = readdirSync(paths.sessions)
+  } catch {
+    return out
+  }
+  for (const f of files) {
+    if (!f.endsWith(".json")) continue
+    const path = join(paths.sessions, f)
+    try {
+      const st = statSync(path)
+      const meta = readJson<SessionMeta | null>(metaFile(f.slice(0, -5)), null)
+      if (meta && meta.mtime === st.mtimeMs && meta.size === st.size) {
+        out.push({ id: meta.id, title: meta.title, cwd: meta.cwd, updated: meta.updated })
+        continue
+      }
+      const s = JSON.parse(readFileSync(path, "utf8")) as SessionData
+      out.push({ id: s.id, title: s.title, cwd: s.cwd, updated: s.updated })
+      writeMeta(s)
+    } catch {}
+  }
   return out.sort((a, b) => b.updated - a.updated)
 }
 
