@@ -263,6 +263,7 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
             </text>
             <textarea
               ref={input}
+            cursorColor={t.accent}
               focused={!store.picker && !store.permission}
               flexGrow={1}
               maxHeight={10}
@@ -341,7 +342,7 @@ function Welcome({ store }: { store: Store }) {
       ]
   return (
     <box flexDirection="column" paddingTop={1} paddingLeft={1}>
-      <ascii-font text="oah" font="block" color={[t.accent, t.cyan]} />
+      <ascii-font text="oah" font="block" color={[t.accent, t.accentDeep]} />
       <text>
         <span fg={t.dim}>an AI coding agent for your terminal</span>
         <span fg={t.faint}> v{VERSION}</span>
@@ -455,7 +456,7 @@ function QuestionBox({ store }: { store: Store }) {
       flexShrink={0}
       border
       borderStyle="rounded"
-      borderColor={t.cyan}
+      borderColor={t.accent}
       title=" oah has a question "
       flexDirection="column"
       paddingLeft={1}
@@ -474,7 +475,7 @@ function QuestionBox({ store }: { store: Store }) {
             const mark = q.multiSelect ? (q.checked.has(i) ? "☒" : "☐") : on ? "›" : " "
             return (
               <box key={i} flexDirection="row" backgroundColor={on ? t.panelHi : t.panel}>
-                <text fg={on ? t.cyan : t.faint} wrapMode="none">
+                <text fg={on ? t.accent : t.faint} wrapMode="none">
                   {` ${mark} ${i + 1}. `}
                 </text>
                 <text fg={on ? t.text : t.dim} wrapMode="none">
@@ -584,7 +585,7 @@ function PickerModal({ store, width, height }: { store: Store; width: number; he
 /** Bottom-left of the input box: mode · model · effort. */
 function InputFooter({ store }: { store: Store }) {
   const s = store.settings
-  const effortColor = s.effort === "high" ? t.accent : s.effort === "xhigh" || s.effort === "max" ? t.orange : s.effort === "medium" ? t.cyan : t.dim
+  const effortColor = s.effort === "high" ? t.accent : s.effort === "xhigh" || s.effort === "max" ? t.orange : s.effort === "medium" ? t.text : t.dim
   return (
     <text wrapMode="none">
       <span fg={s.mode === "plan" ? t.plan : t.build}>
