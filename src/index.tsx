@@ -9,13 +9,15 @@ import { Mcp } from "./mcp"
 import { Memory } from "./memory"
 import { latestSession, listSessions, loadSession, relativeTime, saveSession } from "./session"
 import { Skills } from "./skills"
+import { readStdin, runPrint } from "./print"
 import { App } from "./ui/App"
 import { Store } from "./ui/store"
 
 const USAGE = `oah — an AI coding agent for your terminal
 
 Usage:
-  oah [options] [prompt]
+  oah [options] [prompt]   Full-screen app (an optional first prompt)
+  oah -p "prompt"         Run once, print the answer, exit (also: echo … | oah -p)
   oah sessions            List saved sessions
   oah login               Continue with ChatGPT (no TUI)
   oah logout              Sign out of ChatGPT
@@ -26,7 +28,11 @@ Options:
   -c, --continue          Continue the most recent session here
   -m, --model <p/model>   e.g. chatgpt/gpt-5.6, anthropic/claude-opus-5-5, google/gemini-4-argon
   -e, --effort <level>    minimal | low | medium | high | xhigh | max
-  -p, --permission <lvl>  auto | ask | allow
+  -p, --print             Non-interactive: stream the answer to stdout, progress to stderr
+      --json              With -p: print one JSON result (answer, session, cost, errors)
+  -q, --quiet             With -p: no progress on stderr
+      --permission <lvl>  auto | ask | allow (with -p, anything that would ask is denied)
+      --yolo              Same as --permission allow
       --plan              Start in plan mode
   -h, --help · -V, --version
 
@@ -38,6 +44,9 @@ interface Args {
   effort?: Effort
   permission?: Permission
   plan?: boolean
+  print?: boolean
+  json?: boolean
+  quiet?: boolean
   prompt?: string
   sub?: string
 }
@@ -81,6 +90,20 @@ function parseArgs(argv: string[]): Args {
         a.effort = next() as Effort
         break
       case "-p":
+      case "--print":
+        a.print = true
+        break
+      case "--json":
+        a.json = true
+        a.print = true
+        break
+      case "-q":
+      case "--quiet":
+        a.quiet = true
+        break
+      case "--yolo":
+        a.permission = "allow"
+        break
       case "--permission":
         a.permission = ({ ask: "ask", "always-ask": "ask", allow: "allow", "always-allow": "allow", auto: "auto" } as Record<string, Permission>)[next()]
         break
@@ -149,9 +172,15 @@ async function main() {
   if (args.sub === "logout") return console.log(await auth.logoutChatGpt())
   if (args.sub === "models") return console.log((await refreshCatalog(true)) ? "Model catalog updated from models.dev." : "Couldn't reach models.dev.")
 
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error("oah needs an interactive terminal.")
-    process.exit(1)
+  const headless = !!args.print || !process.stdin.isTTY || !process.stdout.isTTY
+  let prompt = args.prompt ?? ""
+  if (headless) {
+    const piped = (await readStdin(prompt ? 400 : undefined)).trim()
+    if (piped) prompt = prompt ? `${prompt}\n\n<stdin>\n${piped}\n</stdin>` : piped
+    if (!prompt.trim()) {
+      console.error(args.print ? 'oah: -p needs a prompt, e.g. oah -p "fix the failing tests" (or pipe one in)' : "oah needs an interactive terminal (or use -p \"prompt\" to run once and print the answer).")
+      process.exit(2)
+    }
   }
 
   const settings = loadSettings()
@@ -173,6 +202,9 @@ async function main() {
     }
   }
   const cwd = process.cwd()
+  const model = args.model ? joinModel(splitModel(args.model).provider, splitModel(args.model).slug) : undefined
+
+  if (headless) process.exit(await runPrint({ prompt, settings, session, cwd, json: !!args.json, quiet: !!args.quiet, model }))
 
   // Anything written to stderr lands on top of the full-screen UI: silence the AI
   // SDK's warning logger and Node-style process warnings while the TUI runs.
@@ -187,10 +219,7 @@ async function main() {
   let store: Store
   const mcp = new Mcp(cwd, () => store?.emit())
   store = new Store(settings, session, cwd, new Skills(cwd), new Memory(cwd), mcp, copy)
-  if (args.model) {
-    const { provider, slug } = splitModel(args.model)
-    store.settings.model = joinModel(provider, slug)
-  }
+  if (model) store.settings.model = model
   if (session) store.info(`Resumed session ${session.id}`)
   mcp.start()
 
@@ -210,7 +239,7 @@ async function main() {
   process.on("SIGTERM", exit)
   process.on("SIGHUP", exit)
   createRoot(renderer).render(<App store={store} onExit={exit} />)
-  if (args.prompt) store.submit(args.prompt)
+  if (prompt) store.submit(prompt)
 }
 
 main()

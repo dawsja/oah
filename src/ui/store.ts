@@ -108,6 +108,8 @@ export class Store {
   authStatus = auth.status()
   quit = false
   private login: auth.PendingLogin | null = null
+  /** Non-interactive runs (oah -p): answer permission prompts and questions without a UI. */
+  headless: { ask(req: { title: string; kind: string }): Reply; question(q: Question): string } | null = null
 
   constructor(
     public settings: Settings,
@@ -440,6 +442,7 @@ export class Store {
           this.emit()
         },
         ask: (req) =>
+          this.headless ? Promise.resolve(this.headless.ask(req)) :
           new Promise<Reply>((resolve) => {
             this.activity = "Waiting for permission"
             this.permission = { ...req, resolve }
@@ -462,6 +465,7 @@ export class Store {
           }
         },
         question: (q) =>
+          this.headless ? Promise.resolve(this.headless.question(q)) :
           new Promise<string>((resolve) => {
             this.activity = "Waiting for your answer"
             this.question = { ...q, selected: 0, checked: new Set(), resolve }
@@ -514,6 +518,19 @@ export class Store {
 
   get liveText() {
     return this.streamText
+  }
+
+  /** Resolves once nothing is running or queued and checkpoint work has finished. */
+  whenIdle(): Promise<void> {
+    return new Promise((resolve) => {
+      const check = () => {
+        if (this.busy || this.queue.length) return
+        off()
+        this.cpChain.then(() => resolve(), () => resolve())
+      }
+      const off = this.subscribe(() => setTimeout(check, 0))
+      setTimeout(check, 0)
+    })
   }
 
   spend(usd: number) {

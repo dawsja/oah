@@ -41,6 +41,13 @@ export class Mcp {
     private onChange: () => void,
   ) {}
 
+  private connecting: Promise<unknown>[] = []
+
+  /** Wait for every server to connect or fail (at most `ms`). */
+  settled(ms = 15_000): Promise<void> {
+    return Promise.race([Promise.allSettled(this.connecting).then(() => {}), new Promise<void>((r) => setTimeout(r, ms))])
+  }
+
   start() {
     const files = [paths.mcp, join(this.cwd, ".oah", "mcp.json"), join(this.cwd, ".mcp.json")]
     const configs = new Map<string, [ServerConfig, string]>()
@@ -53,7 +60,7 @@ export class Mcp {
       if (cfg.disabled) continue
       const server: McpServer = { name, source, state: "starting", tools: [] }
       this.servers.push(server)
-      this.connect(server, cfg).then(this.onChange, this.onChange)
+      this.connecting.push(this.connect(server, cfg).then(this.onChange, this.onChange))
     }
   }
 

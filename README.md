@@ -21,6 +21,19 @@ Answer-first. Your prompt is a `›` heading; thinking and tool calls fold into 
 The input box shows **plan/build · model · effort** in its bottom-left corner; the status bar below shows
 the **permission** level on the left and the **context meter** on the right.
 
+## Scripts and CI
+
+```sh
+oah -p "fix the failing tests"              # run once: answer on stdout, progress on stderr
+npm test 2>&1 | oah -p "why did this fail?"  # piped input is added to the prompt
+oah -c -p "now add a test for it"            # continue the latest session here
+oah -p --json "summarize src/" | jq .cost    # one JSON object: result, session, cost, errors
+```
+
+Nobody is around to approve anything, so tool calls that would ask (edits, non-read-only commands) are
+denied and listed on stderr. Pass `--permission allow` (or `--yolo`) to let it change files. Exit code is 1
+on errors, 130 if interrupted. Checkpoints are still taken, so `/undo` in the app can roll a run back.
+
 ## Keys
 
 | Key | |
