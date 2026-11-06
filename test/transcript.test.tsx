@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test"
 import { RGBA, SyntaxStyle } from "@opentui/core"
+import { useRenderer } from "@opentui/react"
 import { testRender } from "@opentui/react/test-utils"
+import { useMemo } from "react"
 import { Transcript } from "../src/ui/Transcript"
 import type { Entry } from "../src/session"
 
@@ -16,14 +18,39 @@ const entries: Entry[] = [
   { kind: "error", text: "boom" },
 ]
 
+// The style must belong to the renderer that draws it (markdown reads it synchronously).
+function Styled() {
+  const renderer = useRenderer()
+  const style = useMemo(() => SyntaxStyle.fromStyles({ default: { fg: RGBA.fromHex("#ffffff") } }, (renderer as any).nativeScene), [renderer])
+  return <Transcript entries={entries} style={style} liveText={null} busy={false} />
+}
+
 test("renders every entry kind", async () => {
-  const setup = await testRender(<box />, { width: 100, height: 60 })
-  const style = SyntaxStyle.fromStyles({ default: { fg: RGBA.fromHex("#ffffff") } }, (setup.renderer as any).nativeScene)
-  setup.renderer.destroy()
-  const s2 = await testRender(<Transcript entries={entries} style={style} liveText={null} busy={false} />, { width: 100, height: 60 })
+  const s2 = await testRender(<Styled />, { width: 100, height: 60 })
   await s2.renderOnce()
   const frame = s2.captureCharFrame()
   expect(frame).toMatch(/\d steps? · Update, Edit, Bash/)
   expect(frame).toMatch(/› add a --json flag/)
   s2.renderer.destroy()
+})
+
+// Regression: while streaming, the instant preview used to be inline-only ("## Steps"),
+// then tree-sitter swapped in the concealed form ("Steps") — every delta flickered.
+test("streaming preview conceals block markers", async () => {
+  const live: Entry[] = [
+    { kind: "user", text: "plan it" },
+    { kind: "assistant", text: "Here is the plan.\n\n## Steps\n\n1. Read **store.ts**\n2. Ch", model: "openai/gpt-5.6" },
+  ]
+  function Live() {
+    const renderer = useRenderer()
+    const style = useMemo(() => SyntaxStyle.fromStyles({ default: { fg: RGBA.fromHex("#ffffff") } }, (renderer as any).nativeScene), [renderer])
+    return <Transcript entries={live} style={style} liveText={1} busy />
+  }
+  const s = await testRender(<Live />, { width: 80, height: 30 })
+  await s.renderOnce()
+  const frame = s.captureCharFrame()
+  expect(frame).toMatch(/Steps/)
+  expect(frame).not.toMatch(/## Steps/)
+  expect(frame).not.toMatch(/\*\*store\.ts\*\*/)
+  s.renderer.destroy()
 })

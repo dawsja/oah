@@ -26,8 +26,12 @@ function DiffLines({ lines }: { lines: string[] }) {
 
 const verbOf = (title: string) => title.split(" ", 1)[0]!
 
+// internalBlockMode="top-level": by default OpenTUI coalesces all prose into one block
+// whose instant streaming preview is inline-only (shows "## ", list markers, …), then
+// tree-sitter swaps in the concealed version — so every delta flips the whole answer
+// between two layouts. Per-block mode gives the preview real tokens, so both agree.
 function Md({ text, style, streaming, dim }: { text: string; style: SyntaxStyle; streaming: boolean; dim?: boolean }) {
-  return <markdown content={text} syntaxStyle={style} streaming={streaming} fg={dim ? t.dim : t.text} conceal />
+  return <markdown content={text} syntaxStyle={style} streaming={streaming} internalBlockMode="top-level" fg={dim ? t.dim : t.text} conceal />
 }
 
 interface Turn {
