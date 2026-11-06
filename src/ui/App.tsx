@@ -249,8 +249,10 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
           borderColor={masked ? t.yellow : modeColor}
           title={masked ? (store.inputMode === "openai-key" ? " OpenAI API key " : " Anthropic API key ") : undefined}
           flexDirection="column"
-          paddingLeft={1}
-          paddingRight={1}
+          paddingLeft={2}
+          paddingRight={2}
+          paddingTop={1}
+          paddingBottom={1}
           marginLeft={1}
           marginRight={1}
           minHeight={3}
@@ -294,7 +296,7 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
               }}
             />
           </box>
-          {masked ? null : <InputFooter store={store} />}
+          {masked ? null : <box marginTop={1}><InputFooter store={store} /></box>}
         </box>
       )}
       <StatusBar store={store} width={width} />
