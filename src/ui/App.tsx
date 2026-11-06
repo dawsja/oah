@@ -249,13 +249,11 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
           borderColor={masked ? t.yellow : modeColor}
           title={masked ? (store.inputMode === "openai-key" ? " OpenAI API key " : " Anthropic API key ") : undefined}
           flexDirection="column"
-          paddingLeft={2}
-          paddingRight={2}
-          paddingTop={1}
-          paddingBottom={1}
+          paddingLeft={1}
+          paddingRight={1}
           marginLeft={1}
           marginRight={1}
-          minHeight={3}
+          minHeight={masked ? 3 : 6}
         >
           <box flexDirection="row">
             <textarea
@@ -294,7 +292,7 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
               }}
             />
           </box>
-          {masked ? null : <box marginTop={1}><InputFooter store={store} /></box>}
+          {masked ? null : <box flexGrow={1} minHeight={1} justifyContent="flex-end"><InputFooter store={store} /></box>}
         </box>
       )}
       <StatusBar store={store} width={width} />
