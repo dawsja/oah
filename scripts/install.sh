@@ -6,7 +6,7 @@
 # Options (environment variables):
 #   OAH_VERSION        version to install, e.g. 0.1.0 (default: latest)
 #   OAH_INSTALL        install root (default: ~/.config/oah); the binary goes in $OAH_INSTALL/bin
-#   OAH_DOWNLOAD_URL   where release files live (default: https://oah.dev/download)
+#   OAH_DOWNLOAD_URL   where release files live (default: https://dl.oah.dev — the R2 bucket)
 #                      layout: $OAH_DOWNLOAD_URL/latest.txt
 #                              $OAH_DOWNLOAD_URL/v<version>/oah-<os>-<arch>.tar.gz[.sha256]
 #                      GitHub releases use the same layout:
@@ -14,7 +14,7 @@
 #   OAH_NO_MODIFY_PATH set to 1 to leave shell profiles alone
 set -eu
 
-BASE="${OAH_DOWNLOAD_URL:-https://oah.dev/download}"
+BASE="${OAH_DOWNLOAD_URL:-https://dl.oah.dev}"
 BASE="${BASE%/}"
 ROOT="${OAH_INSTALL:-${XDG_CONFIG_HOME:-$HOME/.config}/oah}"
 BIN_DIR="$ROOT/bin"

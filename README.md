@@ -206,25 +206,29 @@ irm https://oah.dev/install.ps1 | iex
 (x64/arm64): `~\.config\oah\bin\oah.exe`, added to your user PATH. On Windows the shell tool runs
 PowerShell (`pwsh` when installed, else Windows PowerShell), and the model is told to write PowerShell.
 
-Hosting on Cloudflare: serve `scripts/install.sh` at `https://oah.dev/install.sh` and put the release files
-under `https://oah.dev/download/`:
+Release files live in a Cloudflare R2 bucket (`oah-releases`) served at **https://dl.oah.dev**, which is
+the installers' default:
 
 ```text
-download/latest.txt                         0.1.0
-download/v0.1.0/oah-linux-x64.tar.gz        + .sha256
-download/v0.1.0/oah-linux-arm64.tar.gz      + .sha256
-download/v0.1.0/oah-darwin-x64.tar.gz       + .sha256
-download/v0.1.0/oah-darwin-arm64.tar.gz     + .sha256
-download/v0.1.0/oah-windows-x64.tar.gz      + .sha256   (oah.exe)
-download/v0.1.0/oah-windows-arm64.tar.gz    + .sha256
+latest.txt                          0.1.0          (no-cache; uploaded last)
+install.sh   install.ps1                           (no-cache)
+v0.1.0/oah-linux-x64.tar.gz         + .sha256      (immutable)
+v0.1.0/oah-linux-arm64.tar.gz       + .sha256
+v0.1.0/oah-darwin-x64.tar.gz        + .sha256
+v0.1.0/oah-darwin-arm64.tar.gz      + .sha256
+v0.1.0/oah-windows-x64.tar.gz       + .sha256      (oah.exe)
+v0.1.0/oah-windows-arm64.tar.gz     + .sha256
 ```
 
-and `scripts/install.ps1` at `https://oah.dev/install.ps1`. `bun scripts/build.ts --os darwin,windows` builds
-just those platforms.
+`https://oah.dev/install.sh` and `/install.ps1` redirect to the copies on dl.oah.dev (a Cloudflare redirect
+rule; `curl -L` and `irm` follow it). `bun scripts/build.ts --os darwin,windows` builds just those platforms.
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds all six with `bun scripts/build.ts --all`
-and attaches them (plus `latest.txt`, `install.sh` and `install.ps1`) to a GitHub release. Until oah.dev is live, install
-from GitHub with `OAH_DOWNLOAD_URL=https://github.com/dawsja/oah/releases/download`.
+To release, bump `version` in `package.json` and push a matching `v*` tag. `.github/workflows/release.yml`
+tests, builds all six with `bun scripts/build.ts --all`, attaches them to a GitHub release, and uploads them to
+R2 with `scripts/publish-r2.sh` (repo secrets `CLOUDFLARE_API_TOKEN` with R2 edit access and
+`CLOUDFLARE_ACCOUNT_ID`; repo variable `OAH_R2_BUCKET` overrides the bucket name). The script also works
+locally after `wrangler login`. To install straight from GitHub instead, set
+`OAH_DOWNLOAD_URL=https://github.com/dawsja/oah/releases/download`.
 
 ## Develop
 

@@ -6,7 +6,7 @@
 # Options (environment variables, set before running):
 #   OAH_VERSION        version to install, e.g. 0.1.0 (default: latest)
 #   OAH_INSTALL        install root (default: ~\.config\oah); the binary goes in $OAH_INSTALL\bin
-#   OAH_DOWNLOAD_URL   where release files live (default: https://oah.dev/download)
+#   OAH_DOWNLOAD_URL   where release files live (default: https://dl.oah.dev - the R2 bucket)
 #                      layout: $OAH_DOWNLOAD_URL/latest.txt
 #                              $OAH_DOWNLOAD_URL/v<version>/oah-windows-<arch>.tar.gz[.sha256]
 #                      GitHub releases use the same layout:
@@ -19,7 +19,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 function Fail($msg) { Write-Host "error: $msg" -ForegroundColor Red; exit 1 }
 
-$Base = if ($env:OAH_DOWNLOAD_URL) { $env:OAH_DOWNLOAD_URL.TrimEnd('/') } else { 'https://oah.dev/download' }
+$Base = if ($env:OAH_DOWNLOAD_URL) { $env:OAH_DOWNLOAD_URL.TrimEnd('/') } else { 'https://dl.oah.dev' }
 $Root = if ($env:OAH_INSTALL) { $env:OAH_INSTALL } else { Join-Path $HOME '.config\oah' }
 $BinDir = Join-Path $Root 'bin'
 $GitHubLatest = 'https://github.com/dawsja/oah/releases/latest/download/latest.txt'
