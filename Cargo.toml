@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/opentui", "crates/nar"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/dawsja/nar"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
