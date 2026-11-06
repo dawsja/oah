@@ -16,18 +16,14 @@ const entries: Entry[] = [
   { kind: "error", text: "boom" },
 ]
 
-for (const design of ["panels", "bubbles", "cards", "gutter", "focus"] as const) {
-  test(`design ${design} renders every entry kind`, async () => {
-    let style!: SyntaxStyle
-    const setup = await testRender(<box />, { width: 100, height: 60 })
-    style = SyntaxStyle.fromStyles({ default: { fg: RGBA.fromHex("#ffffff") } }, (setup.renderer as any).nativeScene)
-    setup.renderer.destroy()
-    const s2 = await testRender(<Transcript entries={entries} design={design} style={style} liveText={null} liveReasoning={null} busy={false} model="openai/gpt-5.6" />, { width: 100, height: 60 })
-    await s2.renderOnce()
-    const frame = s2.captureCharFrame()
-    // Focus folds tool titles into a steps line; the others show them.
-    expect(frame).toMatch(design === "focus" ? /\d steps? · Update, Edit, Bash/ : /cargo test/)
-    expect(frame).toMatch(design === "focus" ? /› add a --json flag/ : /you/)
-    s2.renderer.destroy()
-  })
-}
+test("renders every entry kind", async () => {
+  const setup = await testRender(<box />, { width: 100, height: 60 })
+  const style = SyntaxStyle.fromStyles({ default: { fg: RGBA.fromHex("#ffffff") } }, (setup.renderer as any).nativeScene)
+  setup.renderer.destroy()
+  const s2 = await testRender(<Transcript entries={entries} style={style} liveText={null} busy={false} />, { width: 100, height: 60 })
+  await s2.renderOnce()
+  const frame = s2.captureCharFrame()
+  expect(frame).toMatch(/\d steps? · Update, Edit, Bash/)
+  expect(frame).toMatch(/› add a --json flag/)
+  s2.renderer.destroy()
+})

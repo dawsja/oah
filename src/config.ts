@@ -101,33 +101,12 @@ export const permissionInfo: Record<Permission, { label: string; desc: string }>
 export const nextPermission = (p: Permission): Permission => PERMISSIONS[(PERMISSIONS.indexOf(p) + 1) % PERMISSIONS.length]!
 
 export type Mode = "plan" | "build"
-export type Design = "panels" | "bubbles" | "cards" | "gutter" | "focus"
-export const DESIGNS: Design[] = ["panels", "bubbles", "cards", "gutter", "focus"]
-export const designInfo: Record<Design, { name: string; desc: string }> = {
-  panels: { name: "Panels", desc: "tinted panel for you, labelled column for nur" },
-  bubbles: { name: "Bubbles", desc: "chat bubbles: you on the right, nur on the left" },
-  cards: { name: "Cards", desc: "each exchange in one card: your prompt on top, nur's work and answer below" },
-  gutter: { name: "Gutter", desc: "chat log with a speaker column and a colored bar per message" },
-  focus: { name: "Focus", desc: "answer-first: your prompt as a heading, steps folded into one line" },
-}
-
-/** Accept current names, old letters and removed designs. */
-export function parseDesign(s: string | undefined): Design | undefined {
-  const v = (s ?? "").trim().toLowerCase()
-  if ((DESIGNS as string[]).includes(v)) return v as Design
-  const alias: Record<string, Design> = { a: "panels", panel: "panels", b: "bubbles", bubble: "bubbles", card: "cards", log: "gutter", chat: "gutter" }
-  if (alias[v]) return alias[v]
-  if (/^c\d?$/.test(v) || v === "timeline") return "panels"
-  return undefined
-}
-
 export interface Settings {
   /** `provider/slug`; empty = choose from available credentials. */
   model: string
   effort: Effort
   permission: Permission
   mode: Mode
-  design: Design
   autoCompact: boolean
   /** Fraction of the context window that triggers auto-compaction. */
   autoCompactAt: number
@@ -144,16 +123,14 @@ export const defaultSettings: Settings = {
   effort: "medium",
   permission: "auto",
   mode: "build",
-  design: "panels",
   autoCompact: true,
   autoCompactAt: 0.85,
   allowedCommands: [],
 }
 
 export function loadSettings(): Settings {
-  const s = { ...defaultSettings, ...readJson<Partial<Settings>>(paths.settings, {}) }
-  s.design = parseDesign(s.design) ?? "panels"
-  return s
+  const { design: _removed, ...saved } = readJson<Partial<Settings> & { design?: unknown }>(paths.settings, {})
+  return { ...defaultSettings, ...saved }
 }
 
 export function saveSettings(s: Settings) {

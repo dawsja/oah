@@ -5,9 +5,6 @@ import * as auth from "../auth"
 import { clampEffort, contextWindow, displayName, effortsFor, modelsFor, pickDefault, refreshCatalog } from "../catalog"
 import { HELP, matchCommands, resolveCommand, type Command } from "../commands"
 import {
-  DESIGNS,
-  designInfo,
-  parseDesign,
   effortInfo,
   nextPermission,
   PERMISSIONS,
@@ -16,7 +13,6 @@ import {
   saveSettings,
   shortPath,
   splitModel,
-  type Design,
   type Effort,
   type Mode,
   type Permission,
@@ -29,7 +25,7 @@ import type { Skills } from "../skills"
 import { oneLine, TOOLS, type Outcome } from "../tools"
 import { killAllShells, setShellListener } from "../tools/shells"
 
-export type PickerKind = "model" | "effort" | "permission" | "session" | "auth" | "design"
+export type PickerKind = "model" | "effort" | "permission" | "session" | "auth"
 
 export interface PickItem {
   label: string
@@ -238,12 +234,6 @@ export class Store {
 
   toggleMode() {
     this.setMode(this.settings.mode === "plan" ? "build" : "plan")
-  }
-
-  setDesign(d: Design) {
-    this.settings.design = d
-    this.persistSettings()
-    this.notify(`Design → ${designInfo[d].name}`)
   }
 
   // ---- history ----------------------------------------------------------------
@@ -613,11 +603,6 @@ export class Store {
         return this.setMode("plan")
       case "build":
         return this.setMode("build")
-      case "design": {
-        const d = parseDesign(args)
-        if (d) return this.setDesign(d)
-        return this.openPicker("design", "Transcript design", DESIGNS.map((x) => ({ label: designInfo[x].name, detail: designInfo[x].desc, value: x, current: x === this.settings.design })))
-      }
       case "auth":
         if (args === "logout") return this.authAction("logout-chatgpt")
         if (args === "login" || args === "chatgpt") return this.authAction("chatgpt")
@@ -759,8 +744,6 @@ export class Store {
         return this.setEffort(item.value as Effort)
       case "permission":
         return this.setPermission(item.value as Permission)
-      case "design":
-        return this.setDesign(item.value as Design)
       case "session":
         return this.resume(item.value)
       case "auth":

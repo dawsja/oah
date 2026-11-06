@@ -15,7 +15,6 @@ export const COMMANDS: Command[] = [
   { name: "compact", args: "[focus]", desc: "Summarize the conversation to free context" },
   { name: "clear", args: "", desc: "Start a fresh conversation" },
   { name: "session", args: "[id]", desc: "Browse and resume saved sessions" },
-  { name: "design", args: "[name]", desc: "Transcript look: panels · bubbles · cards · gutter · focus" },
   { name: "memory", args: "[add|global|remove <text>]", desc: "View or edit persistent memory" },
   { name: "skills", args: "", desc: "List available skills" },
   { name: "mcp", args: "", desc: "Show MCP servers and tools" },
@@ -35,7 +34,6 @@ const ALIASES: Record<string, string> = {
   resume: "session",
   login: "auth",
   models: "model",
-  theme: "design",
   quit: "exit",
   q: "exit",
   "?": "help",
@@ -66,7 +64,7 @@ export const HELP = `## Keys
 - **#note** saves a note to project memory
 
 ## Commands
-- **/model**, **/effort**, **/permissions**, **/plan**, **/build**, **/design**
+- **/model**, **/effort**, **/permissions**, **/plan**, **/build**
 - **/auth** — continue with ChatGPT (uses your plan), or add an OpenAI / Anthropic API key
 - **/goal** <objective> — keep going until done (**/goal clear** stops)
 - **/compact** [focus] — summarize history; auto-compaction runs near the context limit

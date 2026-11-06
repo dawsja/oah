@@ -4,7 +4,7 @@ import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import * as auth from "./auth"
 import { refreshCatalog } from "./catalog"
-import { DESIGNS, ensureDir, parseDesign, homeDir, loadSettings, PROVIDERS, shortPath, VERSION, type Design, type Effort, type Permission } from "./config"
+import { ensureDir, homeDir, loadSettings, PROVIDERS, shortPath, VERSION, type Effort, type Permission } from "./config"
 import { Mcp } from "./mcp"
 import { Memory } from "./memory"
 import { latestSession, listSessions, loadSession, relativeTime, saveSession } from "./session"
@@ -27,7 +27,6 @@ Options:
   -m, --model <p/model>   e.g. chatgpt/gpt-5.6, anthropic/claude-opus-5-5, openai/gpt-5.6
   -e, --effort <level>    minimal | low | medium | high | xhigh | max
   -p, --permission <lvl>  auto | ask | allow
-  -d, --design <name>     panels · bubbles · cards · gutter · focus
       --plan              Start in plan mode
   -h, --help · -V, --version
 
@@ -38,7 +37,6 @@ interface Args {
   model?: string
   effort?: Effort
   permission?: Permission
-  design?: Design
   plan?: boolean
   prompt?: string
   sub?: string
@@ -85,11 +83,6 @@ function parseArgs(argv: string[]): Args {
       case "-p":
       case "--permission":
         a.permission = ({ ask: "ask", "always-ask": "ask", allow: "allow", "always-allow": "allow", auto: "auto" } as Record<string, Permission>)[next()]
-        break
-      case "-d":
-      case "--design":
-        a.design = parseDesign(next())
-        if (!a.design) throw new Error(`design must be one of: ${DESIGNS.join(", ")}`)
         break
       case "--plan":
         a.plan = true
@@ -164,7 +157,6 @@ async function main() {
   const settings = loadSettings()
   if (args.effort) settings.effort = args.effort
   if (args.permission) settings.permission = args.permission
-  if (args.design) settings.design = args.design
   if (args.plan) settings.mode = "plan"
 
   let session = undefined

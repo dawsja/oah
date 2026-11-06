@@ -150,8 +150,8 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
       else if (key.name === "pageup") p.selected = Math.max(0, p.selected - 10)
       else if (key.name === "pagedown") p.selected = Math.min(n - 1, p.selected + 10)
       else if (key.name === "return") return store.pick()
-      else if (key.name === "backspace") (p.filter = p.filter.slice(0, -1)), (p.selected = 0)
-      else if (key.sequence && key.sequence.length === 1 && key.sequence >= " " && !key.ctrl) (p.filter += key.sequence), (p.selected = 0)
+      else if (key.name === "backspace") ((p.filter = p.filter.slice(0, -1)), (p.selected = 0))
+      else if (key.sequence && key.sequence.length === 1 && key.sequence >= " " && !key.ctrl) ((p.filter += key.sequence), (p.selected = 0))
       return store.emit(true)
     }
     // Command palette.
@@ -222,9 +222,17 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
   return (
     <box width={width} height={height} flexDirection="column" backgroundColor={t.bg}>
       <Header store={store} width={width} />
-      <scrollbox ref={scroll} flexGrow={1} stickyScroll stickyStart="bottom" paddingLeft={1} paddingRight={1} scrollbarOptions={{ trackOptions: { foregroundColor: t.borderHi, backgroundColor: t.bg } }}>
+      <scrollbox
+        ref={scroll}
+        flexGrow={1}
+        stickyScroll
+        stickyStart="bottom"
+        paddingLeft={1}
+        paddingRight={1}
+        scrollbarOptions={{ trackOptions: { foregroundColor: t.borderHi, backgroundColor: t.bg } }}
+      >
         {entries.length === 0 ? <Welcome store={store} /> : null}
-        <Transcript entries={entries} design={s.design} style={style} liveText={store.liveText} liveReasoning={store.liveReasoning} busy={!!busy} model={s.model} />
+        <Transcript entries={entries} style={style} liveText={store.liveText} busy={!!busy} />
         <TodoPanel store={store} />
         <box height={1} />
       </scrollbox>
@@ -234,44 +242,59 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
       {store.permission ? (
         <PermissionBox store={store} />
       ) : (
-        <box flexShrink={0} border borderStyle="rounded" borderColor={masked ? t.yellow : modeColor} title={masked ? (store.inputMode === "openai-key" ? " OpenAI API key " : " Anthropic API key ") : undefined} flexDirection="row" paddingLeft={1} paddingRight={1} marginLeft={1} marginRight={1} minHeight={3}>
-          <text fg={modeColor}>
-            <b>{"› "}</b>
-          </text>
-          <textarea
-            ref={input}
-            focused={!store.picker && !store.permission}
-            flexGrow={1}
-            maxHeight={10}
-            minHeight={1}
-            textColor={masked ? t.bg : t.text}
-            focusedTextColor={masked ? t.bg : t.text}
-            placeholder={
-              masked
-                ? "paste the key and press enter · esc to cancel"
-                : store.question
-                  ? "or type your own answer and press enter"
-                  : busy
-                  ? "type to queue a message · esc to interrupt"
-                  : s.mode === "plan"
-                    ? "describe what to plan… (tab for build mode)"
-                    : "ask anything · / for commands · shift+enter for newline"
-            }
-            placeholderColor={t.faint}
-            keyBindings={[
-              { name: "return", shift: true, action: "newline" },
-              { name: "return", meta: true, action: "newline" },
-              { name: "j", ctrl: true, action: "newline" },
-            ]}
-            onContentChange={() => {
-              const v = input.current?.plainText ?? ""
-              if (v !== store.input) {
-                store.input = v
-                store.histIdx = null
-                store.emit()
+        <box
+          flexShrink={0}
+          border
+          borderStyle="rounded"
+          borderColor={masked ? t.yellow : modeColor}
+          title={masked ? (store.inputMode === "openai-key" ? " OpenAI API key " : " Anthropic API key ") : undefined}
+          flexDirection="column"
+          paddingLeft={1}
+          paddingRight={1}
+          marginLeft={1}
+          marginRight={1}
+          minHeight={3}
+        >
+          <box flexDirection="row">
+            <text fg={modeColor}>
+              <b>{"› "}</b>
+            </text>
+            <textarea
+              ref={input}
+              focused={!store.picker && !store.permission}
+              flexGrow={1}
+              maxHeight={10}
+              minHeight={1}
+              textColor={masked ? t.bg : t.text}
+              focusedTextColor={masked ? t.bg : t.text}
+              placeholder={
+                masked
+                  ? "paste the key and press enter · esc to cancel"
+                  : store.question
+                    ? "or type your own answer and press enter"
+                    : busy
+                      ? "type to queue a message · esc to interrupt"
+                      : s.mode === "plan"
+                        ? "describe what to plan… (tab for build mode)"
+                        : "ask anything · / for commands · shift+enter for newline"
               }
-            }}
-          />
+              placeholderColor={t.faint}
+              keyBindings={[
+                { name: "return", shift: true, action: "newline" },
+                { name: "return", meta: true, action: "newline" },
+                { name: "j", ctrl: true, action: "newline" },
+              ]}
+              onContentChange={() => {
+                const v = input.current?.plainText ?? ""
+                if (v !== store.input) {
+                  store.input = v
+                  store.histIdx = null
+                  store.emit()
+                }
+              }}
+            />
+          </box>
+          {masked ? null : <InputFooter store={store} />}
         </box>
       )}
       <StatusBar store={store} width={width} />
@@ -308,7 +331,6 @@ function Welcome({ store }: { store: Store }) {
         ["tab", "plan ↔ build"],
         ["shift+tab", "auto → always ask → always allow"],
         ["/goal", "work until it's done"],
-        ["/design", "panels · bubbles · cards · gutter · focus"],
         ["/help", "keys & commands"],
       ]
     : [
@@ -320,7 +342,7 @@ function Welcome({ store }: { store: Store }) {
       <ascii-font text="nur" font="block" color={[t.accent, t.cyan]} />
       <text>
         <span fg={t.dim}>an AI coding agent for your terminal</span>
-        <span fg={t.faint}>  v{VERSION}</span>
+        <span fg={t.faint}> v{VERSION}</span>
       </text>
       <text fg={t.faint}>{shortPath(store.cwd)}</text>
       <box height={1} />
@@ -377,7 +399,19 @@ function Activity({ store }: { store: Store }) {
 function PermissionBox({ store }: { store: Store }) {
   const p = store.permission!
   return (
-    <box flexShrink={0} border borderStyle="rounded" borderColor={t.yellow} title={` Permission · ${p.kind} `} flexDirection="column" paddingLeft={1} paddingRight={1} marginLeft={1} marginRight={1} backgroundColor={t.panel}>
+    <box
+      flexShrink={0}
+      border
+      borderStyle="rounded"
+      borderColor={t.yellow}
+      title={` Permission · ${p.kind} `}
+      flexDirection="column"
+      paddingLeft={1}
+      paddingRight={1}
+      marginLeft={1}
+      marginRight={1}
+      backgroundColor={t.panel}
+    >
       <text fg={t.text}>{p.title}</text>
       {p.preview.length ? (
         <box flexDirection="column" marginTop={1}>
@@ -396,15 +430,15 @@ function PermissionBox({ store }: { store: Store }) {
         <span bg={t.yellow} fg={t.bg}>
           <b> y </b>
         </span>
-        <span fg={t.text}> allow once   </span>
+        <span fg={t.text}> allow once </span>
         <span bg={t.yellow} fg={t.bg}>
           <b> a </b>
         </span>
-        <span fg={t.text}> always allow   </span>
+        <span fg={t.text}> always allow </span>
         <span bg={t.yellow} fg={t.bg}>
           <b> n </b>
         </span>
-        <span fg={t.text}> deny   </span>
+        <span fg={t.text}> deny </span>
         <span fg={t.faint}>esc deny</span>
       </text>
     </box>
@@ -415,7 +449,19 @@ function QuestionBox({ store }: { store: Store }) {
   const q = store.question!
   const typing = store.input.length > 0
   return (
-    <box flexShrink={0} border borderStyle="rounded" borderColor={t.cyan} title=" nur has a question " flexDirection="column" paddingLeft={1} paddingRight={1} marginLeft={1} marginRight={1} backgroundColor={t.panel}>
+    <box
+      flexShrink={0}
+      border
+      borderStyle="rounded"
+      borderColor={t.cyan}
+      title=" nur has a question "
+      flexDirection="column"
+      paddingLeft={1}
+      paddingRight={1}
+      marginLeft={1}
+      marginRight={1}
+      backgroundColor={t.panel}
+    >
       <text fg={t.text}>
         <b>{q.question}</b>
       </text>
@@ -487,7 +533,21 @@ function PickerModal({ store, width, height }: { store: Store; width: number; he
   const labelW = Math.min(Math.floor(bw / 2), Math.max(12, ...vis.map((i) => i.label.length)) + 2)
   let lastGroup = ""
   return (
-    <box position="absolute" left={Math.floor((width - bw) / 2)} top={Math.max(1, Math.floor((height - rows - 6) / 2))} width={bw} zIndex={10} border borderStyle="rounded" borderColor={t.accent} backgroundColor={t.panel} title={` ${p.title} `} flexDirection="column" paddingLeft={1} paddingRight={1}>
+    <box
+      position="absolute"
+      left={Math.floor((width - bw) / 2)}
+      top={Math.max(1, Math.floor((height - rows - 6) / 2))}
+      width={bw}
+      zIndex={10}
+      border
+      borderStyle="rounded"
+      borderColor={t.accent}
+      backgroundColor={t.panel}
+      title={` ${p.title} `}
+      flexDirection="column"
+      paddingLeft={1}
+      paddingRight={1}
+    >
       <text>
         <span fg={t.dim}>⌕ </span>
         {p.filter ? <span fg={t.text}>{p.filter}▏</span> : <span fg={t.faint}>type to filter</span>}
@@ -519,6 +579,23 @@ function PickerModal({ store, width, height }: { store: Store; width: number; he
   )
 }
 
+/** Bottom-left of the input box: mode · model · effort. */
+function InputFooter({ store }: { store: Store }) {
+  const s = store.settings
+  const effortColor = s.effort === "high" ? t.accent : s.effort === "xhigh" || s.effort === "max" ? t.orange : s.effort === "medium" ? t.cyan : t.dim
+  return (
+    <text wrapMode="none">
+      <span fg={s.mode === "plan" ? t.plan : t.build}>
+        <b>{s.mode === "plan" ? "◇ plan" : "◆ build"}</b>
+      </span>
+      <span fg={t.faint}> · </span>
+      <span fg={t.text}>{displayName(s.model)}</span>
+      <span fg={t.faint}> · </span>
+      <span fg={effortColor}>{s.effort}</span>
+    </text>
+  )
+}
+
 function StatusBar({ store, width }: { store: Store; width: number }) {
   const s = store.settings
   const window = store.contextWindow()
@@ -527,21 +604,12 @@ function StatusBar({ store, width }: { store: Store; width: number }) {
   const filled = Math.min(10, Math.ceil(pct / 10))
   const meter = pct >= 85 ? t.red : pct >= 60 ? t.yellow : t.green
   const permColor = s.permission === "auto" ? t.green : s.permission === "ask" ? t.yellow : t.red
-  const effortColor = s.effort === "high" ? t.accent : s.effort === "xhigh" || s.effort === "max" ? t.orange : s.effort === "medium" ? t.cyan : t.dim
   const authLabel = auth.label(store.authStatus, store.provider)
   const wide = width >= 110
   return (
     <box height={1} flexShrink={0} flexDirection="row" paddingLeft={2} paddingRight={2}>
       <text flexGrow={1} wrapMode="none">
-        <b fg={t.text}>{displayName(s.model)}</b>
-        <span fg={t.faint}> · </span>
-        <span fg={effortColor}>{s.effort}</span>
-        <span fg={t.faint}> · </span>
         <span fg={permColor}>{permissionInfo[s.permission].label}</span>
-        <span fg={t.faint}> · </span>
-        <span fg={s.mode === "plan" ? t.plan : t.build}>
-          <b>{s.mode === "plan" ? "◇ plan" : "◆ build"}</b>
-        </span>
         {runningShells().length ? <span fg={t.yellow}>{`  ⧗ ${runningShells().length} bg`}</span> : null}
         {wide ? <span fg={t.faint}>{"  tab mode · shift+tab perms"}</span> : null}
       </text>

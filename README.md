@@ -13,19 +13,12 @@ curl -fsSL https://nur.sh/install.sh | sh
 nur
 ```
 
-## Designs
+## Layout
 
-Pick with `/design` or start with `nur -d <name>`:
-
-| Panels | Bubbles | Cards | Gutter | Focus |
-| --- | --- | --- | --- | --- |
-| ![Panels](docs/design-panels.png) | ![Bubbles](docs/design-bubbles.png) | ![Cards](docs/design-cards.png) | ![Gutter](docs/design-gutter.png) | ![Focus](docs/design-focus.png) |
-| tinted panel for you, `◆ nur · model` column | you on the right, nur on the left | each exchange in one card: your prompt, a rule, nur's work and answer, a `model · tools · time` footer | chat log: a `you` / `nur` speaker column and a colored bar per message | answer-first: your prompt as a `›` heading, thinking and tools folded into one live `▸ 5 steps · …` line, diffs kept |
-
-Everywhere: a spinner + shimmering "Thinking" line while the model works, `∴ Thought for 4s` summaries,
-tool calls as `✓ Bash cargo test · 2s` with a `⎿ exit 0 · 3 lines` result and inline diffs, a live task
-list, and a status bar with **model · effort · permission · plan/build** on the left and the **context
-meter** on the right.
+Answer-first. Your prompt is a `›` heading; thinking and tool calls fold into one live
+`▸ 5 steps · Read, Edit, Bash · 12s` line (edits keep their diffs, failures show in red), then the answer.
+The input box shows **plan/build · model · effort** in its bottom-left corner; the status bar below shows
+the **permission** level on the left and the **context meter** on the right.
 
 ## Keys
 
@@ -43,7 +36,7 @@ meter** on the right.
 
 ## Commands
 
-`/model` `/effort` `/permissions` `/plan` `/build` `/design` `/auth` `/goal <objective>` `/compact [focus]`
+`/model` `/effort` `/permissions` `/plan` `/build` `/auth` `/goal <objective>` `/compact [focus]`
 `/clear` `/session [id]` `/memory` `/skills` `/mcp` `/tools` `/init` `/copy` `/help` `/exit`, plus `/<skill>`.
 
 - **/goal** keeps working turn after turn until the model calls `goal_complete` (Esc pauses, `/goal clear` stops).
@@ -118,7 +111,7 @@ Everything lives in `~/.config/nur` (`$XDG_CONFIG_HOME/nur`, or `$NUR_HOME`):
 
 ```text
 bin/nur              the binary (installed by install.sh)
-settings.json        model, effort, permission, mode, design, autoCompactAt, allowedCommands
+settings.json        model, effort, permission, mode, autoCompactAt, allowedCommands
 auth.json            credentials (0600)    host_id   ext_agent_host_id for ChatGPT
 sessions/<id>.json   conversations         history.jsonl  prompt history
 memory/  skills/  mcp.json  AGENTS.md  models.json (models.dev cache)
