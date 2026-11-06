@@ -1,17 +1,16 @@
-// The details panel: context use, tasks, files changed (with undo), MCP servers
-// and the goal — what the TUI shows in its status bar, task box and /commands.
-import { Minimize2, Target, Undo2 } from "lucide-react"
-import { useState, type ReactNode } from "react"
+// The details panel: context use, tasks (while there are any) and files changed
+// with undo. MCP servers and goals live in /mcp and /goal (the goal timer is in
+// the title bar).
+import { Minimize2, Undo2 } from "lucide-react"
+import type { ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { useClient } from "@/lib/client"
-import { fmtCost, fmtMs, fmtTokens } from "@/lib/format"
+import { fmtCost, fmtTokens } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { useTick } from "./hooks"
 import { TodoList } from "./Todos"
 
 function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
@@ -31,7 +30,6 @@ const Empty = ({ children }: { children: ReactNode }) => <p className="text-xs t
 export function Inspector() {
   const c = useClient()
   const s = c.state!
-  const [goal, setGoal] = useState("")
   const window = s.model.contextWindow
   const used = s.session.contextTokens
   const pct = window ? Math.min(999, Math.round((used / window) * 100)) : 0
@@ -40,8 +38,6 @@ export function Inspector() {
   const todos = s.session.todos
   const done = todos.filter((t) => t.status === "completed").length
   const files = [...new Set(s.session.checkpoints.flatMap((cp) => cp.files))]
-  const g = s.session.goal
-  useTick(1000, !!g?.running)
 
   return (
     <aside aria-label="Session details" className="hidden w-[300px] shrink-0 border-l border-sidebar-border bg-rail lg:block">
@@ -53,11 +49,12 @@ export function Inspector() {
               <span>{fmtTokens(used)} / {fmtTokens(window)}</span>
               <span className={cn("truncate", !s.model.ready && "text-warn")} title={s.model.providerLabel}>{s.model.providerLabel}</span>
             </div>
-            {s.session.cost || s.cacheHit !== null || s.session.compactions ? (
+            {s.session.cost || s.cacheHit !== null || s.session.compactions || s.shells ? (
               <div className="flex flex-wrap gap-1.5">
                 {s.session.cost ? <Badge variant="secondary" className="font-mono">{fmtCost(s.session.cost)}</Badge> : null}
                 {s.cacheHit !== null ? <Badge variant="secondary" className="font-mono">{s.cacheHit}% cache</Badge> : null}
                 {s.session.compactions ? <Badge variant="secondary">compacted {s.session.compactions}×</Badge> : null}
+                {s.shells ? <Badge variant="outline" className="border-warn/40 text-warn">{s.shells} background shell{s.shells === 1 ? "" : "s"}</Badge> : null}
               </div>
             ) : null}
             <Button variant="outline" size="sm" className="self-start bg-transparent" disabled={!!s.busy} onClick={() => c.submit("/compact")}>
@@ -66,11 +63,14 @@ export function Inspector() {
             </Button>
           </Section>
 
-          <Separator />
-
-          <Section title={`Tasks${todos.length ? ` ${done}/${todos.length}` : ""}`}>
-            {todos.length ? <TodoList /> : <Empty>oah lists its tasks here as it works.</Empty>}
-          </Section>
+          {todos.length ? (
+            <>
+              <Separator />
+              <Section title={`Tasks ${done}/${todos.length}`}>
+                <TodoList />
+              </Section>
+            </>
+          ) : null}
 
           <Separator />
 
@@ -92,57 +92,6 @@ export function Inspector() {
             </Button>
           </Section>
 
-          <Separator />
-
-          <Section title="MCP" aside={<Button variant="link" size="sm" className="h-auto p-0 text-xs normal-case" onClick={() => c.submit("/mcp")}>Manage</Button>}>
-            {s.mcp.length ? (
-              <ul className="flex flex-col gap-2">
-                {s.mcp.map((m) => (
-                  <li key={m.name} className="flex items-center gap-2 text-[13px]" title={`${m.status} · ${m.source}`}>
-                    <span className={cn("size-1.5 shrink-0 rounded-full", m.state === "ready" ? "bg-green" : m.state === "needs-auth" ? "bg-warn" : m.state === "failed" ? "bg-red" : "animate-pulse bg-faint")} />
-                    <span className="flex-1 truncate">{m.name}</span>
-                    {m.state === "needs-auth" ? (
-                      <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => c.send({ op: "mcpSignIn", name: m.name })}>Sign in</Button>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">{m.state === "ready" ? `${m.tools} tools` : m.state === "failed" ? "failed" : "connecting"}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <Empty>No MCP servers. Ask oah to add one, or /import.</Empty>
-            )}
-            {s.shells ? <Badge variant="outline" className="self-start border-warn/40 text-warn">{s.shells} background shell{s.shells === 1 ? "" : "s"}</Badge> : null}
-          </Section>
-
-          <Separator />
-
-          <Section title="Goal" aside={g && !g.done ? <Button variant="link" size="sm" className="h-auto p-0 text-xs normal-case" onClick={() => c.submit("/goal clear")}>Clear</Button> : null}>
-            {g && !g.done ? (
-              <div className="flex flex-col gap-1.5 rounded-lg border border-warn/30 bg-card p-3 text-[13px]">
-                <span className="select-text">{g.text}</span>
-                <span className="font-mono text-xs text-warn">
-                  turn {g.turns} · {fmtMs(c.goalElapsed())} {g.running ? "working" : "so far"}
-                </span>
-              </div>
-            ) : (
-              <form
-                className="flex flex-col gap-1.5"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  if (!goal.trim()) return
-                  c.submit(`/goal ${goal.trim()}`)
-                  setGoal("")
-                }}
-              >
-                <div className="relative">
-                  <Target className="absolute top-2 left-2.5 size-4 text-muted-foreground" />
-                  <Input aria-label="Goal" placeholder="Keep working until…" value={goal} onChange={(e) => setGoal(e.target.value)} className="h-8 pl-8 text-xs" />
-                </div>
-                <span className="text-xs text-faint">{g?.done ? "Last goal completed. " : ""}oah works until it's done.</span>
-              </form>
-            )}
-          </Section>
         </div>
       </ScrollArea>
     </aside>

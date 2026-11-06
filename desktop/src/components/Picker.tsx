@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useClient } from "@/lib/client"
 import { filterItems } from "@/lib/format"
 import type { PickItem } from "@/lib/protocol"
+import { cn } from "@/lib/utils"
+import { PERMISSION } from "./icons"
 
 export function Picker() {
   const c = useClient()
@@ -63,7 +65,14 @@ export function Picker() {
               <CommandGroup key={`${g.name}-${k}`} heading={g.name || undefined}>
                 {g.items.map(({ item, i }) => (
                   <CommandItem key={key(item, i)} value={key(item, i)} onSelect={() => c.send({ op: "pick", value: item.value })} className="group gap-3 py-2">
-                    <span className={item.current ? "size-1.5 shrink-0 rounded-full bg-green" : "size-1.5 shrink-0"} />
+                    {p.kind === "permission" && item.value in PERMISSION ? (
+                      (() => {
+                        const P = PERMISSION[item.value as keyof typeof PERMISSION]
+                        return <P.icon className={cn("size-4 shrink-0", P.className, !item.current && "opacity-70")} />
+                      })()
+                    ) : (
+                      <span className={item.current ? "size-1.5 shrink-0 rounded-full bg-green" : "size-1.5 shrink-0"} />
+                    )}
                     <span className="max-w-[50%] shrink-0 truncate group-data-[selected=true]:font-semibold group-data-[selected=true]:text-primary">{item.label}</span>
                     <span className="truncate text-xs text-muted-foreground" title={item.detail}>{item.detail}</span>
                   </CommandItem>

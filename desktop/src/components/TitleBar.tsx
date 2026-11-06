@@ -4,9 +4,11 @@ import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useClient } from "@/lib/client"
+import { targetLabel } from "@/lib/protocol"
 import { cn } from "@/lib/utils"
 import { modKey } from "./hooks"
 import { Mark, WinClose, WinMax, WinMin } from "./icons"
+import { TargetIcon } from "./Remote"
 import { GoalClock } from "./Todos"
 import { UpdateButton } from "./Updates"
 
@@ -27,6 +29,12 @@ export function TitleBar() {
       </div>
       <Separator orientation="vertical" className="mx-1 h-4!" />
       <span data-tauri-drag-region className="truncate text-[13px] font-medium">{title}</span>
+      {c.target.kind !== "local" ? (
+        <span data-tauri-drag-region className="flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-cyan/10 px-1.5 py-0.5 text-[11px] font-medium text-cyan" title={`Working on ${targetLabel(c.target)}`}>
+          <TargetIcon t={c.target} className="size-3" />
+          {targetLabel(c.target)}
+        </span>
+      ) : null}
       {c.started && c.view === "chat" ? (
         <span data-tauri-drag-region className="truncate font-mono text-xs text-muted-foreground" title={c.started.cwd}>
           {c.started.cwdShort}

@@ -7,7 +7,7 @@
 # ~/.local/bin with a menu entry. Installed apps update themselves.
 #
 # Options (environment variables):
-#   OAH_DESKTOP_VERSION  version to install, e.g. 0.1.1 (default: latest)
+#   OAH_DESKTOP_VERSION  version to install, e.g. 0.1.4 (default: latest)
 #   OAH_DESKTOP_FORMAT   deb | rpm | appimage (default: what this system uses)
 #   OAH_DOWNLOAD_URL     where release files live (default: https://dl.oah.dev)
 #                        layout: $OAH_DOWNLOAD_URL/desktop/latest.txt

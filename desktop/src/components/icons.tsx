@@ -1,3 +1,5 @@
+import { Hand, ShieldCheck, Zap } from "lucide-react"
+
 // The oah mark (assets/svg/oah-mark-on-dark.svg). Other icons come from lucide-react.
 
 export function Mark({ size = 20, ring = "#E6EDF3", node = "#FFD43B", label, className }: { size?: number; ring?: string; node?: string; label?: string; className?: string }) {
@@ -22,3 +24,11 @@ export const WinMax = () => (
 export const WinClose = () => (
   <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" strokeWidth="1" /></svg>
 )
+
+/** Permission levels: the same label, icon and color everywhere they appear. */
+export const PERMISSION = {
+  auto: { label: "auto", desc: "Works on its own; a safety monitor reviews risky actions and blocks or asks", icon: ShieldCheck, className: "text-green" },
+  ask: { label: "always ask", desc: "Ask before every tool call", icon: Hand, className: "text-warn" },
+  allow: { label: "always allow", desc: "Never ask (use with care)", icon: Zap, className: "text-red" },
+} as const
+export type PermissionLevel = keyof typeof PERMISSION

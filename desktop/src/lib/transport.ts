@@ -1,18 +1,26 @@
 // How the UI reaches the shell: Tauri IPC in the app, or a WebSocket to
 // scripts/dev-bridge.ts when the UI runs in a plain browser (`bun run web`).
-import type { AppInfo, ClientOp, Prefs, SessionMeta, Started } from "./protocol"
+import type { AppInfo, ClientOp, ImageData, Listing, Prefs, RemoteCheck, SessionMeta, Started, Target, Targets } from "./protocol"
 
 export type Platform = "windows" | "linux" | "web"
 
 export interface Transport {
   platform: Platform
-  start(opts: { cwd?: string; resume?: string }, onLine: (line: string) => void): Promise<Started>
+  start(opts: { cwd?: string; resume?: string; target?: Target }, onLine: (line: string) => void): Promise<Started>
   send(op: ClientOp): Promise<void>
-  sessions(): Promise<SessionMeta[]>
+  sessions(target: Target): Promise<SessionMeta[]>
+  deleteSession(target: Target, id: string): Promise<void>
+  remote: {
+    targets(): Promise<Targets>
+    check(target: Target): Promise<RemoteCheck>
+    install(target: Target): Promise<RemoteCheck>
+    ls(target: Target, path: string): Promise<Listing>
+  }
+  readImage(path: string): Promise<ImageData>
   info(): Promise<AppInfo>
   prefs(): Promise<Prefs>
   setPrefs(patch: Partial<Record<keyof Prefs, unknown>>): Promise<void>
-  openFolder(which: "home" | "cwd"): Promise<void>
+  openFolder(which: "home" | "cwd", path?: string, target?: Target): Promise<void>
   /** Stop the engine (it saves the open session). */
   stop(): Promise<void>
   openUrl(url: string): Promise<void>
@@ -40,14 +48,22 @@ async function tauriTransport(): Promise<Transport> {
     start(opts, onLine) {
       const ch = new Channel<string>()
       ch.onmessage = onLine
-      return invoke<Started>("engine_start", { cwd: opts.cwd ?? null, resume: opts.resume ?? null, onEvent: ch })
+      return invoke<Started>("engine_start", { cwd: opts.cwd ?? null, resume: opts.resume ?? null, target: opts.target ?? null, onEvent: ch })
     },
     send: (op) => invoke("engine_send", { op: JSON.stringify(op) }),
-    sessions: () => invoke<SessionMeta[]>("list_sessions"),
+    sessions: (target) => invoke<SessionMeta[]>("list_sessions", { target }),
+    deleteSession: (target, id) => invoke("delete_session", { target, id }),
+    remote: {
+      targets: () => invoke<Targets>("remote_targets"),
+      check: (target) => invoke<RemoteCheck>("remote_check", { target }),
+      install: (target) => invoke<RemoteCheck>("remote_install", { target }),
+      ls: (target, path) => invoke<Listing>("remote_ls", { target, path }),
+    },
+    readImage: (path) => invoke<ImageData>("read_image", { path }),
     info: () => invoke<AppInfo>("app_info"),
     prefs: () => invoke<Prefs>("prefs_get"),
     setPrefs: (patch) => invoke("prefs_set", { patch }).then(() => {}),
-    openFolder: (which) => invoke("open_folder", { which }),
+    openFolder: (which, path, target) => invoke("open_folder", { which, path: path ?? null, target: target ?? null }),
     stop: () => invoke("engine_stop"),
     openUrl: (url) => opener.openUrl(url),
     async pickFolder() {
@@ -105,7 +121,16 @@ function webTransport(): Transport {
       return call<Started>("start", opts)
     },
     send: (op) => call("send", { op }),
-    sessions: () => call<SessionMeta[]>("sessions"),
+    sessions: (target) => call<SessionMeta[]>("sessions", { target }),
+    deleteSession: (target, id) => call("deleteSession", { target, id }),
+    // Remote machines need the app's shell (Rust); the browser bridge is local only.
+    remote: {
+      targets: async () => ({ wsl: [], sshConfig: [] }),
+      check: () => Promise.reject(new Error("Remote machines need the desktop app")),
+      install: () => Promise.reject(new Error("Remote machines need the desktop app")),
+      ls: () => Promise.reject(new Error("Remote machines need the desktop app")),
+    },
+    readImage: () => Promise.reject(new Error("Not available in the browser")),
     info: () => call<AppInfo>("info"),
     prefs: () => call<Prefs>("prefs"),
     setPrefs: (patch) => call("setPrefs", { patch }),

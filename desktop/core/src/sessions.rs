@@ -180,6 +180,47 @@ impl SessionIndex {
     }
 }
 
+/// Delete a saved session (and its summary). `id` must look like a session id.
+pub fn delete(dir: &Path, id: &str) -> std::io::Result<()> {
+    if !crate::remote::valid_session_id(id) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("not a session id: {id:?}")));
+    }
+    for f in [dir.join(format!("{id}.json")), dir.join("meta").join(format!("{id}.json"))] {
+        match fs::remove_file(&f) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Sessions on another machine, from the summaries `remote::SESSIONS` prints
+/// (home folder first, then one JSON summary per session), newest first.
+pub fn from_remote(out: &str) -> Vec<SessionMeta> {
+    let mut lines = out.lines().filter(|l| !l.starts_with("__OAH_PATH__"));
+    let home = lines.next().unwrap_or_default().trim().to_string();
+    let rest: String = lines.collect::<Vec<_>>().join("\n");
+    let mut list: Vec<SessionMeta> = serde_json::Deserializer::from_str(&rest)
+        .into_iter::<Summary>()
+        .map_while(Result::ok)
+        .map(|s| SessionMeta {
+            cwd_short: crate::remote::short_with_home(&s.cwd, &home),
+            id: s.id,
+            title: s.title,
+            cwd: s.cwd,
+            created: 0.0,
+            updated: s.updated,
+            model: String::new(),
+            mode: String::new(),
+            entries: 1,
+            has_goal: false,
+            detailed: false,
+        })
+        .collect();
+    list.sort_by(|a, b| b.updated.total_cmp(&a.updated));
+    list
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +233,23 @@ mod tests {
             ),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn deletes_sessions_and_reads_remote_summaries() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "aaa", 10.0, "");
+        fs::create_dir_all(dir.path().join("meta")).unwrap();
+        fs::write(dir.path().join("meta/aaa.json"), "{}").unwrap();
+        assert!(delete(dir.path(), "../aaa").is_err());
+        delete(dir.path(), "aaa").unwrap();
+        assert!(!dir.path().join("aaa.json").exists() && !dir.path().join("meta/aaa.json").exists());
+        delete(dir.path(), "aaa").unwrap(); // already gone: fine
+        let out = "/home/me\n{\"id\":\"a\",\"title\":\"A\",\"cwd\":\"/home/me/x\",\"updated\":1,\"mtime\":1,\"size\":2}\n{\"id\":\"b\",\"cwd\":\"/srv\",\"updated\":5,\"mtime\":1,\"size\":2}\n";
+        let l = from_remote(out);
+        assert_eq!(l.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert_eq!(l[1].cwd_short, "~/x");
+        assert!(from_remote("/home/me\n").is_empty());
     }
 
     #[test]

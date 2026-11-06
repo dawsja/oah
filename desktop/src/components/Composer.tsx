@@ -16,13 +16,10 @@ import { useClient } from "@/lib/client"
 import { matchCommands, type Command as Cmd } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { modKey } from "./hooks"
+import { PERMISSION } from "./icons"
 import { DiffLines } from "./Transcript"
+import { toast } from "sonner"
 
-const PERM = {
-  auto: { label: "auto", className: "text-green" },
-  ask: { label: "always ask", className: "text-warn" },
-  allow: { label: "always allow", className: "text-red" },
-} as const
 const EFFORT_CLASS: Record<string, string> = { high: "text-primary", xhigh: "text-orange", max: "text-orange", low: "text-muted-foreground", minimal: "text-muted-foreground" }
 
 function Palette({ items, sel, onPick }: { items: Cmd[]; sel: number; onPick: (c: Cmd) => void }) {
@@ -305,15 +302,16 @@ export function Composer() {
   const onPaste = (e: React.ClipboardEvent) => {
     // An image on the clipboard (and no text): attach it, like ctrl+v in the TUI.
     const types = [...e.clipboardData.types]
-    if (!e.clipboardData.getData("text/plain") && (types.includes("Files") || [...e.clipboardData.items].some((i) => i.type.startsWith("image/")))) {
-      e.preventDefault()
-      c.send({ op: "pasteImage" })
-    }
+    if (e.clipboardData.getData("text/plain") || !(types.includes("Files") || [...e.clipboardData.items].some((i) => i.type.startsWith("image/")))) return
+    e.preventDefault()
+    const files = [...e.clipboardData.items].filter((i) => i.kind === "file" && /^image\/(png|jpeg|gif|webp)$/.test(i.type)).map((i) => i.getAsFile()).filter((f): f is File => !!f)
+    if (files.length) for (const f of files) void c.attachBlob(f)
+    // No image data in the paste event: a local engine can read the system clipboard itself.
+    else if (c.target.kind === "local") c.send({ op: "pasteImage" })
+    else toast.error("Couldn't read the image from the clipboard. Drop the file here or use Attach instead.")
   }
 
-  const attach = async () => {
-    for (const path of await c.t.pickImages()) c.send({ op: "attach", path })
-  }
+  const attach = async () => c.attachFiles(await c.t.pickImages())
 
   const busy = s.busy
   const placeholder = masked
@@ -328,7 +326,7 @@ export function Composer() {
           ? "Describe what to plan… (Tab for build mode)"
           : "Ask anything · / for commands · # to remember"
   const canSend = !!text.trim() || (!!busy && s.queue.length > 0)
-  const perm = PERM[s.settings.permission]
+  const perm = PERMISSION[s.settings.permission]
 
   if (s.permission) return <PermissionCard />
 
@@ -385,7 +383,8 @@ export function Composer() {
                 </Button>
               ) : null}
               <Button variant="outline" size="sm" className={cn("bg-transparent text-xs", perm.className)} onClick={() => c.submit("/permissions")} title="Permissions (Shift+Tab cycles)">
-                ● {perm.label}
+                <perm.icon />
+                {perm.label}
               </Button>
               <div className="flex-1" />
               <Tooltip>

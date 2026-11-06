@@ -5,7 +5,7 @@
 //
 //   bun run web:bridge     # terminal 1 (OAH_HOME=… to use a scratch config)
 //   bun run web            # terminal 2, then open http://localhost:1420
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import type { ServerWebSocket } from "bun"
@@ -79,7 +79,7 @@ async function start(opts: { cwd?: string; resume?: string }) {
     relay(JSON.stringify({ t: "engine-exit", code: await p.exited, stderr: stderr.split("\n").slice(-60).join("\n") }))
   })()
   writePrefs({ lastCwd: cwd })
-  return { cwd, cwdShort: short(cwd), engine: `source at ${ENTRY} (dev bridge)` }
+  return { cwd, cwdShort: short(cwd), engine: `source at ${ENTRY} (dev bridge)`, target: { kind: "local" } }
 }
 
 const methods: Record<string, (p: any) => unknown> = {
@@ -91,6 +91,10 @@ const methods: Record<string, (p: any) => unknown> = {
     stdin.flush?.()
   },
   sessions,
+  deleteSession({ id }) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new Error(`Not a session id: ${id}`)
+    for (const f of [join(home(), "sessions", `${id}.json`), join(home(), "sessions", "meta", `${id}.json`)]) rmSync(f, { force: true })
+  },
   info: () => ({ version: "dev", bundle: null, os: process.platform === "win32" ? "windows" : "linux", home: home(), homeShort: short(home()), homeDir: homedir(), sessionsDir: join(home(), "sessions"), oahHomeEnv: !!process.env.OAH_HOME, xdgEnv: !!process.env.XDG_CONFIG_HOME }),
   prefs: readPrefs,
   setPrefs: ({ patch }) => writePrefs(patch),

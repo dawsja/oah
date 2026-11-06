@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch"
 import { useClient } from "@/lib/client"
 import type { Effort } from "@/lib/protocol"
 import { cn } from "@/lib/utils"
+import { PERMISSION, type PermissionLevel } from "./icons"
 import { UpdateSettings } from "./Updates"
 
 const EFFORT_INFO: Record<string, string> = {
@@ -25,11 +26,7 @@ const EFFORT_INFO: Record<string, string> = {
   xhigh: "very deep reasoning for long agentic work",
   max: "everything it has",
 }
-const PERMS = [
-  { value: "auto", label: "auto", desc: "Works on its own; a safety monitor reviews risky actions and blocks or asks", color: "text-green" },
-  { value: "ask", label: "always ask", desc: "Ask before every tool call", color: "text-warn" },
-  { value: "allow", label: "always allow", desc: "Never ask (use with care)", color: "text-red" },
-] as const
+const PERMS = (Object.keys(PERMISSION) as PermissionLevel[]).map((value) => ({ value, ...PERMISSION[value] }))
 
 const SECTIONS = [
   ["general", "General"],
@@ -230,7 +227,7 @@ export function Settings() {
                 <Label key={p.value} htmlFor={`perm-${p.value}`} className={cn("flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal hover:bg-accent/40", s.settings.permission === p.value && "border-primary/40 bg-primary/5")}>
                   <RadioGroupItem id={`perm-${p.value}`} value={p.value} className="mt-0.5" />
                   <span className="flex flex-col gap-0.5">
-                    <span className={cn("font-medium", p.color)}>{p.label}</span>
+                    <span className={cn("flex items-center gap-1.5 font-medium", p.className)}><p.icon className="size-4" />{p.label}</span>
                     <span className="text-sm text-muted-foreground">{p.desc}</span>
                   </span>
                 </Label>

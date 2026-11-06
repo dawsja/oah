@@ -40,6 +40,31 @@ Which engine runs: `$OAH_ENGINE`, else the one bundled with the app
 installed CLI (`~/.config/oah/bin/oah`, then `oah` on PATH). On Linux the
 engine gets your login shell's `PATH`, so its tools find what a terminal would.
 
+## Remote machines (WSL, SSH)
+
+The location menu at the top of the sidebar switches where oah works: this
+computer, a WSL distro (Windows), or an SSH host (hand-added, or any `Host` in
+`~/.ssh/config`). The app runs the **oah CLI installed there** as `oah serve`
+through `wsl.exe --exec` or `ssh`, so the agent's tools, files and shell are the
+remote machine's, and so are its sessions and settings (its own
+`~/.config/oah`). If oah is missing there, or older than the version the app
+needs, the app offers to install it with the official install script.
+
+- SSH uses your client, keys, agent and config with `BatchMode=yes`: set up key
+  logins first (password prompts aren't supported).
+- Folders are picked with a built-in browser; images you paste, drop or attach
+  are sent as bytes, since the remote engine can't read this machine's files.
+- `desktop/core/src/remote.rs` holds the small `sh` scripts it runs there.
+  `OAH_TEST_TARGET='{"kind":"ssh","host":"devbox"}' cargo test -p oah-desktop-core -- --ignored over_a_real_target`
+  checks a real target end to end.
+
+## Sidebar
+
+Sessions are grouped by folder. A folder's ⋯ menu starts a new session there,
+shows it in the file manager, or **closes** it (hides it until you open that
+folder again; nothing is deleted). A session's ⋯ menu can **delete** it, which
+removes it for the CLI too.
+
 ## Develop
 
 Needs Bun and Rust. On Linux also WebKitGTK:

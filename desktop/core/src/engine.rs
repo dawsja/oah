@@ -156,7 +156,7 @@ impl Engine {
         cwd: &Path,
         resume: Option<&str>,
         env: &[(OsString, OsString)],
-        mut on_line: impl FnMut(String) + Send + 'static,
+        on_line: impl FnMut(String) + Send + 'static,
         on_exit: impl FnOnce(Exit) + Send + 'static,
     ) -> io::Result<Engine> {
         let mut cmd = Command::new(&command.program);
@@ -168,16 +168,45 @@ impl Engine {
         if command.bundled {
             cmd.env("OAH_BUNDLED_ENGINE", "1");
         }
-        cmd
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
+        Self::start(cmd, command.clone(), cwd.to_path_buf(), on_line, on_exit)
+    }
+
+    /// Start the oah CLI installed on another machine as `oah serve` in `cwd`
+    /// (a path there; empty for its home folder), through `wsl.exe` or `ssh`.
+    pub fn spawn_remote(
+        target: &crate::remote::Target,
+        cwd: &str,
+        resume: Option<&str>,
+        on_line: impl FnMut(String) + Send + 'static,
+        on_exit: impl FnOnce(Exit) + Send + 'static,
+    ) -> io::Result<Engine> {
+        target.validate().map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+        let mut args = vec![cwd];
+        if let Some(id) = resume {
+            args.extend(["--resume", id]);
+        }
+        let cmd = crate::remote::command(target, crate::remote::ENGINE, &args);
+        let command = EngineCommand { program: PathBuf::from(cmd.get_program()), args: vec![], describe: format!("oah on {}", target.label()), bundled: false };
+        Self::start(cmd, command, PathBuf::from(cwd), on_line, on_exit)
+    }
+
+    fn start(
+        mut cmd: Command,
+        command: EngineCommand,
+        cwd: PathBuf,
+        mut on_line: impl FnMut(String) + Send + 'static,
+        on_exit: impl FnOnce(Exit) + Send + 'static,
+    ) -> io::Result<Engine> {
+        cmd
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         let mut child = cmd.spawn()?;
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("piped stdout");
@@ -228,7 +257,7 @@ impl Engine {
                 on_exit(Exit { code, stderr });
             })?;
         }
-        Ok(Engine { child, stdin: Mutex::new(stdin), command: command.clone(), cwd: cwd.to_path_buf() })
+        Ok(Engine { child, stdin: Mutex::new(stdin), command, cwd })
     }
 
     /// Send one op (a JSON object, without the newline).
@@ -355,5 +384,45 @@ mod tests {
         wait(&|v| v["t"] == "state" && v["s"]["settings"]["mode"] == "plan");
         e.shutdown(Duration::from_secs(10));
         assert!(home.path().join("settings.json").is_file(), "settings are the CLI's");
+    }
+
+    /// The remote launch script, run with sh here: finds `<oah home>/bin/oah`,
+    /// cds to the folder and relays the engine's JSON lines.
+    #[cfg(unix)]
+    #[test]
+    fn talks_to_the_real_engine_through_the_remote_script() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/index.tsx");
+        let Some(bun) = bun(None) else { return };
+        if !src.is_file() {
+            return;
+        }
+        let _g = crate::paths::tests::ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join("bin")).unwrap();
+        let wrapper = home.path().join("bin/oah");
+        std::fs::write(&wrapper, format!("#!/bin/sh\nexec '{}' '{}' \"$@\"\n", bun.display(), src.display())).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let work = cwd.path().join("my project");
+        std::fs::create_dir_all(&work).unwrap();
+        std::env::set_var("OAH_HOME", home.path());
+        std::env::set_var("OAH_NO_UPDATE_CHECK", "1");
+        let (tx, rx) = mpsc::channel::<String>();
+        let target = crate::remote::Target::Local;
+        let e = Engine::spawn_remote(&target, work.to_str().unwrap(), None, move |l| { let _ = tx.send(l); }, |_| {}).unwrap();
+        let hello = loop {
+            let l = rx.recv_timeout(Duration::from_secs(30)).expect("engine event");
+            // Only the engine's JSON reaches us.
+            let v: serde_json::Value = serde_json::from_str(&l).unwrap_or_else(|_| panic!("not JSON: {l}"));
+            if v["t"] == "hello" {
+                break v;
+            }
+        };
+        std::env::remove_var("OAH_HOME");
+        std::env::remove_var("OAH_NO_UPDATE_CHECK");
+        assert_eq!(hello["protocol"], PROTOCOL);
+        assert_eq!(Path::new(hello["cwd"].as_str().unwrap()).canonicalize().unwrap(), work.canonicalize().unwrap());
+        e.shutdown(Duration::from_secs(10));
     }
 }

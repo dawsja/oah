@@ -12,6 +12,7 @@ import { mod, modKey, useTick } from "./components/hooks"
 import { Mark, SPINNER } from "./components/icons"
 import { Inspector } from "./components/Inspector"
 import { Picker } from "./components/Picker"
+import { FolderBrowser, RemoteDialog } from "./components/Remote"
 import { Settings } from "./components/Settings"
 import { AppSidebar } from "./components/Sidebar"
 import { TitleBar } from "./components/TitleBar"
@@ -275,7 +276,9 @@ export function App() {
           </div>
         </SidebarProvider>
         {ready && s.picker ? <Picker /> : null}
-        <Toaster position="bottom-center" offset={{ bottom: 150 }} />
+        <RemoteDialog />
+        <FolderBrowser />
+        <Toaster position="bottom-right" offset={{ bottom: 20, right: 20 }} closeButton />
       </div>
     </TooltipProvider>
   )
