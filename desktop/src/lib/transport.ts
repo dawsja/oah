@@ -2,7 +2,7 @@
 // scripts/dev-bridge.ts when the UI runs in a plain browser (`bun run web`).
 import type { AppInfo, ClientOp, Prefs, SessionMeta, Started } from "./protocol"
 
-export type Platform = "macos" | "windows" | "linux" | "web"
+export type Platform = "windows" | "linux" | "web"
 
 export interface Transport {
   platform: Platform
@@ -36,7 +36,7 @@ async function tauriTransport(): Promise<Transport> {
   const ua = navigator.userAgent
   const w = getCurrentWindow()
   return {
-    platform: ua.includes("Mac") ? "macos" : ua.includes("Windows") ? "windows" : "linux",
+    platform: ua.includes("Windows") ? "windows" : "linux",
     start(opts, onLine) {
       const ch = new Channel<string>()
       ch.onmessage = onLine

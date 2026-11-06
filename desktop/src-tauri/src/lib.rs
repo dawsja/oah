@@ -18,7 +18,7 @@ struct App {
     sessions: SessionIndex,
 }
 
-/// Environment for the engine: the login shell's PATH on macOS/Linux, so the
+/// Environment for the engine: the login shell's PATH on Linux, so the
 /// agent's tools find what they would in a terminal.
 fn engine_env() -> &'static Vec<(OsString, OsString)> {
     static ENV: OnceLock<Vec<(OsString, OsString)>> = OnceLock::new();
@@ -133,7 +133,7 @@ fn bundle_name() -> Option<&'static str> {
         BundleType::Rpm => "rpm",
         BundleType::Nsis => "nsis",
         BundleType::Msi => "msi",
-        BundleType::App | BundleType::Dmg => "app",
+        _ => return None,
     })
 }
 

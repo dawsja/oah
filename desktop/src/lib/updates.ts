@@ -2,8 +2,8 @@
 // The app checks https://dl.oah.dev/desktop/latest.json, where each build finds
 // its own signed update under `{os}-{arch}-{installer}` (tauri-plugin-updater).
 //
-// macOS (.app) and AppImage installs update in place silently — the new version
-// starts next launch, or now with "Restart to finish". Windows (NSIS/MSI) and
+// AppImage installs update in place silently — the new version starts next
+// launch, or now with "Restart to finish". Windows (NSIS) and
 // deb/rpm installs download silently, then install when you choose "Restart to
 // update" (the Windows installer must close the app; deb/rpm ask for a password).
 import type { Update } from "@tauri-apps/plugin-updater"
@@ -20,7 +20,7 @@ export type UpdateState =
 
 const EVERY = 4 * 60 * 60 * 1000
 /** Installs the updater can replace in place without closing the app. */
-const SILENT = new Set(["app", "appimage"])
+const SILENT = new Set(["appimage"])
 
 export class Updater {
   state: UpdateState = { kind: "off" }

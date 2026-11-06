@@ -32,7 +32,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb", "rpm", "appimage", "nsis"],
     "category": "DeveloperTool",
     "shortDescription": "oah \u2014 open agent harness",
     "longDescription": "An AI coding agent for your projects: the oah CLI's engine with a desktop interface. Shares sessions, settings and sign-ins with the oah terminal app.",
@@ -48,9 +48,6 @@
       "deb": {
         "depends": []
       }
-    },
-    "macOS": {
-      "minimumSystemVersion": "11.0"
     },
     "windows": {
       "webviewInstallMode": {

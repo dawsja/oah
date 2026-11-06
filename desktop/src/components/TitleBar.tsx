@@ -10,18 +10,16 @@ import { Mark, WinClose, WinMax, WinMin } from "./icons"
 import { GoalClock } from "./Todos"
 import { UpdateButton } from "./Updates"
 
-/** The window's title bar: drag region, session title and window controls
- * (macOS keeps its own traffic lights on the left). */
+/** The window's title bar: drag region, session title and window controls. */
 export function TitleBar() {
   const c = useClient()
   const t = c.t
-  const mac = t?.platform === "macos"
-  const custom = !!t && t.platform !== "macos" && t.platform !== "web"
+  const custom = !!t && t.platform !== "web"
   const s = c.state
   const title = c.view === "settings" ? "Settings" : s?.session.title || (s ? "New session" : "")
   const inspector = c.prefs.inspector !== false
   return (
-    <header data-tauri-drag-region className={cn("flex h-(--header-height) shrink-0 items-center gap-2 border-b border-sidebar-border bg-deep pl-3", mac && "pl-[84px]")}>
+    <header data-tauri-drag-region className="flex h-(--header-height) shrink-0 items-center gap-2 border-b border-sidebar-border bg-deep pl-3">
       <SidebarTrigger className="text-muted-foreground" />
       <div data-tauri-drag-region className="flex items-center gap-2 pl-1">
         <Mark size={18} label="oah" />

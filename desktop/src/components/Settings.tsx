@@ -104,7 +104,7 @@ export function Settings() {
     c.submit(cmd)
     if (toChat) c.setView("chat")
   }
-  const os = info.os === "macos" ? "macOS" : info.os === "windows" ? "Windows" : "Linux"
+  const os = info.os === "windows" ? "Windows" : "Linux"
   const keyMode = s.inputMode.startsWith("key:") ? s.inputMode.slice(4) : null
   const keyProviders = s.auth.providers.filter((p) => !p.local)
   const local = s.auth.providers.filter((p) => p.local)
@@ -134,7 +134,7 @@ export function Settings() {
               </div>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
-              {[["Linux", "~/.config/oah"], ["macOS", "~/.config/oah"], ["Windows", "%USERPROFILE%\\.config\\oah"]].map(([name, path]) => (
+              {[["Linux", "~/.config/oah"], ["Windows", "%USERPROFILE%\\.config\\oah"]].map(([name, path]) => (
                 <div key={name} className={cn("flex flex-col gap-0.5 rounded-lg border bg-background px-3 py-2", name === os && "border-primary/40")}>
                   <span className="flex items-center gap-2 text-xs text-muted-foreground">
                     {name}

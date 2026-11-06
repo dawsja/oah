@@ -1,15 +1,14 @@
 #!/bin/sh
-# oah desktop installer (macOS, Linux)
+# oah desktop installer (Linux)
 #
 #   curl -fsSL https://dl.oah.dev/install-desktop.sh | sh
 #
-# macOS: installs oah.app into /Applications (or ~/Applications).
-# Linux: the .deb with apt, the .rpm with dnf/zypper, else the AppImage in
-#        ~/.local/bin with a menu entry. Installed apps update themselves.
+# Installs the .deb with apt, the .rpm with dnf/zypper, else the AppImage in
+# ~/.local/bin with a menu entry. Installed apps update themselves.
 #
 # Options (environment variables):
 #   OAH_DESKTOP_VERSION  version to install, e.g. 0.1.1 (default: latest)
-#   OAH_DESKTOP_FORMAT   linux: deb | rpm | appimage (default: what this system uses)
+#   OAH_DESKTOP_FORMAT   deb | rpm | appimage (default: what this system uses)
 #   OAH_DOWNLOAD_URL     where release files live (default: https://dl.oah.dev)
 #                        layout: $OAH_DOWNLOAD_URL/desktop/latest.txt
 #                                $OAH_DOWNLOAD_URL/desktop/v<version>/oah-desktop-<version>-<os>-<arch>.<ext>[.sha256]
@@ -45,7 +44,7 @@ os="$(uname -s)"
 arch="$(uname -m)"
 case "$os" in
   Linux) os=linux ;;
-  Darwin) os=darwin ;;
+  Darwin) fail "the desktop app is for Linux and Windows. On macOS, use the CLI: curl -fsSL https://oah.dev/install.sh | sh" ;;
   MINGW* | MSYS* | CYGWIN*) fail "on Windows, run this in PowerShell instead:  irm https://dl.oah.dev/install-desktop.ps1 | iex" ;;
   *) fail "unsupported OS: $os" ;;
 esac
@@ -54,25 +53,18 @@ case "$arch" in
   arm64 | aarch64) arch=arm64 ;;
   *) fail "unsupported architecture: $arch" ;;
 esac
-if [ "$os" = darwin ] && [ "$arch" = x64 ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 1 ]; then
-  arch=arm64
-fi
-if [ "$os" = linux ] && [ "$arch" != x64 ]; then
+if [ "$arch" != x64 ]; then
   fail "the desktop app is built for x64 Linux only for now (the CLI works everywhere: curl -fsSL https://oah.dev/install.sh | sh)"
 fi
 
 # --- what to download ------------------------------------------------------------
-if [ "$os" = darwin ]; then
-  ext=dmg
-else
-  ext="${OAH_DESKTOP_FORMAT:-}"
-  if [ -z "$ext" ]; then
-    if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then ext=deb
-    elif command -v dnf >/dev/null 2>&1 || command -v zypper >/dev/null 2>&1; then ext=rpm
-    else ext=appimage; fi
-  fi
-  case "$ext" in deb | rpm) ;; appimage) ext=AppImage ;; AppImage) ;; *) fail "OAH_DESKTOP_FORMAT must be deb, rpm or appimage" ;; esac
+ext="${OAH_DESKTOP_FORMAT:-}"
+if [ -z "$ext" ]; then
+  if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then ext=deb
+  elif command -v dnf >/dev/null 2>&1 || command -v zypper >/dev/null 2>&1; then ext=rpm
+  else ext=appimage; fi
 fi
+case "$ext" in deb | rpm) ;; appimage) ext=AppImage ;; AppImage) ;; *) fail "OAH_DESKTOP_FORMAT must be deb, rpm or appimage" ;; esac
 
 version="${OAH_DESKTOP_VERSION:-latest}"
 if [ "$version" = latest ]; then
@@ -88,11 +80,7 @@ say ""
 
 # --- download & verify ------------------------------------------------------------
 tmp="$(mktemp -d 2>/dev/null || mktemp -d -t oah)"
-cleanup() {
-  [ -n "${mnt:-}" ] && hdiutil detach -quiet "$mnt" 2>/dev/null || true
-  rm -rf "$tmp"
-}
-trap cleanup EXIT INT TERM
+trap 'rm -rf "$tmp"' EXIT INT TERM
 file="oah-desktop-$version-$os-$arch.$ext"
 url="$BASE/desktop/v$version/$file"
 say "  ${D}downloading${N} $url"
@@ -105,19 +93,6 @@ say "  ${D}checksum${N}    ${G}ok${N}"
 # --- install ---------------------------------------------------------------------
 sudo_() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
 case "$ext" in
-  dmg)
-    mnt="$tmp/mnt"
-    mkdir -p "$mnt"
-    hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mnt" "$tmp/$file" || fail "couldn't open the disk image"
-    dest=/Applications
-    [ -w "$dest" ] || { dest="$HOME/Applications"; mkdir -p "$dest"; }
-    rm -rf "$dest/oah.app"
-    cp -R "$mnt/oah.app" "$dest/" || fail "couldn't copy oah.app to $dest"
-    # Downloaded with curl, not a browser: no quarantine flag, but clear any just in case.
-    xattr -dr com.apple.quarantine "$dest/oah.app" 2>/dev/null || true
-    say "  ${D}installed${N}   $dest/oah.app"
-    run="open -a oah"
-    ;;
   deb)
     say "  ${D}installing with apt (may ask for your password)${N}"
     sudo_ apt-get install -y "$tmp/$file" || fail "apt couldn't install $file"

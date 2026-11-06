@@ -1,12 +1,12 @@
 # oah desktop
 
-The oah coding agent with a desktop interface, for Windows, macOS and Linux. It
+The oah coding agent with a desktop interface, for Windows and Linux. It
 runs the **same engine as the `oah` CLI** — same agent, tools, commands, pickers,
 permissions, checkpoints, MCP and skills — and shares its data folder, so you can
 start a session in one and continue it in the other.
 
 ```
-~/.config/oah                 Linux, macOS
+~/.config/oah                 Linux
 %USERPROFILE%\.config\oah     Windows
 ```
 
@@ -37,8 +37,8 @@ React UI (shadcn/ui, Tailwind)   ── Tauri IPC ──   Rust shell (src-tauri
 
 Which engine runs: `$OAH_ENGINE`, else the one bundled with the app
 (`oah-engine`), else (debug builds) this repo's source with Bun, else the
-installed CLI (`~/.config/oah/bin/oah`, then `oah` on PATH). On macOS and Linux
-the engine gets your login shell's `PATH`, so its tools find what a terminal would.
+installed CLI (`~/.config/oah/bin/oah`, then `oah` on PATH). On Linux the
+engine gets your login shell's `PATH`, so its tools find what a terminal would.
 
 ## Develop
 
@@ -62,7 +62,7 @@ engine from source; set `OAH_HOME` to try it on a scratch config.
 ## Install
 
 ```sh
-curl -fsSL https://dl.oah.dev/install-desktop.sh | sh       # macOS, Linux
+curl -fsSL https://dl.oah.dev/install-desktop.sh | sh       # Linux
 irm https://dl.oah.dev/install-desktop.ps1 | iex            # Windows (PowerShell)
 ```
 
@@ -73,8 +73,8 @@ Every download is listed in https://dl.oah.dev/desktop/latest.json (`files`).
 The app updates itself in the background (Settings → Updates & engine, on by
 default). It polls `https://dl.oah.dev/desktop/latest.json`; each install finds
 its own signed update there under `{os}-{arch}-{installer}` (e.g.
-`linux-x86_64-deb`, `windows-x86_64-nsis`, `darwin-aarch64-app`), falling back
-to `{os}-{arch}`. macOS and AppImage installs update in place silently; Windows
+`linux-x86_64-deb`, `windows-x86_64-nsis`), falling back to `{os}-{arch}`.
+AppImage installs update in place silently; Windows
 and deb/rpm installs download silently and install on "Restart to update".
 
 Updates are signed with the key whose public half is in `tauri.conf.json`
@@ -101,10 +101,9 @@ once; installed apps pick it up within a few hours.
 bun run build          # compiles the engine for this machine, then tauri build
 ```
 
-Output lands in `target/release/bundle/` (`.deb`/`.rpm`/`.AppImage`, `.msi`/`.exe`,
-`.dmg`/`.app`). CI builds all platforms: see `.github/workflows/desktop.yml`
-(push a `desktop-v*` tag, or run the workflow by hand). macOS signing and
-notarization use the `APPLE_*` secrets when they are set.
+Output lands in `target/release/bundle/` (`.deb`/`.rpm`/`.AppImage`, `-setup.exe`).
+CI builds both platforms: see `.github/workflows/desktop.yml` (push a
+`desktop-v*` tag, or run the workflow by hand).
 
 Icons are generated from `../assets/png/icon/oah-icon-dark-1024.png`
 (`bun run icons`).
@@ -112,7 +111,7 @@ Icons are generated from `../assets/png/icon/oah-icon-dark-1024.png`
 ## Keys
 
 Same as the TUI where it makes sense: Enter sends, Shift+Enter newline,
-Ctrl/⌘+Enter sends now mid-turn, Esc interrupts, Tab plan ↔ build, Shift+Tab
-cycles permissions, ↑/↓ history, Ctrl/⌘+T model, Ctrl/⌘+End jump to bottom.
-Desktop extras: Ctrl/⌘+N new session, Ctrl/⌘+O open a folder, Ctrl/⌘+B sidebar,
-Ctrl/⌘+I details panel, Ctrl/⌘+, settings.
+Ctrl+Enter sends now mid-turn, Esc interrupts, Tab plan ↔ build, Shift+Tab
+cycles permissions, ↑/↓ history, Ctrl+T model, Ctrl+End jump to bottom.
+Desktop extras: Ctrl+N new session, Ctrl+O open a folder, Ctrl+B sidebar,
+Ctrl+I details panel, Ctrl+, settings.

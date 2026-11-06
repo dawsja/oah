@@ -57,7 +57,6 @@ for f in "${files[@]}"; do
     *.rpm) type="application/x-rpm" ;;
     *.msi) type="application/x-msi" ;;
     *.exe) type="application/vnd.microsoft.portable-executable" ;;
-    *.dmg) type="application/x-apple-diskimage" ;;
     *.tar.gz) type="application/gzip" ;;
     *) type="application/octet-stream" ;;
   esac

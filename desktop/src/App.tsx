@@ -228,7 +228,7 @@ export function App() {
     ;(t.error ? toast.error : toast.success)(t.text, { id: `engine-${t.at}`, duration: 4000 })
   }, [toastAt])
 
-  // Shortcuts that work anywhere (the composer handles its own keys; ⌘/Ctrl+B is the sidebar's).
+  // Shortcuts that work anywhere (the composer handles its own keys; Ctrl+B is the sidebar's).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return

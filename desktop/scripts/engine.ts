@@ -3,7 +3,7 @@
 // naming; tauri.bundle.conf.json lists it). Same flags as ../scripts/build.ts.
 //
 //   bun scripts/engine.ts                          # this machine's target
-//   bun scripts/engine.ts --target aarch64-apple-darwin
+//   bun scripts/engine.ts --target x86_64-pc-windows-msvc
 import { $ } from "bun"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -13,8 +13,6 @@ const root = resolve(import.meta.dir, "../..")
 const TARGETS: Record<string, { bun: string; pkg: string }> = {
   "x86_64-unknown-linux-gnu": { bun: "bun-linux-x64", pkg: "@opentui/core-linux-x64" },
   "aarch64-unknown-linux-gnu": { bun: "bun-linux-arm64", pkg: "@opentui/core-linux-arm64" },
-  "x86_64-apple-darwin": { bun: "bun-darwin-x64", pkg: "@opentui/core-darwin-x64" },
-  "aarch64-apple-darwin": { bun: "bun-darwin-arm64", pkg: "@opentui/core-darwin-arm64" },
   "x86_64-pc-windows-msvc": { bun: "bun-windows-x64", pkg: "@opentui/core-win32-x64" },
   "aarch64-pc-windows-msvc": { bun: "bun-windows-arm64", pkg: "@opentui/core-win32-arm64" },
 }

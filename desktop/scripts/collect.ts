@@ -3,9 +3,7 @@
 // .sig where Tauri made one):
 //
 //   oah-desktop-<version>-linux-x64.AppImage | .deb | .rpm
-//   oah-desktop-<version>-windows-x64-setup.exe | .msi
-//   oah-desktop-<version>-darwin-arm64.dmg     (install)
-//   oah-desktop-<version>-darwin-arm64.app.tar.gz (update)
+//   oah-desktop-<version>-windows-x64-setup.exe
 //
 //   bun scripts/collect.ts --target x86_64-unknown-linux-gnu
 import { createHash } from "node:crypto"
@@ -17,8 +15,7 @@ const version: string = JSON.parse(readFileSync(join(desktop, "package.json"), "
 const arg = process.argv.indexOf("--target")
 const triple = arg > 0 ? process.argv[arg + 1]! : ""
 
-const OS: Record<string, string> = { linux: "linux", windows: "windows", darwin: "darwin" }
-const os = Object.keys(OS).find((o) => triple.includes(o === "darwin" ? "apple-darwin" : o))
+const os = ["linux", "windows"].find((o) => triple.includes(o))
 const arch = triple.startsWith("aarch64") ? "arm64" : triple.startsWith("x86_64") ? "x64" : ""
 if (!os || !arch) throw new Error(`usage: bun scripts/collect.ts --target <rust target triple> (got '${triple}')`)
 
@@ -32,9 +29,6 @@ const KINDS: [string, RegExp, string][] = [
   ["deb", /\.deb$/, ".deb"],
   ["rpm", /\.rpm$/, ".rpm"],
   ["nsis", /-setup\.exe$/, "-setup.exe"],
-  ["msi", /\.msi$/, ".msi"],
-  ["dmg", /\.dmg$/, ".dmg"],
-  ["macos", /\.app\.tar\.gz$/, ".app.tar.gz"],
 ]
 
 const out = join(desktop, "release")
@@ -43,8 +37,7 @@ let n = 0
 for (const [dir, match, suffix] of KINDS) {
   const d = join(bundle, dir)
   if (!existsSync(d)) continue
-  // macOS's update archive is plain `oah.app.tar.gz`; the rest carry the version.
-  const file = readdirSync(d).find((f) => match.test(f) && (dir === "macos" || f.includes(version)))
+  const file = readdirSync(d).find((f) => match.test(f) && f.includes(version))
   if (!file) continue
   const name = `oah-desktop-${version}-${os}-${arch}${suffix}`
   copyFileSync(join(d, file), join(out, name))

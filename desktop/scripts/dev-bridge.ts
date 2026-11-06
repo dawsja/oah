@@ -91,7 +91,7 @@ const methods: Record<string, (p: any) => unknown> = {
     stdin.flush?.()
   },
   sessions,
-  info: () => ({ version: "dev", bundle: null, os: process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux", home: home(), homeShort: short(home()), homeDir: homedir(), sessionsDir: join(home(), "sessions"), oahHomeEnv: !!process.env.OAH_HOME, xdgEnv: !!process.env.XDG_CONFIG_HOME }),
+  info: () => ({ version: "dev", bundle: null, os: process.platform === "win32" ? "windows" : "linux", home: home(), homeShort: short(home()), homeDir: homedir(), sessionsDir: join(home(), "sessions"), oahHomeEnv: !!process.env.OAH_HOME, xdgEnv: !!process.env.XDG_CONFIG_HOME }),
   prefs: readPrefs,
   setPrefs: ({ patch }) => writePrefs(patch),
 }

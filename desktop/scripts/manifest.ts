@@ -17,18 +17,15 @@ export interface Manifest {
   files: Record<string, { path: string; url: string; sha256: string; size: number }>
 }
 
-/** Release suffix → updater installer name (null: not an update artifact). */
-const UPDATE: [string, string | null][] = [
+/** Release suffix → updater installer name. */
+const UPDATE: [string, string][] = [
   [".AppImage", "appimage"],
   [".deb", "deb"],
   [".rpm", "rpm"],
   ["-setup.exe", "nsis"],
-  [".msi", "msi"],
-  [".app.tar.gz", "app"],
-  [".dmg", null],
 ]
 /** The update an install falls back to when its own kind isn't listed. */
-const FALLBACK: Record<string, string> = { linux: "appimage", windows: "nsis", darwin: "app" }
+const FALLBACK: Record<string, string> = { linux: "appimage", windows: "nsis" }
 const ARCH: Record<string, string> = { x64: "x86_64", arm64: "aarch64" }
 
 export function buildManifest(dir: string, version: string, base: string, notes = "", now = new Date()): Manifest {
@@ -44,9 +41,9 @@ export function buildManifest(dir: string, version: string, base: string, notes 
     const path = `desktop/v${version}/${f}`
     const url = `${base}/${path}`
     const sha = existsSync(join(dir, `${f}.sha256`)) ? readFileSync(join(dir, `${f}.sha256`), "utf8").split(/\s/)[0]! : ""
-    // Download key, e.g. windows-x64-setup.exe → "windows-x64-nsis"; darwin-arm64.dmg → "darwin-arm64-dmg".
-    m.files[`${os}-${arch}-${installer ?? suffix.slice(1)}`] = { path, url, sha256: sha, size: statSync(join(dir, f)).size }
-    if (!installer || !existsSync(join(dir, `${f}.sig`))) continue
+    // Download key, e.g. windows-x64-setup.exe → "windows-x64-nsis".
+    m.files[`${os}-${arch}-${installer}`] = { path, url, sha256: sha, size: statSync(join(dir, f)).size }
+    if (!existsSync(join(dir, `${f}.sig`))) continue
     const signature = readFileSync(join(dir, `${f}.sig`), "utf8").trim()
     const target = `${os}-${ARCH[arch] ?? arch}`
     m.platforms[`${target}-${installer}`] = { url, signature }

@@ -11,5 +11,5 @@ export function useTick(ms: number, on: boolean): number {
   return n
 }
 
-export const mod = (e: { ctrlKey: boolean; metaKey: boolean }) => (navigator.userAgent.includes("Mac") ? e.metaKey : e.ctrlKey)
-export const modKey = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl+"
+export const mod = (e: { ctrlKey: boolean }) => e.ctrlKey
+export const modKey = "Ctrl+"
