@@ -16,7 +16,7 @@ const entries: Entry[] = [
   { kind: "error", text: "boom" },
 ]
 
-for (const design of ["a", "b", "c", "c2", "c3", "c4"] as const) {
+for (const design of ["panels", "bubbles", "cards", "gutter", "focus"] as const) {
   test(`design ${design} renders every entry kind`, async () => {
     let style!: SyntaxStyle
     const setup = await testRender(<box />, { width: 100, height: 60 })
@@ -25,8 +25,9 @@ for (const design of ["a", "b", "c", "c2", "c3", "c4"] as const) {
     const s2 = await testRender(<Transcript entries={entries} design={design} style={style} liveText={null} liveReasoning={null} busy={false} model="openai/gpt-5.6" />, { width: 100, height: 60 })
     await s2.renderOnce()
     const frame = s2.captureCharFrame()
-    expect(frame).toContain("cargo test")
-    expect(frame).toContain("you")
+    // Focus folds tool titles into a steps line; the others show them.
+    expect(frame).toMatch(design === "focus" ? /\d steps? · Update, Edit, Bash/ : /cargo test/)
+    expect(frame).toMatch(design === "focus" ? /› add a --json flag/ : /you/)
     s2.renderer.destroy()
   })
 }

@@ -15,7 +15,7 @@ export const COMMANDS: Command[] = [
   { name: "compact", args: "[focus]", desc: "Summarize the conversation to free context" },
   { name: "clear", args: "", desc: "Start a fresh conversation" },
   { name: "session", args: "[id]", desc: "Browse and resume saved sessions" },
-  { name: "design", args: "[a|b|c]", desc: "Transcript look: A panels · B bubbles · C timeline" },
+  { name: "design", args: "[name]", desc: "Transcript look: panels · bubbles · cards · gutter · focus" },
   { name: "memory", args: "[add|global|remove <text>]", desc: "View or edit persistent memory" },
   { name: "skills", args: "", desc: "List available skills" },
   { name: "mcp", args: "", desc: "Show MCP servers and tools" },

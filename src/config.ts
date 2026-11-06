@@ -101,15 +101,24 @@ export const permissionInfo: Record<Permission, { label: string; desc: string }>
 export const nextPermission = (p: Permission): Permission => PERMISSIONS[(PERMISSIONS.indexOf(p) + 1) % PERMISSIONS.length]!
 
 export type Mode = "plan" | "build"
-export type Design = "a" | "b" | "c" | "c2" | "c3" | "c4"
-export const DESIGNS: Design[] = ["a", "b", "c", "c2", "c3", "c4"]
+export type Design = "panels" | "bubbles" | "cards" | "gutter" | "focus"
+export const DESIGNS: Design[] = ["panels", "bubbles", "cards", "gutter", "focus"]
 export const designInfo: Record<Design, { name: string; desc: string }> = {
-  a: { name: "A · Panels", desc: "tinted panel for you, labelled column for nur" },
-  b: { name: "B · Bubbles", desc: "chat bubbles: you on the right, nur on the left" },
-  c: { name: "C1 · Rail", desc: "one vertical rail with a node per event" },
-  c2: { name: "C2 · Compact rail", desc: "no gaps, one line per tool and thought, times on the right" },
-  c3: { name: "C3 · Lanes", desc: "rail colored by speaker, time dividers between turns" },
-  c4: { name: "C4 · Tree", desc: "one nur node per turn, tools and thinking branch off it" },
+  panels: { name: "Panels", desc: "tinted panel for you, labelled column for nur" },
+  bubbles: { name: "Bubbles", desc: "chat bubbles: you on the right, nur on the left" },
+  cards: { name: "Cards", desc: "each exchange in one card: your prompt on top, nur's work and answer below" },
+  gutter: { name: "Gutter", desc: "chat log with a speaker column and a colored bar per message" },
+  focus: { name: "Focus", desc: "answer-first: your prompt as a heading, steps folded into one line" },
+}
+
+/** Accept current names, old letters and removed designs. */
+export function parseDesign(s: string | undefined): Design | undefined {
+  const v = (s ?? "").trim().toLowerCase()
+  if ((DESIGNS as string[]).includes(v)) return v as Design
+  const alias: Record<string, Design> = { a: "panels", panel: "panels", b: "bubbles", bubble: "bubbles", card: "cards", log: "gutter", chat: "gutter" }
+  if (alias[v]) return alias[v]
+  if (/^c\d?$/.test(v) || v === "timeline") return "panels"
+  return undefined
 }
 
 export interface Settings {
@@ -135,14 +144,16 @@ export const defaultSettings: Settings = {
   effort: "medium",
   permission: "auto",
   mode: "build",
-  design: "a",
+  design: "panels",
   autoCompact: true,
   autoCompactAt: 0.85,
   allowedCommands: [],
 }
 
 export function loadSettings(): Settings {
-  return { ...defaultSettings, ...readJson<Partial<Settings>>(paths.settings, {}) }
+  const s = { ...defaultSettings, ...readJson<Partial<Settings>>(paths.settings, {}) }
+  s.design = parseDesign(s.design) ?? "panels"
+  return s
 }
 
 export function saveSettings(s: Settings) {

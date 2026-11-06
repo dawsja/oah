@@ -4,7 +4,7 @@ import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import * as auth from "./auth"
 import { refreshCatalog } from "./catalog"
-import { DESIGNS, ensureDir, homeDir, loadSettings, PROVIDERS, shortPath, VERSION, type Design, type Effort, type Permission } from "./config"
+import { DESIGNS, ensureDir, parseDesign, homeDir, loadSettings, PROVIDERS, shortPath, VERSION, type Design, type Effort, type Permission } from "./config"
 import { Mcp } from "./mcp"
 import { Memory } from "./memory"
 import { latestSession, listSessions, loadSession, relativeTime, saveSession } from "./session"
@@ -27,7 +27,7 @@ Options:
   -m, --model <p/model>   e.g. chatgpt/gpt-5.6, anthropic/claude-opus-5-5, openai/gpt-5.6
   -e, --effort <level>    minimal | low | medium | high | xhigh | max
   -p, --permission <lvl>  auto | ask | allow
-  -d, --design <name>     a panels · b bubbles · c1–c4 timelines
+  -d, --design <name>     panels · bubbles · cards · gutter · focus
       --plan              Start in plan mode
   -h, --help · -V, --version
 
@@ -88,8 +88,8 @@ function parseArgs(argv: string[]): Args {
         break
       case "-d":
       case "--design":
-        a.design = next().toLowerCase().replace(/^c1$/, "c") as Design
-        if (!DESIGNS.includes(a.design)) throw new Error("design must be a, b, c (c1), c2, c3 or c4")
+        a.design = parseDesign(next())
+        if (!a.design) throw new Error(`design must be one of: ${DESIGNS.join(", ")}`)
         break
       case "--plan":
         a.plan = true

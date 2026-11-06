@@ -308,7 +308,7 @@ function Welcome({ store }: { store: Store }) {
         ["tab", "plan ↔ build"],
         ["shift+tab", "auto → always ask → always allow"],
         ["/goal", "work until it's done"],
-        ["/design", "A panels · B bubbles · C timeline"],
+        ["/design", "panels · bubbles · cards · gutter · focus"],
         ["/help", "keys & commands"],
       ]
     : [

@@ -7,6 +7,7 @@ import { HELP, matchCommands, resolveCommand, type Command } from "../commands"
 import {
   DESIGNS,
   designInfo,
+  parseDesign,
   effortInfo,
   nextPermission,
   PERMISSIONS,
@@ -613,8 +614,8 @@ export class Store {
       case "build":
         return this.setMode("build")
       case "design": {
-        const d = (args.toLowerCase().replace(/^c1$/, "c") as Design)
-        if (DESIGNS.includes(d)) return this.setDesign(d)
+        const d = parseDesign(args)
+        if (d) return this.setDesign(d)
         return this.openPicker("design", "Transcript design", DESIGNS.map((x) => ({ label: designInfo[x].name, detail: designInfo[x].desc, value: x, current: x === this.settings.design })))
       }
       case "auth":

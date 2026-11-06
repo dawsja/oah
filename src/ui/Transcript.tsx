@@ -1,14 +1,16 @@
-// The conversation, in one of three designs:
+// The conversation, in one of five designs:
 //   A · Panels   — you: tinted panel with a cyan bar · nur: labelled column
 //   B · Bubbles  — you: bubble on the right · nur: bubble on the left
-//   C · Timeline — a single rail with a node per event (variants c, c2, c3, c4)
+//   Cards        — each exchange in one card: your prompt on top, nur's work and answer below
+//   Gutter       — chat log with a speaker column and a colored bar per message
+//   Focus        — answer-first: your prompt as a heading, steps folded into one line
 import type { SyntaxStyle } from "@opentui/core"
 import type { ReactNode } from "react"
 import type { Design } from "../config"
 import { displayName } from "../catalog"
 import type { Entry } from "../session"
 import { Shimmer, useTick } from "./Thinking"
-import { fmtMs, mix, SPINNER, t } from "./theme"
+import { fmtMs, SPINNER, t } from "./theme"
 
 type ToolEntry = Extract<Entry, { kind: "tool" }>
 type ReasoningEntry = Extract<Entry, { kind: "reasoning" }>
@@ -132,21 +134,35 @@ export interface TranscriptProps {
 
 export function Transcript({ entries, design, style, liveText, liveReasoning, busy, model }: TranscriptProps) {
   const anyRunning = entries.some((e) => e.kind === "tool" && e.status === "running")
-  const tick = useTick(90, liveReasoning !== null || anyRunning)
+  const tick = useTick(90, liveReasoning !== null || anyRunning || (busy && (design === "focus" || design === "cards")))
+  if (design === "cards" || design === "focus") {
+    const groups = groupTurns(entries)
+    return (
+      <box flexDirection="column">
+        {groups.map((g, k) => {
+          const live = busy && k === groups.length - 1 && g.kind === "turn"
+          if (g.kind === "note") return <NoteEntry key={k} e={g.entry} style={style} />
+          return design === "cards" ? (
+            <Card key={k} turn={g} style={style} tick={tick} live={live} liveText={liveText} liveReasoning={liveReasoning} model={model} />
+          ) : (
+            <FocusTurn key={k} turn={g} style={style} tick={tick} live={live} liveText={liveText} liveReasoning={liveReasoning} />
+          )
+        })}
+      </box>
+    )
+  }
   const out: ReactNode[] = []
   entries.forEach((e, i) => {
     const prev = entries[i - 1]
     const firstOfTurn = isAssistantSide(e) && !isAssistantSide(prev)
     const props = { e, i, firstOfTurn, style, tick, model: e.kind === "assistant" ? e.model : model, live: { text: liveText === i, reasoning: liveReasoning === i } }
-    const lastOfTurn = isAssistantSide(e) && !isAssistantSide(entries[i + 1])
-    const last = i === entries.length - 1 && !busy
     out.push(
-      design === "b" ? (
+      design === "bubbles" ? (
         <BubbleEntry key={i} {...props} />
-      ) : design === "a" ? (
-        <PanelEntry key={i} {...props} />
+      ) : design === "gutter" ? (
+        <GutterEntry key={i} {...props} prev={prev} />
       ) : (
-        <RailEntry key={i} {...props} last={last} lastOfTurn={lastOfTurn} variant={design} index={i} />
+        <PanelEntry key={i} {...props} />
       ),
     )
   })
@@ -287,46 +303,123 @@ function BubbleEntry({ e, style, tick, live }: EntryProps) {
   }
 }
 
-// ---- C · Timeline variants ---------------------------------------------------------
-//   c  (C1) Rail     — a node per event, blank rail row between events
-//   c2 Compact rail  — no gaps, one line per tool / thought, times on the right
-//   c3 Lanes         — rail colored by speaker, time dividers before each of your messages
-//   c4 Tree          — one nur node per turn; thinking and tools branch off it
+// ---- shared: exchanges ---------------------------------------------------------------
 
-type RailVariant = "c" | "c2" | "c3" | "c4"
+interface Turn {
+  kind: "turn"
+  user?: Extract<Entry, { kind: "user" }>
+  steps: { e: Entry; i: number }[]
+}
 
-const hhmm = (ms?: number) => (ms ? new Date(ms).toTimeString().slice(0, 5) : "")
-const nurLane = mix(t.accent, t.bg, 0.55)
-const youLane = mix(t.you, t.bg, 0.45)
+type Group = Turn | { kind: "note"; entry: Entry }
 
-/** One rail row group: a node glyph (or a bare continuation) plus content. */
-function Rail({ glyph, color, lane = t.border, children, last, gap = true, gutter }: { glyph: string | null; color?: string; lane?: string; children: ReactNode; last?: boolean; gap?: boolean; gutter?: string | null }) {
+/** Split the transcript into exchanges (your message + nur's work) and standalone notes. */
+function groupTurns(entries: Entry[]): Group[] {
+  const out: Group[] = []
+  let cur: Turn | null = null
+  entries.forEach((e, i) => {
+    if (e.kind === "user") {
+      cur = { kind: "turn", user: e, steps: [] }
+      out.push(cur)
+    } else if (e.kind === "info" || e.kind === "error") {
+      // Errors and notes during a turn stay inside it; others stand alone.
+      if (cur && e.kind === "error") cur.steps.push({ e, i })
+      else {
+        out.push({ kind: "note", entry: e })
+        cur = null
+      }
+    } else {
+      if (!cur) {
+        cur = { kind: "turn", steps: [] }
+        out.push(cur)
+      }
+      cur.steps.push({ e, i })
+    }
+  })
+  return out
+}
+
+function NoteEntry({ e, style }: { e: Entry; style: SyntaxStyle }) {
+  if (e.kind === "error")
+    return (
+      <box marginTop={1}>
+        <text fg={t.red}>✗ {e.text}</text>
+      </box>
+    )
+  if (e.kind === "info")
+    return (
+      <box marginTop={1}>
+        <InfoBlock text={e.text} style={style} />
+      </box>
+    )
+  return null
+}
+
+function turnStats(turn: Turn) {
+  const tools = turn.steps.filter((s) => s.e.kind === "tool").length
+  const start = turn.user?.at ?? turn.steps[0]?.e.at
+  const lastStep = turn.steps.at(-1)?.e
+  const end = lastStep ? (lastStep.kind === "tool" && lastStep.ms !== undefined ? lastStep.started + lastStep.ms : lastStep.at) : undefined
+  const secs = start && end ? Math.max(0, Math.round((end - start) / 1000)) : 0
+  return { tools, secs }
+}
+
+// ---- Cards ----------------------------------------------------------------------------
+
+function Card({ turn, style, tick, live, liveText, liveReasoning, model }: { turn: Turn; style: SyntaxStyle; tick: number; live: boolean; liveText: number | null; liveReasoning: number | null; model: string }) {
+  const time = turn.user?.at ? new Date(turn.user.at).toTimeString().slice(0, 5) : ""
+  const { tools, secs } = turnStats(turn)
+  const answerModel = turn.steps.map((s) => s.e).find((e): e is Extract<Entry, { kind: "assistant" }> => e.kind === "assistant")?.model ?? model
+  const footer = [displayName(answerModel), tools ? `${tools} tool${tools === 1 ? "" : "s"}` : "", secs ? fmtMs(secs * 1000) : ""].filter(Boolean).join(" · ")
   return (
-    <box flexDirection="row">
-      {gutter !== undefined ? (
-        <text width={6} fg={t.faint} wrapMode="none">
-          {gutter ?? ""}
+    <box marginTop={1} border borderStyle="rounded" borderColor={live ? t.accent : t.border} title={` you${time ? ` · ${time}` : ""} `} titleAlignment="left" flexDirection="column" paddingLeft={1} paddingRight={1}>
+      {turn.user ? <text fg={t.you}>{turn.user.text}</text> : null}
+      {turn.user && turn.steps.length ? (
+        <text fg={t.border} wrapMode="none">
+          {"─".repeat(400)}
         </text>
       ) : null}
-      <box width={3} flexDirection="column">
-        {glyph !== null ? <text fg={color}>{glyph}</text> : null}
-        {last ? null : <box flexGrow={1} border={["left"]} borderColor={lane} />}
-      </box>
-      <box flexGrow={1} flexDirection="column" paddingBottom={gap ? 1 : 0}>
-        {children}
-      </box>
+      {turn.steps.map(({ e, i }) => {
+        if (e.kind === "assistant")
+          return (
+            <box key={i} marginTop={0}>
+              <Md text={e.text} style={style} streaming={liveText === i} />
+            </box>
+          )
+        if (e.kind === "reasoning") return <ReasoningBlock key={i} e={e} live={liveReasoning === i} tick={tick} oneLine />
+        if (e.kind === "tool") return <ToolBlock key={i} e={e} tick={tick} compact />
+        if (e.kind === "error")
+          return (
+            <text key={i} fg={t.red}>
+              ✗ {e.text}
+            </text>
+          )
+        return null
+      })}
+      {live ? (
+        <text fg={t.faint}>
+          <Shimmer text="working…" tick={tick} base={t.faint} glow={t.accent} />
+        </text>
+      ) : (
+        <box flexDirection="row" justifyContent="flex-end">
+          <text fg={t.faint}>{footer}</text>
+        </box>
+      )}
     </box>
   )
 }
 
-/** Tree branch inside a turn: ├─ for middle items, └─ for the last. */
-function Branch({ last, children }: { last: boolean; children: ReactNode }) {
+// ---- Gutter ---------------------------------------------------------------------------
+
+const GUTTER = 5
+
+function GutterRow({ label, color, bar, top, children }: { label: string; color: string; bar: string; top: number; children: ReactNode }) {
   return (
-    <box flexDirection="row">
-      <box width={3} flexDirection="column">
-        <text fg={nurLane}>{last ? "└─" : "├─"}</text>
-        {last ? null : <box flexGrow={1} border={["left"]} borderColor={nurLane} />}
-      </box>
+    <box flexDirection="row" marginTop={top}>
+      <text width={GUTTER} fg={color} wrapMode="none">
+        <b>{label.padStart(GUTTER - 1)}</b>
+      </text>
+      <box width={2} border={["left"]} borderColor={bar} />
       <box flexGrow={1} flexDirection="column">
         {children}
       </box>
@@ -334,161 +427,146 @@ function Branch({ last, children }: { last: boolean; children: ReactNode }) {
   )
 }
 
-function Header({ children, time }: { children: ReactNode; time?: string }) {
+function GutterEntry({ e, style, tick, live, prev, model }: EntryProps & { prev?: Entry }) {
+  const speaker = (x?: Entry) => (!x ? "" : x.kind === "user" ? "you" : isAssistantSide(x) ? "nur" : x.kind)
+  const newSpeaker = speaker(e) !== speaker(prev)
+  const top = newSpeaker ? 1 : 0
+  switch (e.kind) {
+    case "user":
+      return (
+        <GutterRow label="you" color={t.you} bar={t.you} top={1}>
+          <text fg={t.text}>{e.text}</text>
+        </GutterRow>
+      )
+    case "assistant":
+      return (
+        <GutterRow label={newSpeaker ? "nur" : ""} color={t.accent} bar={t.accent} top={top}>
+          {newSpeaker ? <text fg={t.faint}>{displayName(e.model || model)}</text> : null}
+          <Md text={e.text} style={style} streaming={live.text} />
+        </GutterRow>
+      )
+    case "reasoning":
+      return (
+        <GutterRow label={newSpeaker ? "nur" : "∴"} color={newSpeaker ? t.accent : t.faint} bar={t.accent} top={top}>
+          <ReasoningBlock e={e} live={live.reasoning} tick={tick} oneLine />
+        </GutterRow>
+      )
+    case "tool": {
+      const { g, c } = statusGlyph(e.status, tick)
+      return (
+        <GutterRow label={newSpeaker ? "nur" : g} color={newSpeaker ? t.accent : c} bar={t.accent} top={top}>
+          {newSpeaker ? (
+            <ToolBlock e={e} tick={tick} compact />
+          ) : (
+            <>
+              <text>
+                <b fg={t.text}>{splitTitle(e.title)[0]}</b>
+                <span fg={t.dim}> {splitTitle(e.title)[1]}</span>
+                {e.summary ? <span fg={e.status === "failed" ? t.red : t.faint}> — {e.summary}</span> : null}
+                {e.ms && e.ms > 900 ? <span fg={t.faint}> · {fmtMs(e.ms)}</span> : null}
+              </text>
+              <DiffLines lines={e.detail} indent={0} />
+            </>
+          )}
+        </GutterRow>
+      )
+    }
+    case "info":
+      return (
+        <GutterRow label="※" color={t.cyan} bar={t.border} top={1}>
+          <Md text={e.text} style={style} streaming={false} dim />
+        </GutterRow>
+      )
+    case "error":
+      return (
+        <GutterRow label="✗" color={t.red} bar={t.red} top={1}>
+          <text fg={t.red}>{e.text}</text>
+        </GutterRow>
+      )
+  }
+}
+
+// ---- Focus ----------------------------------------------------------------------------
+
+/** One folded line for a run of thinking + tool calls; edits keep their diffs. */
+function StepsLine({ steps, tick, running }: { steps: Entry[]; tick: number; running: boolean }) {
+  const tools = steps.filter((e): e is ToolEntry => e.kind === "tool")
+  const verbs = [...new Set(tools.map((x) => splitTitle(x.title)[0]))]
+  const first = steps[0]
+  const last = steps.at(-1)!
+  const start = first?.kind === "tool" || first?.kind === "reasoning" ? first.started : first?.at
+  const end = last.kind === "tool" && last.ms !== undefined ? last.started + last.ms : last.kind === "reasoning" && last.ms !== undefined ? last.started + last.ms : undefined
+  const secs = start && end ? Math.round((end - start) / 1000) : 0
+  const failed = tools.filter((x) => x.status === "failed" || x.status === "denied").length
+  const current = tools.findLast((x) => x.status === "running")
+  const edits = tools.filter((x) => /^(Edit|Write|Patch)$/.test(splitTitle(x.title)[0]) && x.detail.length)
   return (
-    <box flexDirection="row">
-      <text flexGrow={1} wrapMode="none">
-        {children}
+    <box flexDirection="column" marginTop={1}>
+      <text>
+        {running ? <span fg={t.accent}>{SPINNER[tick % SPINNER.length]} </span> : <span fg={failed ? t.orange : t.faint}>▸ </span>}
+        <span fg={t.dim}>{tools.length ? `${tools.length} step${tools.length === 1 ? "" : "s"}` : "thinking"}</span>
+        {verbs.length ? <span fg={t.faint}> · {verbs.join(", ")}</span> : null}
+        {failed ? <span fg={t.orange}> · {failed} failed</span> : null}
+        {secs ? <span fg={t.faint}> · {fmtMs(secs * 1000)}</span> : null}
+        {current ? (
+          <>
+            <span fg={t.faint}> · </span>
+            <Shimmer text={current.title} tick={tick} base={t.dim} glow={t.text} />
+          </>
+        ) : null}
       </text>
-      {time ? <text fg={t.faint}>{time}</text> : null}
+      {edits.map((x, k) => (
+        <box key={k} flexDirection="column" paddingLeft={2}>
+          <text fg={t.faint}>{x.title}</text>
+          <DiffLines lines={x.detail} indent={0} />
+        </box>
+      ))}
     </box>
   )
 }
 
-/** Spans for a tool's title and result; wrap in <text>. */
-function ToolLine({ e }: { e: ToolEntry; tick?: number }) {
-  const [verb, rest] = splitTitle(e.title)
+function FocusTurn({ turn, style, tick, live, liveText }: { turn: Turn; style: SyntaxStyle; tick: number; live: boolean; liveText: number | null; liveReasoning: number | null }) {
+  // Fold consecutive thinking/tool entries into one steps line each.
+  const blocks: ({ kind: "steps"; items: Entry[]; key: number } | { kind: "entry"; e: Entry; i: number })[] = []
+  for (const { e, i } of turn.steps) {
+    if (e.kind === "tool" || e.kind === "reasoning") {
+      const lastBlock = blocks.at(-1)
+      if (lastBlock?.kind === "steps") lastBlock.items.push(e)
+      else blocks.push({ kind: "steps", items: [e], key: i })
+    } else blocks.push({ kind: "entry", e, i })
+  }
   return (
-    <>
-      <b fg={t.text}>{verb}</b>
-      <span fg={t.dim}> {rest}</span>
-      {e.summary ? <span fg={e.status === "failed" ? t.red : e.status === "denied" ? t.orange : t.faint}> — {e.summary}</span> : null}
-      {e.ms && e.ms > 900 ? <span fg={t.faint}> · {fmtMs(e.ms)}</span> : null}
-    </>
-  )
-}
-
-function RailEntry({ e, style, tick, live, last, firstOfTurn, lastOfTurn, model, variant, index }: EntryProps & { last: boolean; lastOfTurn: boolean; variant: RailVariant; index: number }) {
-  const time = hhmm(e.at)
-  const compact = variant === "c2"
-  const gap = !compact
-  const lane = variant === "c3" ? (e.kind === "user" ? youLane : nurLane) : t.border
-  const tool = e.kind === "tool" ? statusGlyph(e.status, tick) : null
-
-  // ---- C4 · Tree: a node per turn, entries hang off it ----
-  if (variant === "c4") {
-    if (e.kind === "user" || e.kind === "info" || e.kind === "error") {
-      const glyph = e.kind === "user" ? "●" : e.kind === "info" ? "※" : "✗"
-      const color = e.kind === "user" ? t.you : e.kind === "info" ? t.cyan : t.red
-      return (
-        <Rail glyph={glyph} color={color} last={last} gutter={time}>
-          {e.kind === "user" ? (
-            <>
-              <text>
-                <b fg={t.you}>you</b>
-              </text>
-              <text fg={t.text}>{e.text}</text>
-            </>
-          ) : e.kind === "info" ? (
-            <Md text={e.text} style={style} streaming={false} dim />
-          ) : (
-            <text fg={t.red}>{e.text}</text>
-          )}
-        </Rail>
-      )
-    }
-    const body =
-      e.kind === "assistant" ? (
-        <Md text={e.text} style={style} streaming={live.text} />
-      ) : e.kind === "reasoning" ? (
-        <ReasoningBlock e={e} live={live.reasoning} tick={tick} oneLine />
-      ) : (
+    <box flexDirection="column" marginTop={1}>
+      {turn.user ? (
         <>
-          <text>
-            <span fg={tool!.c}>{tool!.g} </span>
-            <ToolLine e={e} />
+          <text fg={t.border} wrapMode="none">
+            {"─".repeat(400)}
           </text>
-          <DiffLines lines={e.detail} indent={2} />
+          <text>
+            <b fg={t.you}>› </b>
+            <b fg={t.text}>{turn.user.text}</b>
+          </text>
         </>
-      )
-    return (
-      <>
-        {firstOfTurn ? (
-          <Rail glyph="◆" color={t.accent} gap={false} gutter={time} last={false} lane={nurLane}>
-            <text>
-              <b fg={t.accent}>nur</b>
-              {model ? <span fg={t.faint}> · {displayName(model)}</span> : null}
-            </text>
-          </Rail>
-        ) : null}
-        <Rail glyph={null} gutter={null} lane={nurLane} last={last} gap={lastOfTurn}>
-          <Branch last={lastOfTurn}>{body}</Branch>
-        </Rail>
-      </>
-    )
-  }
-
-  // ---- C1 / C2 / C3 ----
-  const divider =
-    variant === "c3" && e.kind === "user" && index > 0 ? (
-      <box flexDirection="row">
-        <text fg={youLane} wrapMode="none">
-          {`── ${time || "·····"} ${"─".repeat(200)}`}
+      ) : null}
+      {blocks.map((b, k) =>
+        b.kind === "steps" ? (
+          <StepsLine key={`s${b.key}`} steps={b.items} tick={tick} running={live && k === blocks.length - 1} />
+        ) : b.e.kind === "assistant" ? (
+          <box key={b.i} marginTop={1}>
+            <Md text={b.e.text} style={style} streaming={liveText === b.i} />
+          </box>
+        ) : b.e.kind === "error" ? (
+          <text key={b.i} fg={t.red}>
+            ✗ {b.e.text}
+          </text>
+        ) : null,
+      )}
+      {live && !blocks.length ? (
+        <text marginTop={1}>
+          <span fg={t.accent}>{SPINNER[tick % SPINNER.length]} </span>
+          <Shimmer text="thinking" tick={tick} base={t.dim} glow={t.accent} />
         </text>
-      </box>
-    ) : null
-  switch (e.kind) {
-    case "user":
-      return (
-        <>
-          {divider}
-          <Rail glyph="●" color={t.you} lane={lane} last={last} gap={gap}>
-            {compact ? (
-              <Header time={time}>
-                <b fg={t.you}>you </b>
-                <span fg={t.text}>{e.text.split("\n")[0]}</span>
-              </Header>
-            ) : (
-              <Header time={variant === "c3" ? undefined : undefined}>
-                <b fg={t.you}>you</b>
-              </Header>
-            )}
-            {compact ? (e.text.includes("\n") ? <text fg={t.text}>{e.text.split("\n").slice(1).join("\n")}</text> : null) : (
-              <box backgroundColor={variant === "c3" ? t.userBg : undefined} paddingRight={variant === "c3" ? 1 : 0}>
-                <text fg={t.text}>{e.text}</text>
-              </box>
-            )}
-          </Rail>
-        </>
-      )
-    case "assistant":
-      return (
-        <Rail glyph="◆" color={t.accent} lane={lane} last={last} gap={gap}>
-          {firstOfTurn || !compact ? (
-            <Header time={compact ? time : undefined}>
-              <b fg={t.accent}>nur</b>
-              <span fg={t.faint}> · {displayName(e.model)}</span>
-            </Header>
-          ) : null}
-          <Md text={e.text} style={style} streaming={live.text} />
-        </Rail>
-      )
-    case "reasoning":
-      return (
-        <Rail glyph="∴" color={live.reasoning ? t.accent : t.faint} lane={lane} last={last} gap={gap}>
-          {compact ? <ReasoningBlock e={e} live={live.reasoning} tick={tick} oneLine /> : <ReasoningBlock e={e} live={live.reasoning} tick={tick} bare />}
-        </Rail>
-      )
-    case "tool":
-      return (
-        <Rail glyph={compact || e.status === "running" ? tool!.g : "○"} color={tool!.c} lane={lane} last={last} gap={gap}>
-          <text>
-            <ToolLine e={e} />
-          </text>
-          <DiffLines lines={compact ? e.detail.slice(0, 4) : e.detail} indent={0} />
-        </Rail>
-      )
-    case "info":
-      return (
-        <Rail glyph="※" color={t.cyan} lane={lane} last={last} gap={gap}>
-          <Md text={e.text} style={style} streaming={false} dim />
-        </Rail>
-      )
-    case "error":
-      return (
-        <Rail glyph="✗" color={t.red} lane={lane} last={last} gap={gap}>
-          <text fg={t.red}>{e.text}</text>
-        </Rail>
-      )
-  }
+      ) : null}
+    </box>
+  )
 }
