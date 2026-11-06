@@ -984,7 +984,7 @@ export class Store {
       keywords: `${m.provider} ${providerInfo[m.provider].label} ${PROVIDER_ALIASES[m.provider] ?? ""}`,
     })
     const byId = new Map(all.map((m) => [m.full, m]))
-    const recent = [...new Set([this.settings.model, ...(this.settings.recentModels ?? [])])].filter((id) => byId.has(id)).slice(0, 3)
+    const recent = [...new Set([this.settings.model, ...(this.settings.recentModels ?? [])])].filter((id) => byId.has(id)).slice(0, 5)
     // Unfiltered, show only the newest few per provider; typing searches everything.
     const shown = new Map<string, number>()
     const items: PickItem[] = [
@@ -1113,7 +1113,7 @@ export class Store {
 }
 
 /** Models listed per provider in /model before you start typing. */
-const MODELS_PER_PROVIDER = 3
+const MODELS_PER_PROVIDER = 6
 
 /** Other names people search providers by. */
 const PROVIDER_ALIASES: Partial<Record<Provider, string>> = {
