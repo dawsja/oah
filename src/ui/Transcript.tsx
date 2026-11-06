@@ -152,15 +152,12 @@ function FocusTurn({ turn, style, tick, live, liveText }: { turn: Turn; style: S
   return (
     <box flexDirection="column" marginTop={1}>
       {turn.user ? (
-        <>
-          <text fg={t.border} wrapMode="none">
-            {"─".repeat(400)}
-          </text>
+        <box backgroundColor={t.userBg} paddingLeft={1} paddingRight={1} paddingTop={1} paddingBottom={1}>
           <text>
             <b fg={t.you}>› </b>
             <b fg={t.text}>{turn.user.text}</b>
           </text>
-        </>
+        </box>
       ) : null}
       {blocks.map((b, k) =>
         b.kind === "steps" ? (

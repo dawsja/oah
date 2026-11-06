@@ -2,7 +2,7 @@ export const t = {
   bg: "#0e0e0f",
   panel: "#161617",
   panelHi: "#1f1f21",
-  userBg: "#18181a",
+  userBg: "#1c1c1f",
   border: "#2c2c2f",
   borderHi: "#424246",
   text: "#ececec",

@@ -258,9 +258,6 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
           minHeight={3}
         >
           <box flexDirection="row">
-            <text fg={modeColor}>
-              <b>{"› "}</b>
-            </text>
             <textarea
               ref={input}
             cursorColor={t.accent}
@@ -589,7 +586,7 @@ function InputFooter({ store }: { store: Store }) {
   return (
     <text wrapMode="none">
       <span fg={s.mode === "plan" ? t.plan : t.build}>
-        <b>{s.mode === "plan" ? "◇ plan" : "◆ build"}</b>
+        <b>{s.mode}</b>
       </span>
       <span fg={t.faint}> · </span>
       <span fg={t.text}>{displayName(s.model)}</span>
