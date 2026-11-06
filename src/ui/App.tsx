@@ -9,7 +9,7 @@ import { displayName } from "../catalog"
 import { permissionInfo, providerInfo, shortPath, VERSION } from "../config"
 import { Shimmer, Thinking, useTick } from "./Thinking"
 import { markCells } from "./logo"
-import { fmtCost, fmtMs, fmtTokens, t } from "./theme"
+import { fmtCost, fmtMs, fmtTokens, SPINNER, t } from "./theme"
 import { Transcript } from "./Transcript"
 import { runningShells } from "../tools/shells"
 import type { Store } from "./store"
@@ -441,18 +441,31 @@ export function Welcome({ store }: { store: Store }) {
   )
 }
 
-function TodoPanel({ store }: { store: Store }) {
+export function TodoPanel({ store }: { store: Store }) {
   const todos = store.session.todos
+  // The current task spins while oah is working; it rests as ◐ when paused.
+  const working = !!store.busy && todos.some((x) => x.status === "in_progress")
+  const tick = useTick(80, working)
   if (!todos.length || todos.every((x) => x.status === "completed")) return null
   const done = todos.filter((x) => x.status === "completed").length
   return (
     <box marginTop={1} flexDirection="column" border borderStyle="rounded" borderColor={t.border} title={` Tasks ${done}/${todos.length} `} paddingLeft={1} paddingRight={1}>
-      {todos.map((x, i) => (
-        <text key={i} fg={x.status === "completed" ? t.faint : x.status === "in_progress" ? t.yellow : t.dim}>
-          {x.status === "completed" ? "☒ " : x.status === "in_progress" ? "◐ " : "☐ "}
-          {x.status === "completed" ? <span attributes={TextAttributes.STRIKETHROUGH}>{x.text}</span> : x.status === "in_progress" ? <b>{x.text}</b> : x.text}
-        </text>
-      ))}
+      {todos.map((x, i) =>
+        x.status === "completed" ? (
+          <text key={i} fg={t.faint}>
+            <span fg={t.green}>☑ </span>
+            <span attributes={TextAttributes.STRIKETHROUGH}>{x.text}</span>
+          </text>
+        ) : x.status === "in_progress" ? (
+          <text key={i} fg={t.yellow}>
+            {working ? SPINNER[tick % SPINNER.length] : "◐"} <b>{x.text}</b>
+          </text>
+        ) : (
+          <text key={i} fg={t.dim}>
+            ☐ {x.text}
+          </text>
+        ),
+      )}
     </box>
   )
 }
