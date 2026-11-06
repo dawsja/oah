@@ -1,4 +1,4 @@
-// Credentials for the three providers.
+// Credentials: Sign in with ChatGPT, and API keys for every other provider.
 //
 // ChatGPT plan usage follows OpenAI's open-source "Sign in with ChatGPT" flow
 // (developers.openai.com/siwc/token-sharing-open-source):
@@ -11,7 +11,7 @@
 //  * hourly access tokens refresh automatically; sign-out revokes the refresh token
 import { randomBytes, createHash, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { paths, readJson, writeFileAtomic, type Provider } from "../config"
+import { info, KEY_PROVIDERS, PROVIDERS, paths, readJson, writeFileAtomic, type Provider } from "../config"
 
 export const ISSUER = "https://auth.openai.com"
 const AUTHORIZE_URL = "https://auth.openai.com/api/accounts/authorize"
@@ -41,6 +41,9 @@ export interface ChatGptCredentials {
 
 interface AuthStore {
   chatgpt?: ChatGptCredentials
+  /** API keys by provider. */
+  keys?: Partial<Record<Provider, string>>
+  /** Older layout, migrated into `keys`. */
   openaiKey?: string
   anthropicKey?: string
   /** Issued client id, kept across sign-out for reauthorization. */
@@ -51,55 +54,56 @@ interface AuthStore {
 
 export interface AuthStatus {
   chatgpt?: { email?: string; planUsage: boolean }
-  openai?: string
-  anthropic?: string
+  /** Where each provider's key comes from: "saved key" or the env var name. */
+  keys: Partial<Record<Provider, string>>
 }
 
 let store: AuthStore = readJson<AuthStore>(paths.auth, {})
+if (store.openaiKey || store.anthropicKey) {
+  store.keys = { openai: store.openaiKey, anthropic: store.anthropicKey, ...store.keys }
+  delete store.openaiKey
+  delete store.anthropicKey
+}
 const save = () => writeFileAtomic(paths.auth, JSON.stringify(store, null, 2), true)
 const now = () => Math.floor(Date.now() / 1000)
 const b64url = (b: Buffer) => b.toString("base64url")
 
+const envKey = (p: Provider) => info(p).env.find((k) => process.env[k])
+
 export function status(): AuthStatus {
-  const env = (k: string) => (process.env[k] ? k : undefined)
-  return {
-    chatgpt: store.chatgpt ? { email: store.chatgpt.email, planUsage: store.chatgpt.scopes.includes(PLAN_SCOPE) } : undefined,
-    openai: store.openaiKey ? "saved key" : env("OPENAI_API_KEY"),
-    anthropic: store.anthropicKey ? "saved key" : env("ANTHROPIC_API_KEY"),
+  const keys: AuthStatus["keys"] = {}
+  for (const p of KEY_PROVIDERS) {
+    const src = store.keys?.[p] ? "saved key" : envKey(p)
+    if (src) keys[p] = src
   }
+  return { chatgpt: store.chatgpt ? { email: store.chatgpt.email, planUsage: store.chatgpt.scopes.includes(PLAN_SCOPE) } : undefined, keys }
 }
 
 export function has(s: AuthStatus, p: Provider): boolean {
   if (p === "chatgpt") return !!s.chatgpt?.planUsage
-  return !!s[p]
+  return !!s.keys[p]
 }
 
 export function available(s = status()): Provider[] {
-  return (["chatgpt", "anthropic", "openai"] as Provider[]).filter((p) => has(s, p))
+  return PROVIDERS.filter((p) => has(s, p))
 }
 
 export function label(s: AuthStatus, p: Provider): string {
   if (p === "chatgpt") return s.chatgpt?.planUsage ? "Using ChatGPT plan" : s.chatgpt ? "ChatGPT plan usage off · /auth" : "not signed in · /auth"
-  if (has(s, p)) return p === "openai" ? "OpenAI API" : "Anthropic API"
-  return `no ${p === "openai" ? "OpenAI" : "Anthropic"} key · /auth`
+  if (has(s, p)) return info(p).label + (info(p).billing.includes("plan") ? " plan" : " API")
+  return `no ${info(p).label} key · /auth`
 }
 
-export function setKey(p: "openai" | "anthropic", key: string | undefined) {
-  if (p === "openai") store.openaiKey = key?.trim() || undefined
-  else store.anthropicKey = key?.trim() || undefined
+export function setKey(p: Provider, key: string | undefined) {
+  store.keys = { ...store.keys, [p]: key?.trim() || undefined }
   save()
 }
 
 /** API key or (refreshed) ChatGPT access token. */
 export async function credential(p: Provider): Promise<string> {
-  if (p === "openai") {
-    const k = store.openaiKey ?? process.env.OPENAI_API_KEY
-    if (!k) throw new Error("No OpenAI API key — run /auth")
-    return k
-  }
-  if (p === "anthropic") {
-    const k = store.anthropicKey ?? process.env.ANTHROPIC_API_KEY
-    if (!k) throw new Error("No Anthropic API key — run /auth")
+  if (p !== "chatgpt") {
+    const k = store.keys?.[p] ?? process.env[envKey(p) ?? ""]
+    if (!k) throw new Error(`No ${info(p).label} API key — run /auth`)
     return k
   }
   const c = store.chatgpt

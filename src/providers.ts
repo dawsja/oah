@@ -1,13 +1,20 @@
 // AI SDK models for each provider.
 //  * chatgpt   → OpenAI Responses API, Authorization from Sign in with ChatGPT
 //  * openai    → OpenAI Responses API with an API key
-//  * anthropic → Anthropic Messages API with an API key
+//  * anthropic → Anthropic Messages API (also MiniMax's Anthropic-compatible API)
+//  * google, xai, deepseek, openrouter → their AI SDK providers
+//  * synthetic, kimi, z.ai → OpenAI-compatible chat completions
 import { createAnthropic } from "@ai-sdk/anthropic"
+import { createDeepSeek } from "@ai-sdk/deepseek"
+import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createOpenAI } from "@ai-sdk/openai"
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
+import { createXai } from "@ai-sdk/xai"
+import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import type { LanguageModel } from "ai"
 import * as auth from "./auth"
 import { clampEffort, lookup } from "./catalog"
-import { splitModel, VERSION, type Effort, type Settings } from "./config"
+import { info, splitModel, VERSION, type Effort, type Settings } from "./config"
 
 const UA = `oah/${VERSION} (${process.platform}; ${process.arch})`
 
@@ -34,19 +41,38 @@ const chatgptFetch: typeof fetch = Object.assign(
   { preconnect: fetch.preconnect },
 )
 
+/** providerOptions key for an OpenAI-compatible provider (camelCase: zai-coding → zaiCoding). */
+const optionsKey = (p: string) => p.replace(/-(\w)/g, (_, c: string) => c.toUpperCase())
+
 export async function languageModel(full: string, settings: Settings): Promise<LanguageModel> {
   const { provider, slug } = splitModel(full)
-  if (provider === "anthropic") {
-    const apiKey = await auth.credential("anthropic")
-    const base = settings.anthropicBaseURL ?? process.env.ANTHROPIC_BASE_URL
-    return createAnthropic({ apiKey, baseURL: base ? `${base.replace(/\/$/, "")}/v1` : undefined, headers: { "User-Agent": UA } })(slug)
-  }
-  const baseURL = settings.openaiBaseURL ?? process.env.OPENAI_BASE_URL
+  const headers = { "User-Agent": UA }
   if (provider === "chatgpt") {
-    return createOpenAI({ apiKey: "chatgpt-plan", baseURL, fetch: chatgptFetch }).responses(slug)
+    return createOpenAI({ apiKey: "chatgpt-plan", baseURL: settings.openaiBaseURL ?? process.env.OPENAI_BASE_URL, fetch: chatgptFetch }).responses(slug)
   }
-  const apiKey = await auth.credential("openai")
-  return createOpenAI({ apiKey, baseURL, headers: { "User-Agent": UA } }).responses(slug)
+  const apiKey = await auth.credential(provider)
+  const def = info(provider)
+  // OAH_<PROVIDER>_BASE_URL points any provider at a proxy or gateway.
+  const override = process.env[`OAH_${provider.toUpperCase().replace(/-/g, "_")}_BASE_URL`]
+  const baseURL = override ?? def.baseURL
+  switch (def.sdk) {
+    case "openai":
+      return createOpenAI({ apiKey, baseURL: override ?? settings.openaiBaseURL ?? process.env.OPENAI_BASE_URL, headers }).responses(slug)
+    case "anthropic": {
+      const base = provider === "anthropic" ? (settings.anthropicBaseURL ?? process.env.ANTHROPIC_BASE_URL) : undefined
+      return createAnthropic({ apiKey, baseURL: base ? `${base.replace(/\/$/, "")}/v1` : baseURL, headers })(slug)
+    }
+    case "google":
+      return createGoogleGenerativeAI({ apiKey, baseURL, headers })(slug)
+    case "xai":
+      return createXai({ apiKey, baseURL, headers })(slug)
+    case "deepseek":
+      return createDeepSeek({ apiKey, baseURL, headers })(slug)
+    case "openrouter":
+      return createOpenRouter({ apiKey, baseURL, headers: { ...headers, "HTTP-Referer": "https://oah.sh", "X-Title": "oah" } })(slug)
+    case "compat":
+      return createOpenAICompatible({ name: optionsKey(provider), apiKey, baseURL: baseURL!, headers, includeUsage: true })(slug)
+  }
 }
 
 /** Models that accept Anthropic's server-side refusal fallbacks. */
@@ -65,6 +91,7 @@ function adaptiveThinking(slug: string): boolean {
 export function providerOptions(full: string, effort: Effort): Record<string, any> {
   const { provider, slug } = splitModel(full)
   const e = clampEffort(full, effort)
+  const sdk = info(provider).sdk
   if (provider === "anthropic") {
     const o: Record<string, any> = { cacheControl: { type: "ephemeral" } }
     if (adaptiveThinking(slug)) {
@@ -74,6 +101,12 @@ export function providerOptions(full: string, effort: Effort): Record<string, an
     if (FALLBACK_MODELS.has(slug)) o.fallbacks = "default"
     return { anthropic: o }
   }
+  if (sdk === "anthropic") return { anthropic: e ? { effort: e } : {} } // MiniMax
+  if (sdk === "google") return { google: { thinkingConfig: { includeThoughts: true, ...(e ? { thinkingLevel: e === "xhigh" || e === "max" ? "high" : e } : {}) } } }
+  if (sdk === "xai") return e ? { xai: { reasoningEffort: e === "minimal" ? "low" : e === "max" ? "xhigh" : e } } : {}
+  if (sdk === "deepseek") return e ? { deepseek: { reasoningEffort: e } } : {}
+  if (sdk === "openrouter") return e ? { openrouter: { reasoning: { effort: e === "max" ? "xhigh" : e } } } : {}
+  if (sdk === "compat") return e ? { [optionsKey(provider)]: { reasoningEffort: e } } : {}
   const o: Record<string, any> = { store: false, parallelToolCalls: true }
   const reasoning = lookup(full)?.reasoning ?? /^(gpt-5|gpt-6|o\d)/.test(slug)
   if (reasoning) {
@@ -82,6 +115,16 @@ export function providerOptions(full: string, effort: Effort): Record<string, an
     o.include = ["reasoning.encrypted_content"]
   }
   return { openai: o }
+}
+
+/**
+ * Output cap for providers whose SDK can't know the model's limit (MiniMax via the
+ * Anthropic SDK would otherwise default to 4096 tokens). Undefined = SDK default.
+ */
+export function maxOutputTokens(full: string): number | undefined {
+  const { provider } = splitModel(full)
+  if (provider === "anthropic" || info(provider).sdk !== "anthropic") return undefined
+  return Math.min(lookup(full)?.limit?.output ?? 32_000, 64_000)
 }
 
 export { adaptiveThinking }

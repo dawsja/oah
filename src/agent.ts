@@ -3,10 +3,10 @@
 // `execute`, so the model only sees the result ("denied" included).
 import { APICallError, generateText, jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type ToolSet } from "ai"
 import { USAGE_URL } from "./auth"
-import { shortPath, splitModel, type Effort, type Mode, type Permission, type Settings } from "./config"
+import { info, shortPath, splitModel, type Effort, type Mode, type Permission, type Settings } from "./config"
 import type { Mcp } from "./mcp"
 import { projectRoot } from "./memory"
-import { languageModel, providerOptions } from "./providers"
+import { languageModel, maxOutputTokens, providerOptions } from "./providers"
 import { oneLine, permissionPreview, risk, title, TOOLS, type Outcome, type Risk, type Todo, type ToolCtx } from "./tools"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
@@ -129,7 +129,8 @@ export function buildTools(o: TurnOptions): ToolSet {
 
   const tools: ToolSet = {}
   const hasSkills = o.ctx.skills.list.length > 0
-  const openai = splitModel(o.model).provider !== "anthropic"
+  const { provider, slug } = splitModel(o.model)
+  const openai = info(provider).sdk === "openai" || /^openai\/gpt/.test(slug) // apply_patch is trained into GPT models
   for (const def of TOOLS) {
     if (o.only && !o.only.has(def.name)) continue
     if (def.buildOnly && o.mode !== "build") continue
@@ -271,6 +272,7 @@ Date: ${new Date().toISOString().slice(0, 10)}`,
     tools: buildTools(sub),
     stopWhen: stepCountIs(60),
     providerOptions: providerOptions(parent.model, parent.effort),
+    maxOutputTokens: maxOutputTokens(parent.model),
     abortSignal: parent.signal,
     maxRetries: 3,
   })
@@ -339,6 +341,7 @@ export async function runTurn(o: TurnOptions): Promise<TurnResult> {
       tools: buildTools(o),
       stopWhen: stepCountIs(500),
       providerOptions: providerOptions(o.model, o.effort),
+      maxOutputTokens: maxOutputTokens(o.model),
       abortSignal: o.signal,
       maxRetries: 3,
       onStepFinish(step: any) {
@@ -394,6 +397,7 @@ export async function compact(o: { model: string; effort: Effort; settings: Sett
     system: o.instructions,
     messages: [...o.messages, { role: "user", content: ask }],
     providerOptions: providerOptions(o.model, "low"),
+    maxOutputTokens: maxOutputTokens(o.model),
     abortSignal: o.signal,
     maxRetries: 3,
   })

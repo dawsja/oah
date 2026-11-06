@@ -2,7 +2,7 @@
 // levels, costs and capabilities. Cached in ~/.config/oah/models.json for a day;
 // a small built-in table keeps oah working offline.
 import { statSync } from "node:fs"
-import { defaultModel, paths, providerInfo, readJson, splitModel, writeFileAtomic, type Effort, type Provider } from "./config"
+import { info, paths, PROVIDERS, readJson, splitModel, writeFileAtomic, type Effort, type Provider } from "./config"
 
 const URL = "https://models.dev/api.json"
 const TTL_MS = 24 * 60 * 60 * 1000
@@ -44,7 +44,12 @@ const FALLBACK: Catalog = {
   },
 }
 
-let catalog: Catalog = readJson<Catalog>(paths.modelsCache, FALLBACK)
+let catalog: Catalog = { ...FALLBACK, ...readJson<Catalog>(paths.modelsCache, {}) }
+
+/** Re-read the cached catalog (after the config dir changes; used by tests). */
+export function reloadCatalog() {
+  catalog = { ...FALLBACK, ...readJson<Catalog>(paths.modelsCache, {}) }
+}
 
 function cacheAge(): number {
   try {
@@ -56,13 +61,14 @@ function cacheAge(): number {
 
 /** Refresh from models.dev when the cache is stale. Never throws. */
 export async function refreshCatalog(force = false): Promise<boolean> {
-  if (!force && cacheAge() < TTL_MS) return false
+  const missing = PROVIDERS.some((p) => !catalog[info(p).catalog])
+  if (!force && !missing && cacheAge() < TTL_MS) return false
   try {
     const r = await fetch(process.env.OAH_MODELS_URL ?? URL, { signal: AbortSignal.timeout(10_000) })
     if (!r.ok) return false
     const all = (await r.json()) as Catalog
     const slim: Catalog = {}
-    for (const id of ["openai", "anthropic"]) if (all[id]) slim[id] = all[id]!
+    for (const id of new Set(PROVIDERS.map((p) => info(p).catalog))) if (all[id]) slim[id] = all[id]!
     catalog = slim
     writeFileAtomic(paths.modelsCache, JSON.stringify(slim))
     return true
@@ -73,13 +79,14 @@ export async function refreshCatalog(force = false): Promise<boolean> {
 
 export function lookup(full: string): CatalogModel | undefined {
   const { provider, slug } = splitModel(full)
-  return catalog[providerInfo[provider].catalog]?.models[slug]
+  return catalog[info(provider).catalog]?.models[slug]
 }
 
 export function contextWindow(full: string, override?: number): number {
   if (override) return override
   const m = lookup(full)
-  return m?.limit?.input ?? m?.limit?.context ?? (splitModel(full).provider === "anthropic" ? 1_000_000 : 400_000)
+  const p = splitModel(full).provider
+  return m?.limit?.input ?? m?.limit?.context ?? (p === "anthropic" ? 1_000_000 : info(p).sdk === "openai" ? 400_000 : 128_000)
 }
 
 /** Effort levels the model accepts, mapped onto oah's scale. */
@@ -90,7 +97,10 @@ export function effortsFor(full: string): Effort[] {
   const out = (values ?? []).map(map).filter((e): e is Effort => e !== null)
   if (out.length) return out
   if (m && m.reasoning === false) return []
-  return splitModel(full).provider === "anthropic" ? ["low", "medium", "high", "xhigh", "max"] : ["minimal", "low", "medium", "high", "xhigh"]
+  const p = splitModel(full).provider
+  if (p === "anthropic") return ["low", "medium", "high", "xhigh", "max"]
+  if (info(p).sdk === "openai") return ["minimal", "low", "medium", "high", "xhigh"]
+  return []
 }
 
 /** Clamp an effort to what the model accepts (nearest level). */
@@ -112,19 +122,31 @@ export interface ModelChoice {
   release: string
 }
 
+function usable(p: Provider, m: CatalogModel): boolean {
+  if (!m.tool_call || (m.type && m.type !== "chat") || m.status === "deprecated") return false
+  if (/realtime|audio|tts|transcribe|image|imagine|video|embedding|lyria|-vision|deep-research|computer-use|customtools/i.test(m.id)) return false
+  if (info(p).sdk === "openai" && /search|-pro$|codex-mini|^gpt-4|^o\d|chat-latest|\d{8}$/.test(m.id)) return false
+  return true
+}
+
 /** Chat models with tool calling for the given providers, newest first. */
 export function modelsFor(providers: Provider[]): ModelChoice[] {
   const out: ModelChoice[] = []
   for (const p of providers) {
-    const models = catalog[providerInfo[p].catalog]?.models ?? {}
-    for (const m of Object.values(models)) {
-      if (!m.tool_call || (m.type && m.type !== "chat")) continue
-      if (m.status === "deprecated") continue
-      if (/realtime|audio|tts|transcribe|image|embedding|search|-pro$|codex-mini|^gpt-4|^o\d|chat-latest|\d{8}$/.test(m.id)) continue
-      out.push({ full: `${p}/${m.id}`, provider: p, slug: m.id, name: m.name, context: m.limit?.input ?? m.limit?.context ?? 0, release: m.release_date ?? "" })
-    }
+    const models = Object.values(catalog[info(p).catalog]?.models ?? {})
+      .filter((m) => usable(p, m))
+      .sort((a, b) => (b.release_date ?? "").localeCompare(a.release_date ?? ""))
+    for (const m of models) out.push({ full: `${p}/${m.id}`, provider: p, slug: m.id, name: m.name, context: m.limit?.input ?? m.limit?.context ?? 0, release: m.release_date ?? "" })
   }
-  return out.sort((a, b) => (a.provider === b.provider ? b.release.localeCompare(a.release) : 0))
+  return out
+}
+
+/** The provider's preferred model, or its newest one if that's gone from the catalog. */
+export function defaultFor(p: Provider): string {
+  const preferred = info(p).defaultModel
+  const models = catalog[info(p).catalog]?.models
+  if (!models || models[preferred]) return `${p}/${preferred}`
+  return modelsFor([p])[0]?.full ?? `${p}/${preferred}`
 }
 
 export function displayName(full: string): string {
@@ -133,6 +155,5 @@ export function displayName(full: string): string {
 
 export function pickDefault(available: Provider[], current: string): string {
   if (current && available.includes(splitModel(current).provider)) return current
-  const p = available[0] ?? "chatgpt"
-  return `${p}/${defaultModel[p]}`
+  return defaultFor(available[0] ?? "chatgpt")
 }

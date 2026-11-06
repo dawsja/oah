@@ -5,12 +5,12 @@ export interface Command {
 }
 
 export const COMMANDS: Command[] = [
-  { name: "model", args: "[provider/model]", desc: "Choose the model (ChatGPT plan, OpenAI, Anthropic)" },
+  { name: "model", args: "[provider/model]", desc: "Choose the model from any provider you've connected" },
   { name: "effort", args: "[minimal…max]", desc: "Set reasoning effort" },
   { name: "permissions", args: "[auto|ask|allow]", desc: "Permission level (also shift+tab)" },
   { name: "plan", args: "", desc: "Plan mode: read-only research, produce a plan (also tab)" },
   { name: "build", args: "", desc: "Build mode: edit files, run commands (also tab)" },
-  { name: "auth", args: "", desc: "Sign in with ChatGPT, or add OpenAI / Anthropic keys" },
+  { name: "auth", args: "[provider]", desc: "Sign in with ChatGPT, or add a provider key (Anthropic, Gemini, Grok…)" },
   { name: "goal", args: "<objective>|clear", desc: "Keep working autonomously until the goal is done" },
   { name: "compact", args: "[focus]", desc: "Summarize the conversation to free context" },
   { name: "clear", args: "", desc: "Start a fresh conversation" },
@@ -65,7 +65,7 @@ export const HELP = `## Keys
 
 ## Commands
 - **/model**, **/effort**, **/permissions**, **/plan**, **/build**
-- **/auth** — continue with ChatGPT (uses your plan), or add an OpenAI / Anthropic API key
+- **/auth** [provider] — continue with ChatGPT (uses your plan), or add a key: Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter, Synthetic, Kimi, Z.ai, MiniMax
 - **/goal** <objective> — keep going until done (**/goal clear** stops)
 - **/compact** [focus] — summarize history; auto-compaction runs near the context limit
 - **/clear** new conversation · **/session** resume one · **/memory** · **/init**

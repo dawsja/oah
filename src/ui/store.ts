@@ -2,10 +2,11 @@
 import type { ModelMessage } from "ai"
 import { compact, runTurn, systemPrompt, userMessage, type Question, type Reply } from "../agent"
 import * as auth from "../auth"
-import { clampEffort, contextWindow, displayName, effortsFor, modelsFor, pickDefault, refreshCatalog } from "../catalog"
+import { clampEffort, contextWindow, defaultFor, displayName, effortsFor, modelsFor, pickDefault, refreshCatalog } from "../catalog"
 import { HELP, matchCommands, resolveCommand, type Command } from "../commands"
 import {
   effortInfo,
+  KEY_PROVIDERS,
   nextPermission,
   PERMISSIONS,
   permissionInfo,
@@ -16,6 +17,7 @@ import {
   type Effort,
   type Mode,
   type Permission,
+  type Provider,
   type Settings,
 } from "../config"
 import type { Mcp } from "../mcp"
@@ -76,7 +78,8 @@ export class Store {
   histIdx: number | null = null
   draft = ""
   input = ""
-  inputMode: "prompt" | "openai-key" | "anthropic-key" = "prompt"
+  /** "prompt", or "key:<provider>" while an API key is being pasted. */
+  inputMode: "prompt" | `key:${Provider}` = "prompt"
   /** Set by the UI: replaces the composer's text immediately. */
   applyInput: ((text: string) => void) | null = null
 
@@ -269,15 +272,15 @@ export class Store {
       return this.answerQuestion(typed || this.questionChoice())
     }
     if (this.inputMode !== "prompt") {
-      const which = this.inputMode === "openai-key" ? "openai" : "anthropic"
+      const which = this.inputMode.slice(4) as Provider
       this.inputMode = "prompt"
       this.setInput("")
       if (!text.trim()) return
       auth.setKey(which, text)
       this.authStatus = auth.status()
-      if (!auth.has(this.authStatus, this.provider)) this.settings.model = pickDefault([which], "")
+      if (this.provider !== which) this.settings.model = defaultFor(which)
       this.persistSettings()
-      this.info(`Saved your ${providerInfo[which].label} API key. Model: **${displayName(this.settings.model)}**`)
+      this.info(`Saved your ${providerInfo[which].label} key. Model: **${displayName(this.settings.model)}** — /model to change`)
       return
     }
     text = text.replace(/\s+$/, "")
@@ -606,6 +609,11 @@ export class Store {
       case "auth":
         if (args === "logout") return this.authAction("logout-chatgpt")
         if (args === "login" || args === "chatgpt") return this.authAction("chatgpt")
+        if (args) {
+          const a = args.toLowerCase().replace(/[\s.]/g, "")
+          const p = KEY_PROVIDERS.find((x) => x === a || providerInfo[x].label.toLowerCase().replace(/[\s.]/g, "") === a || (a === "gemini" && x === "google") || (a === "grok" && x === "xai"))
+          if (p) return this.authAction(`key:${p}`)
+        }
         return this.openAuthPicker()
       case "goal":
         return this.goalCommand(args)
@@ -759,7 +767,7 @@ export class Store {
       detail: `${m.context ? `${Math.round(m.context / 1000)}k ctx · ` : ""}${m.slug}`,
       value: m.full,
       current: m.full === this.settings.model,
-      group: m.provider === "chatgpt" ? "ChatGPT plan" : m.provider === "openai" ? "OpenAI API" : "Anthropic API",
+      group: auth.label(this.authStatus, m.provider),
     }))
     if (!items.some((i) => i.current)) items.unshift({ label: displayName(this.settings.model), detail: this.settings.model, value: this.settings.model, current: true, group: "current" })
     this.openPicker("model", avail.length ? "Model" : "Model · no credentials yet (/auth)", items)
@@ -777,18 +785,33 @@ export class Store {
   openAuthPicker() {
     const s = (this.authStatus = auth.status())
     const items: PickItem[] = [
-      { label: "Continue with ChatGPT", detail: s.chatgpt ? `signed in${s.chatgpt.email ? ` as ${s.chatgpt.email}` : ""} · uses your plan` : "use your ChatGPT plan (Plus, Pro, Business…)", value: "chatgpt", current: !!s.chatgpt?.planUsage },
-      { label: "Anthropic API key", detail: s.anthropic ? `set (${s.anthropic}) · enter to replace` : "Claude models, billed to your Anthropic account", value: "anthropic-key", current: !!s.anthropic },
-      { label: "OpenAI API key", detail: s.openai ? `set (${s.openai}) · enter to replace` : "GPT models, billed to your OpenAI account", value: "openai-key", current: !!s.openai },
+      { label: "Continue with ChatGPT", detail: s.chatgpt ? `signed in${s.chatgpt.email ? ` as ${s.chatgpt.email}` : ""} · uses your plan` : "use your ChatGPT plan (Plus, Pro, Business…)", value: "chatgpt", current: !!s.chatgpt?.planUsage, group: "Sign in" },
+      ...KEY_PROVIDERS.map((p) => ({
+        label: `${providerInfo[p].label} ${providerInfo[p].billing.includes("plan") ? "plan key" : "API key"}`,
+        detail: s.keys[p] ? `set (${s.keys[p]}) · enter to replace` : providerInfo[p].blurb,
+        value: `key:${p}`,
+        current: !!s.keys[p],
+        group: "API keys",
+      })),
     ]
-    if (s.chatgpt) items.push({ label: "Sign out of ChatGPT", detail: "revoke and remove the saved session", value: "logout-chatgpt" })
-    if (s.anthropic === "saved key") items.push({ label: "Remove Anthropic key", detail: "delete the saved key", value: "remove-anthropic" })
-    if (s.openai === "saved key") items.push({ label: "Remove OpenAI key", detail: "delete the saved key", value: "remove-openai" })
+    if (s.chatgpt) items.push({ label: "Sign out of ChatGPT", detail: "revoke and remove the saved session", value: "logout-chatgpt", group: "Remove" })
+    for (const p of KEY_PROVIDERS) if (s.keys[p] === "saved key") items.push({ label: `Remove ${providerInfo[p].label} key`, detail: "delete the saved key", value: `remove:${p}`, group: "Remove" })
     this.openPicker("auth", "Accounts", items)
     if (this.picker) this.picker.selected = 0
   }
 
   authAction(action: string) {
+    if (action.startsWith("key:")) {
+      const p = action.slice(4) as Provider
+      this.inputMode = `key:${p}`
+      this.setInput("")
+      return this.notify(`Paste your ${providerInfo[p].label} key and press enter (esc cancels)`)
+    }
+    if (action.startsWith("remove:")) {
+      auth.setKey(action.slice(7) as Provider, undefined)
+      this.authStatus = auth.status()
+      return this.notify("Key removed")
+    }
     switch (action) {
       case "chatgpt":
         if (this.busy) return this.notify("Busy — finish or interrupt the current turn first", true)
@@ -821,16 +844,6 @@ export class Store {
             this.emit(true)
           })
         return
-      case "openai-key":
-      case "anthropic-key":
-        this.inputMode = action
-        this.setInput("")
-        return this.notify(`Paste your ${action === "openai-key" ? "OpenAI" : "Anthropic"} API key and press enter (esc cancels)`)
-      case "remove-openai":
-      case "remove-anthropic":
-        auth.setKey(action === "remove-openai" ? "openai" : "anthropic", undefined)
-        this.authStatus = auth.status()
-        return this.notify("Key removed")
       case "logout-chatgpt":
         auth.logoutChatGpt().then((note) => {
           this.authStatus = auth.status()

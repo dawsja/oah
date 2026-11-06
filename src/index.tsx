@@ -4,7 +4,7 @@ import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import * as auth from "./auth"
 import { refreshCatalog } from "./catalog"
-import { ensureDir, homeDir, loadSettings, PROVIDERS, shortPath, VERSION, type Effort, type Permission } from "./config"
+import { ensureDir, homeDir, joinModel, loadSettings, shortPath, splitModel, VERSION, type Effort, type Permission } from "./config"
 import { Mcp } from "./mcp"
 import { Memory } from "./memory"
 import { latestSession, listSessions, loadSession, relativeTime, saveSession } from "./session"
@@ -24,7 +24,7 @@ Usage:
 Options:
   -r, --resume [id]       Resume a session (default: most recent here)
   -c, --continue          Continue the most recent session here
-  -m, --model <p/model>   e.g. chatgpt/gpt-5.6, anthropic/claude-opus-5-5, openai/gpt-5.6
+  -m, --model <p/model>   e.g. chatgpt/gpt-5.6, anthropic/claude-opus-5-5, google/gemini-4-argon
   -e, --effort <level>    minimal | low | medium | high | xhigh | max
   -p, --permission <lvl>  auto | ask | allow
       --plan              Start in plan mode
@@ -174,6 +174,11 @@ async function main() {
   }
   const cwd = process.cwd()
 
+  // Anything written to stderr lands on top of the full-screen UI: silence the AI
+  // SDK's warning logger and Node-style process warnings while the TUI runs.
+  ;(globalThis as any).AI_SDK_LOG_WARNINGS = false
+  process.emitWarning = () => {}
+
   const renderer = await createCliRenderer({ exitOnCtrlC: false, useMouse: true, targetFps: 60, useConsole: false } as any)
   const copy = (text: string) => {
     const osc = renderer.copyToClipboardOSC52(text)
@@ -182,7 +187,10 @@ async function main() {
   let store: Store
   const mcp = new Mcp(cwd, () => store?.emit())
   store = new Store(settings, session, cwd, new Skills(cwd), new Memory(cwd), mcp, copy)
-  if (args.model) store.settings.model = args.model.includes("/") ? args.model : `${PROVIDERS.find((p) => args.model!.startsWith("claude") === (p === "anthropic")) ?? "chatgpt"}/${args.model}`
+  if (args.model) {
+    const { provider, slug } = splitModel(args.model)
+    store.settings.model = joinModel(provider, slug)
+  }
   if (session) store.info(`Resumed session ${session.id}`)
   mcp.start()
 

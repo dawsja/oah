@@ -247,7 +247,7 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
           border
           borderStyle="rounded"
           borderColor={masked ? t.yellow : modeColor}
-          title={masked ? (store.inputMode === "openai-key" ? " OpenAI API key " : " Anthropic API key ") : undefined}
+          title={masked ? ` ${providerInfo[store.inputMode.slice(4) as keyof typeof providerInfo]?.label ?? ""} key ` : undefined}
           flexDirection="column"
           paddingLeft={1}
           paddingRight={1}
@@ -325,14 +325,14 @@ function Welcome({ store }: { store: Store }) {
   const signedIn = auth.available(store.authStatus).length > 0
   const tips: [string, string][] = signedIn
     ? [
-        ["/model", "pick a model (ChatGPT plan · OpenAI · Anthropic)"],
+        ["/model", "pick a model"],
         ["tab", "plan ↔ build"],
         ["shift+tab", "auto → always ask → always allow"],
         ["/goal", "work until it's done"],
         ["/help", "keys & commands"],
       ]
     : [
-        ["/auth", "continue with ChatGPT, or add an Anthropic / OpenAI key"],
+        ["/auth", "continue with ChatGPT, or add a key (Anthropic, OpenAI, Gemini, Grok, DeepSeek, OpenRouter, Kimi, Z.ai, MiniMax…)"],
         ["/help", "keys & commands"],
       ]
   return (

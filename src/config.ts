@@ -53,20 +53,47 @@ export function shortPath(p: string): string {
 
 // ---------------------------------------------------------------------------
 
-export type Provider = "chatgpt" | "openai" | "anthropic"
-export const PROVIDERS: Provider[] = ["chatgpt", "anthropic", "openai"]
+/** Which AI SDK provider package talks to a provider. */
+export type Sdk = "openai" | "anthropic" | "google" | "xai" | "deepseek" | "openrouter" | "compat"
 
-export const providerInfo: Record<Provider, { label: string; catalog: string; billing: string }> = {
-  chatgpt: { label: "ChatGPT", catalog: "openai", billing: "your ChatGPT plan" },
-  openai: { label: "OpenAI", catalog: "openai", billing: "OpenAI API key" },
-  anthropic: { label: "Anthropic", catalog: "anthropic", billing: "Anthropic API key" },
+export interface ProviderDef {
+  label: string
+  /** Provider id in the models.dev catalog. */
+  catalog: string
+  /** What usage is billed to, for messages. */
+  billing: string
+  sdk: Sdk
+  /** Environment variables checked for an API key, in order. */
+  env: string[]
+  baseURL?: string
+  /** Preferred default model; the newest catalog model is used if it's gone. */
+  defaultModel: string
+  /** Shown in /auth next to the key option. */
+  blurb: string
 }
 
-export const defaultModel: Record<Provider, string> = {
-  chatgpt: "gpt-5.6",
-  openai: "gpt-5.6",
-  anthropic: "claude-opus-5-5",
-}
+export const providerInfo = {
+  chatgpt: { label: "ChatGPT", catalog: "openai", billing: "your ChatGPT plan", sdk: "openai", env: [], defaultModel: "gpt-5.6", blurb: "use your ChatGPT plan" },
+  anthropic: { label: "Anthropic", catalog: "anthropic", billing: "an Anthropic API key", sdk: "anthropic", env: ["ANTHROPIC_API_KEY"], defaultModel: "claude-opus-5-5", blurb: "Claude models" },
+  openai: { label: "OpenAI", catalog: "openai", billing: "an OpenAI API key", sdk: "openai", env: ["OPENAI_API_KEY"], defaultModel: "gpt-5.6", blurb: "GPT models" },
+  google: { label: "Gemini", catalog: "google", billing: "a Gemini API key", sdk: "google", env: ["GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GOOGLE_API_KEY"], defaultModel: "gemini-4-argon", blurb: "Google Gemini models" },
+  xai: { label: "xAI", catalog: "xai", billing: "an xAI API key", sdk: "xai", env: ["XAI_API_KEY"], defaultModel: "grok-4.7", blurb: "Grok models" },
+  deepseek: { label: "DeepSeek", catalog: "deepseek", billing: "a DeepSeek API key", sdk: "deepseek", env: ["DEEPSEEK_API_KEY"], defaultModel: "deepseek-v4-pro", blurb: "DeepSeek models" },
+  openrouter: { label: "OpenRouter", catalog: "openrouter", billing: "an OpenRouter API key", sdk: "openrouter", env: ["OPENROUTER_API_KEY"], defaultModel: "anthropic/claude-opus-5.5", blurb: "hundreds of models with one key" },
+  synthetic: { label: "Synthetic", catalog: "synthetic", billing: "a Synthetic API key", sdk: "compat", env: ["SYNTHETIC_API_KEY"], baseURL: "https://api.synthetic.new/openai/v1", defaultModel: "hf:moonshotai/Kimi-K3", blurb: "open models (GLM, Kimi, DeepSeek…)" },
+  kimi: { label: "Kimi", catalog: "moonshotai", billing: "a Moonshot API key", sdk: "compat", env: ["MOONSHOT_API_KEY"], baseURL: "https://api.moonshot.ai/v1", defaultModel: "kimi-k3.1-pro", blurb: "Kimi models via the Moonshot API" },
+  "kimi-code": { label: "Kimi Code", catalog: "kimi-code-plan-global", billing: "your Kimi Code plan", sdk: "compat", env: ["KIMI_API_KEY"], baseURL: "https://api.kimi.ai/coding/v1", defaultModel: "kimi-for-coding", blurb: "Kimi Code plan" },
+  zai: { label: "Z.ai", catalog: "zai", billing: "a Z.ai API key", sdk: "compat", env: ["ZHIPU_API_KEY", "ZAI_API_KEY"], baseURL: "https://api.z.ai/api/paas/v4", defaultModel: "glm-5.3", blurb: "GLM models via the Z.ai API" },
+  "zai-coding": { label: "Z.ai Coding", catalog: "zai-coding-plan", billing: "your GLM Coding plan", sdk: "compat", env: ["ZHIPU_API_KEY", "ZAI_API_KEY"], baseURL: "https://api.z.ai/api/coding/paas/v4", defaultModel: "glm-5.3", blurb: "GLM Coding plan" },
+  minimax: { label: "MiniMax", catalog: "minimax", billing: "a MiniMax API key", sdk: "anthropic", env: ["MINIMAX_API_KEY"], baseURL: "https://api.minimax.io/anthropic/v1", defaultModel: "MiniMax-M3", blurb: "MiniMax models via the MiniMax API" },
+  "minimax-coding": { label: "MiniMax Coding", catalog: "minimax-coding-plan", billing: "your MiniMax Coding plan", sdk: "anthropic", env: ["MINIMAX_API_KEY"], baseURL: "https://api.minimax.io/anthropic/v1", defaultModel: "MiniMax-M3", blurb: "MiniMax Coding plan" },
+} satisfies Record<string, ProviderDef>
+
+export type Provider = keyof typeof providerInfo
+export const PROVIDERS = Object.keys(providerInfo) as Provider[]
+/** Providers that use an API key (everything but the ChatGPT sign-in). */
+export const KEY_PROVIDERS = PROVIDERS.filter((p) => p !== "chatgpt") as Exclude<Provider, "chatgpt">[]
+export const info = (p: Provider): ProviderDef => providerInfo[p]
 
 /** `provider/slug`; a bare slug is inferred (`claude*` → anthropic, else chatgpt). */
 export function splitModel(full: string): { provider: Provider; slug: string } {
@@ -75,7 +102,19 @@ export function splitModel(full: string): { provider: Provider; slug: string } {
     const p = full.slice(0, i) as Provider
     if (PROVIDERS.includes(p)) return { provider: p, slug: full.slice(i + 1) }
   }
-  return { provider: full.startsWith("claude") ? "anthropic" : "chatgpt", slug: full }
+  return { provider: inferProvider(full), slug: full }
+}
+
+/** Best guess at a provider for a bare model slug. */
+export function inferProvider(slug: string): Provider {
+  if (slug.startsWith("claude")) return "anthropic"
+  if (slug.startsWith("gemini")) return "google"
+  if (slug.startsWith("grok")) return "xai"
+  if (slug.startsWith("deepseek")) return "deepseek"
+  if (slug.startsWith("kimi")) return "kimi"
+  if (slug.startsWith("glm")) return "zai"
+  if (/^minimax/i.test(slug)) return "minimax"
+  return "chatgpt"
 }
 
 export const joinModel = (p: Provider, slug: string) => `${p}/${slug}`

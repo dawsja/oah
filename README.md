@@ -4,7 +4,8 @@ A full-screen AI coding agent for your terminal. Built with
 [OpenTUI](https://github.com/anomalyco/opentui) (Zig core, React bindings), the
 [AI SDK](https://ai-sdk.dev) and the [models.dev](https://models.dev) catalog — the same stack as opencode.
 
-Use your **ChatGPT plan** (Sign in with ChatGPT), an **Anthropic API key**, or an **OpenAI API key**.
+Use your **ChatGPT plan** (Sign in with ChatGPT), or a key for **Anthropic, OpenAI, Gemini, xAI, DeepSeek,
+OpenRouter, Synthetic, Kimi, Z.ai or MiniMax** (including the Kimi Code, GLM Coding and MiniMax Coding plans).
 
 ![oah](docs/screenshot.png)
 
@@ -45,11 +46,25 @@ the **permission** level on the left and the **context meter** on the right.
 
 ## Providers
 
-| Provider | Model ids | Auth |
+| Provider | Example model id | Key (`/auth`, or env) |
 | --- | --- | --- |
-| ChatGPT plan | `chatgpt/gpt-5.6`, … | `/auth` → Continue with ChatGPT (or `oah login`) |
-| Anthropic | `anthropic/claude-opus-5-5`, `anthropic/claude-sonnet-5-5`, … | `/auth` → Anthropic API key, or `ANTHROPIC_API_KEY` |
-| OpenAI | `openai/gpt-5.6`, … | `/auth` → OpenAI API key, or `OPENAI_API_KEY` |
+| ChatGPT plan | `chatgpt/gpt-5.6` | Continue with ChatGPT (or `oah login`) |
+| Anthropic | `anthropic/claude-opus-5-5` | `ANTHROPIC_API_KEY` |
+| OpenAI | `openai/gpt-5.6` | `OPENAI_API_KEY` |
+| Gemini | `google/gemini-4-argon` | `GEMINI_API_KEY` |
+| xAI | `xai/grok-4.7` | `XAI_API_KEY` |
+| DeepSeek | `deepseek/deepseek-v4-pro` | `DEEPSEEK_API_KEY` |
+| OpenRouter | `openrouter/anthropic/claude-opus-5.5` | `OPENROUTER_API_KEY` |
+| Synthetic | `synthetic/hf:moonshotai/Kimi-K3` | `SYNTHETIC_API_KEY` |
+| Kimi (Moonshot API) | `kimi/kimi-k3.1-pro` | `MOONSHOT_API_KEY` |
+| Kimi Code plan | `kimi-code/kimi-for-coding` | `KIMI_API_KEY` |
+| Z.ai | `zai/glm-5.3` | `ZHIPU_API_KEY` |
+| Z.ai GLM Coding plan | `zai-coding/glm-5.3` | `ZHIPU_API_KEY` |
+| MiniMax | `minimax/MiniMax-M3` | `MINIMAX_API_KEY` |
+| MiniMax Coding plan | `minimax-coding/MiniMax-M3` | `MINIMAX_API_KEY` |
+
+`/auth gemini` (or any provider name) jumps straight to pasting that key. `OAH_<PROVIDER>_BASE_URL`
+(e.g. `OAH_ZAI_CODING_BASE_URL`) points a provider at a proxy or gateway.
 
 `/model` lists tool-calling models from models.dev for the providers you have credentials for; effort levels
 come from each model's `reasoning_options`.
@@ -59,6 +74,9 @@ come from each model's `reasoning_options`.
   127.0.0.1 loopback, ID-token verification against OpenAI's JWKS, the `chatgpt.tokens.use.direct` scope
   check, automatic refresh, and revocation on sign-out. Requests go to `/v1/responses` with `store: false`,
   and replay encrypted reasoning.
+- **Gemini, xAI, DeepSeek, OpenRouter** use their AI SDK providers; **Synthetic, Kimi, Z.ai** the
+  OpenAI-compatible chat API; **MiniMax** its Anthropic-compatible API. Each gets reasoning effort in its own
+  format, limited to the levels models.dev lists for the model.
 - **Anthropic** uses adaptive thinking with summarized display, `effort` (low → max), server-side refusal
   fallbacks on models that support them, and prompt caching.
 
