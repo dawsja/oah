@@ -98,6 +98,8 @@ function StepsLine({ steps, tick, running }: { steps: Entry[]; tick: number; run
   const current = tools.findLast((x) => x.status === "running")
   const edits = tools.filter((x) => /^(Edit|Write|Patch)$/.test(verbOf(x.title)) && x.detail.length)
   const lastFail = failures.at(-1)
+  // Pure thinking in progress: the activity line under the transcript already says so.
+  if (running && !tools.length) return null
   return (
     <box flexDirection="column" marginTop={1}>
       <text>
@@ -147,8 +149,6 @@ function FocusTurn({ turn, style, tick, live, liveText }: { turn: Turn; style: S
       else blocks.push({ kind: "steps", items: [e], key: i })
     } else blocks.push({ kind: "entry", e, i })
   }
-  const tail = blocks.at(-1)
-  const showThinking = live && (!tail || (tail.kind === "entry" && liveText === null))
   return (
     <box flexDirection="column" marginTop={1}>
       {turn.user ? (
@@ -182,12 +182,6 @@ function FocusTurn({ turn, style, tick, live, liveText }: { turn: Turn; style: S
           </text>
         ) : null,
       )}
-      {showThinking ? (
-        <text marginTop={1}>
-          <span fg={t.accent}>{SPINNER[tick % SPINNER.length]} </span>
-          <Shimmer text="thinking" tick={tick} base={t.dim} glow={t.accent} />
-        </text>
-      ) : null}
     </box>
   )
 }

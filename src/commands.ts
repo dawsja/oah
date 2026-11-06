@@ -18,7 +18,8 @@ export const COMMANDS: Command[] = [
   { name: "session", args: "[id]", desc: "Browse and resume saved sessions" },
   { name: "memory", args: "[add|global|remove <text>]", desc: "View or edit persistent memory" },
   { name: "skills", args: "", desc: "List available skills" },
-  { name: "mcp", args: "", desc: "Show MCP servers and tools" },
+  { name: "mcp", args: "[login|logout <server>|reload]", desc: "MCP servers: status, sign in (OAuth), tools" },
+  { name: "import", args: "[mcp|skills|sessions]", desc: "Import MCP servers, skills and sessions from Claude Code" },
   { name: "tools", args: "", desc: "List the tools oah can use" },
   { name: "init", args: "", desc: "Write an AGENTS.md for this project" },
   { name: "copy", args: "", desc: "Copy the last answer to the clipboard" },
@@ -60,10 +61,12 @@ export function matchCommands(prefix: string, skills: { name: string; descriptio
 }
 
 export const HELP = `## Keys
-- **enter** send · **shift+enter** / **alt+enter** / **ctrl+j** newline
+- **enter** send · **shift+enter** / **alt+enter** / **ctrl+j** / **\\ then enter** newline
 - **↑ / ↓** previous / next prompt (from the first / last line)
 - **ctrl+t** switch model (recent on top; ctrl+t → enter flips back) · **tab** plan ↔ build · **shift+tab** cycle permissions (auto → always ask → always allow)
-- **esc** interrupt the running turn · **ctrl+c** quit (prints how to resume)
+- **auto**: works on its own; a safety monitor reviews risky actions (outside the project, network, secrets, destructive) and blocks them or asks you
+- **esc** / **ctrl+c** interrupt the running turn · **ctrl+c** twice when idle quits (prints how to resume)
+- while working: **enter** queues a message · **ctrl+enter** (or enter on an empty input) sends it now, mid-turn
 - **pgup / pgdn**, mouse wheel — scroll · drag to select text (copied on release)
 - **ctrl+v** attach an image from the clipboard · drag in or paste an image file → **[Image #N]**
 - **#note** saves a note to project memory
@@ -75,4 +78,5 @@ export const HELP = `## Keys
 - **/undo** — pick a checkpoint and restore files to before that turn (one per turn that changed files)
 - **/compact** [focus] — summarize history; auto-compaction runs near the context limit
 - **/clear** new conversation · **/session** resume one · **/memory** · **/init**
-- **/skills**, **/mcp**, **/tools** · **/<skill>** runs a skill · **/copy** · **/exit**`
+- **/skills**, **/mcp** (sign in to servers), **/tools** · **/<skill>** runs a skill · **/import** from Claude Code · **/copy** · **/exit**
+- Ask oah to set itself up: "add the Linear MCP server", "install the shadcn skill"`

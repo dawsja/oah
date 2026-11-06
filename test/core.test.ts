@@ -39,7 +39,8 @@ describe("permissions", () => {
   test("matrix", () => {
     expect(needsPermission("auto", "read")).toBe(false)
     expect(needsPermission("auto", "safe-exec")).toBe(false)
-    expect(needsPermission("auto", "write")).toBe(true)
+    expect(needsPermission("auto", "write")).toBe(false) // inside the project: checkpointed, /undo
+    expect(needsPermission("auto", "write-outside")).toBe(true)
     expect(needsPermission("auto", "exec")).toBe(true)
     expect(needsPermission("ask", "read")).toBe(true)
     expect(needsPermission("ask", "internal")).toBe(false)

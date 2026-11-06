@@ -5,7 +5,7 @@
 // ~/.claude/skills.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, relative } from "node:path"
+import { basename, dirname, join, relative } from "node:path"
 import { paths } from "./config"
 
 export interface Skill {
@@ -39,7 +39,14 @@ export function parseFrontMatter(text: string): { meta: Record<string, string>; 
 export class Skills {
   list: Skill[] = []
 
-  constructor(cwd: string) {
+  constructor(private cwd: string) {
+    this.reload()
+  }
+
+  /** Re-scan the skill folders (after installing or removing one). */
+  reload() {
+    const cwd = this.cwd
+    this.list = []
     const roots: [string, Skill["scope"]][] = [
       [join(cwd, ".oah/skills"), "project"],
       [join(cwd, ".agents/skills"), "project"],
@@ -59,7 +66,7 @@ export class Skills {
         const file = join(dir, "SKILL.md")
         if (!existsSync(file)) continue
         const { meta, body } = parseFrontMatter(readFileSync(file, "utf8"))
-        const name = meta.name ?? dir.split("/").pop()!
+        const name = meta.name ?? basename(dir)
         if (this.list.some((s) => s.name === name)) continue
         const description = meta.description ?? body.split("\n").find((l) => l.trim() && !l.startsWith("#"))?.trim() ?? ""
         this.list.push({ name, description, path: file, scope })

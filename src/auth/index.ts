@@ -10,6 +10,7 @@
 //    granted scopes must include `chatgpt.tokens.use.direct`
 //  * hourly access tokens refresh automatically; sign-out revokes the refresh token
 import { randomBytes, createHash, randomUUID } from "node:crypto"
+import { openUrl } from "../platform"
 import { readFileSync } from "node:fs"
 import { isRunning, LOCAL_PROVIDERS } from "../local"
 import { info, KEY_PROVIDERS, PROVIDERS, paths, readJson, writeFileAtomic, type Provider } from "../config"
@@ -353,13 +354,5 @@ export async function logoutChatGpt(): Promise<string> {
 }
 
 export function openBrowser(url: string): boolean {
-  const cmds = process.platform === "darwin" ? [["open"]] : [["xdg-open"], ["wslview"], ["sensible-browser"]]
-  for (const [c] of cmds) {
-    try {
-      const p = Bun.spawn([c!, url], { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
-      p.unref()
-      return true
-    } catch {}
-  }
-  return false
+  return openUrl(url)
 }

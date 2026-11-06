@@ -1,5 +1,5 @@
 // Application state and behaviour. React components subscribe to `version`.
-import type { ModelMessage } from "ai"
+import { experimental_createSteering, type ModelMessage, type Experimental_Steering as Steering } from "ai"
 import { compact, runTurn, systemPrompt, userMessage, type Question, type Reply } from "../agent"
 import * as auth from "../auth"
 import { acceptsImages, clampEffort, contextWindow, defaultFor, displayName, effortsFor, modelsFor, pickDefault, refreshCatalog } from "../catalog"
@@ -22,18 +22,19 @@ import {
   type Provider,
   type Settings,
 } from "../config"
-import type { Mcp } from "../mcp"
+import type { Mcp, McpServer } from "../mcp"
+import { importFromClaude } from "../setup"
 import type { Memory } from "../memory"
 import { appendHistory, listSessions, loadHistory, loadSession, newId, newSession, relativeTime, saveSession, type Entry, type SessionData } from "../session"
 import type { Skills } from "../skills"
-import { oneLine, TOOLS, type Outcome } from "../tools"
+import { oneLine, TOOLS, type Outcome, type SetupApi } from "../tools"
 import { fmtTokens } from "./theme"
 import { Snapshots, type Checkpoint } from "../checkpoints"
 import { detectLocal, isRunning, LOCAL_PROVIDERS, localBaseURL, type LocalProvider } from "../local"
 import { clipboardImage, imageFromFile, pastedPaths, referenced, userContent, type PastedImage } from "../images"
 import { killAllShells, setShellListener } from "../tools/shells"
 
-export type PickerKind = "model" | "effort" | "permission" | "session" | "auth" | "undo"
+export type PickerKind = "model" | "effort" | "permission" | "session" | "auth" | "undo" | "skills" | "mcp"
 
 export interface PickItem {
   label: string
@@ -107,14 +108,25 @@ export class Store {
   paletteIdx = 0
   permission: PendingPermission | null = null
   question: PendingQuestion | null = null
+  /** Prompts from parallel tool calls wait here until the one on screen is answered. */
+  private waitingPermissions: PendingPermission[] = []
+  private waitingQuestions: PendingQuestion[] = []
+  /** The user's answers to the model's questions (context for the safety monitor). */
+  private answers: { q: string; a: string }[] = []
   queue: string[] = []
+  /** Messages sent mid-turn ("send now") that the model hasn't seen yet. */
+  steers: { id: string; text: string }[] = []
+  private steering: Steering | null = null
+  /** When ctrl+c was last pressed while idle (a second press soon after exits). */
+  private exitArmed = 0
   private after: After = { kind: "none" }
   private streamText: number | null = null
   private streamReasoning: number | null = null
   grants = new Set<string>()
   authStatus = auth.status()
   quit = false
-  private login: auth.PendingLogin | null = null
+  /** A browser sign-in in progress (ChatGPT or an MCP server): its link, and how to cancel it. */
+  private login: { url: string; cancel: () => void } | null = null
   /** Non-interactive runs (oah -p): answer permission prompts and questions without a UI. */
   headless: { ask(req: { title: string; kind: string }): Reply; question(q: Question): string } | null = null
 
@@ -354,7 +366,8 @@ export class Store {
 
   // ---- submit -----------------------------------------------------------------
 
-  submit(text: string) {
+  /** `now`: while a turn runs, send the message into it instead of queuing it. */
+  submit(text: string, now = false) {
     if (this.question) {
       const typed = text.trim()
       this.setInput("")
@@ -373,7 +386,11 @@ export class Store {
       return
     }
     text = text.replace(/\s+$/, "")
-    if (!text.trim()) return
+    if (!text.trim()) {
+      // Enter on an empty input sends waiting messages now (for terminals without ctrl+enter).
+      if (this.queue.length) this.sendQueuedNow()
+      return
+    }
     if (!text.startsWith("/") && referenced(text, this.images).length && !acceptsImages(this.settings.model))
       return this.notify(`${displayName(this.settings.model)} can't see images — switch models with ctrl+t, or remove the [Image] markers`, true)
     this.setInput("")
@@ -392,13 +409,14 @@ export class Store {
       }
       return
     }
-    this.sendUser(text)
+    this.sendUser(text, undefined, now)
   }
 
-  sendUser(text: string, display?: string) {
+  sendUser(text: string, display?: string, now = false) {
     if (this.busy) {
+      if (now && this.canSteer()) return this.steer(text)
       this.queue.push(text)
-      this.notify(`Queued · ${this.queue.length} waiting`)
+      this.notify(`Queued · ${this.queue.length} waiting · ctrl+enter to send now`)
       return
     }
     if (this.needsCompaction()) {
@@ -410,6 +428,103 @@ export class Store {
     this.session.messages.push({ role: "user", content: userContent(this.pendingNote ? `${this.pendingNote}\n\n${text}` : text, this.images) })
     this.pendingNote = ""
     this.startTurn()
+  }
+
+  /**
+   * Show an approval prompt. Parallel tool calls can ask at the same time: extra
+   * requests queue behind the one on screen instead of replacing it (a replaced
+   * prompt would leave its tool waiting forever).
+   */
+  requestPermission(req: { title: string; kind: string; preview: string[] }): Promise<Reply> {
+    return new Promise<Reply>((resolve) => {
+      const p = { ...req, resolve }
+      if (this.permission) {
+        this.waitingPermissions.push(p)
+        return this.emit()
+      }
+      this.activity = "Waiting for permission"
+      this.permission = p
+      this.emit(true)
+    })
+  }
+
+  /** Show a question from the model; queued like approval prompts. */
+  requestAnswer(q: Question): Promise<string> {
+    return new Promise<string>((resolve) => {
+      const pending = { ...q, selected: 0, checked: new Set<number>(), resolve }
+      if (this.question) {
+        this.waitingQuestions.push(pending)
+        return this.emit()
+      }
+      this.activity = "Waiting for your answer"
+      this.question = pending
+      this.emit(true)
+    })
+  }
+
+  /** Deny / dismiss every prompt on screen or queued (turn ended or interrupted). */
+  private dropPrompts() {
+    for (const p of [this.permission, ...this.waitingPermissions.splice(0)]) p?.resolve("deny")
+    this.permission = null
+    for (const q of [this.question, ...this.waitingQuestions.splice(0)]) q?.resolve("")
+    this.question = null
+  }
+
+  /** What the user has asked for, as the safety monitor sees it. */
+  private intentContext(): string {
+    const users = this.session.transcript.filter((e) => e.kind === "user").slice(-8)
+    let s = `The user's messages in this session (oldest first):\n${users.map((e) => `- ${e.kind === "user" ? oneLine(e.text, 800) : ""}`).join("\n") || "- (none)"}`
+    const answers = this.answers.slice(-6)
+    if (answers.length) s += `\n\nThe user's answers to the agent's questions:\n${answers.map((x) => `- Q: ${oneLine(x.q, 200)}\n  A: ${oneLine(x.a, 400)}`).join("\n")}`
+    return s
+  }
+
+  /** Activity line while a turn runs: the newest still-running tool, else thinking. */
+  private workingActivity(): string {
+    const running = this.session.transcript.filter((e) => e.kind === "tool" && e.status === "running")
+    const last = running.at(-1)
+    if (!last || last.kind !== "tool") return "Thinking"
+    return `Running ${oneLine(last.title, 60)}${running.length > 1 ? ` +${running.length - 1} more` : ""}`
+  }
+
+  /** Approval prompts / questions queued behind the one on screen. */
+  get waitingPrompts(): number {
+    return this.waitingPermissions.length + this.waitingQuestions.length
+  }
+
+  private canSteer() {
+    return this.busy?.kind === "turn" && !!this.steering
+  }
+
+  /** Hand a message to the running turn; the model sees it after the current step. */
+  private steer(text: string) {
+    const id = newId()
+    this.steers.push({ id, text })
+    this.steering!.steer({ role: "user", content: userContent(text, this.images) }, { id })
+    this.notify("Sending now · the model sees it after its current step")
+  }
+
+  /** Send every queued message into the running turn (or start a turn with them). */
+  sendQueuedNow() {
+    if (!this.queue.length) return
+    if (!this.busy) return this.afterTurn()
+    if (!this.canSteer()) return this.notify("Queued messages are sent when this finishes", true)
+    for (const text of this.queue.splice(0)) this.steer(text)
+  }
+
+  /** ctrl+c while idle: the first press arms, a second within 2s confirms the exit. */
+  confirmExit(): boolean {
+    if (Date.now() - this.exitArmed < 2000) return true
+    this.exitArmed = Date.now()
+    this.notify("Press ctrl+c again to exit")
+    return false
+  }
+
+  /** Put unsent messages back into the input box so nothing typed is lost. */
+  private restoreToInput(texts: string[]) {
+    if (!texts.length) return
+    this.setInput([...texts, this.input].filter((t) => t.trim()).join("\n\n"))
+    this.notify(`${texts.length} unsent message${texts.length === 1 ? "" : "s"} moved back to the input`)
   }
 
   needsCompaction() {
@@ -428,6 +543,8 @@ export class Store {
     }
     const abort = new AbortController()
     this.busy = { kind: "turn", started: Date.now(), abort }
+    const steering = (this.steering = experimental_createSteering())
+    this.steers = []
     this.activity = "Thinking"
     this.streamText = null
     this.streamReasoning = null
@@ -441,19 +558,36 @@ export class Store {
       instructions: this.instructions(),
       messages: [...this.session.messages],
       settings: this.settings,
-      ctx: { cwd: this.cwd, skills: this.skills, memory: this.memory },
+      ctx: { cwd: this.cwd, skills: this.skills, memory: this.memory, setup: this.setupApi },
       mcp: this.mcp,
       grants: this.grants,
       goalActive: !!this.session.goal && !this.session.goal.done,
       signal: abort.signal,
+      steering,
       hooks: {
+        reviewing: (callId, on) => {
+          if (this.permission || this.question) return
+          const e = this.session.transcript.findLast((x) => x.kind === "tool" && x.callId === callId)
+          this.activity = on && e?.kind === "tool" ? `Safety check · ${oneLine(e.title, 60)}` : this.workingActivity()
+          this.emit()
+        },
+        intent: () => this.intentContext(),
+        steered: (id) => {
+          const i = this.steers.findIndex((x) => x.id === id)
+          if (i < 0) return
+          const [m] = this.steers.splice(i, 1)
+          this.endReasoning()
+          this.streamText = null
+          this.push({ kind: "user", text: m!.text })
+          this.emit(true)
+        },
         text: (d) => this.onText(d, model),
         reasoning: (d) => this.onReasoning(d),
         reasoningEnd: () => this.endReasoning(),
         toolStart: (callId, name, title) => {
           this.endReasoning()
           this.streamText = null
-          this.activity = `Running ${oneLine(title, 60)}`
+          if (!this.permission && !this.question) this.activity = `Running ${oneLine(title, 60)}`
           this.push({ kind: "tool", callId, name, title, summary: "", detail: [], status: "running", started: Date.now() })
         },
         toolEnd: (callId, o: Outcome, denied) => {
@@ -464,16 +598,10 @@ export class Store {
             e.status = denied ? "denied" : o.ok ? "ok" : "failed"
             e.ms = Date.now() - e.started
           }
-          this.activity = "Thinking"
+          if (!this.permission && !this.question) this.activity = this.workingActivity()
           this.emit()
         },
-        ask: (req) =>
-          this.headless ? Promise.resolve(this.headless.ask(req)) :
-          new Promise<Reply>((resolve) => {
-            this.activity = "Waiting for permission"
-            this.permission = { ...req, resolve }
-            this.emit(true)
-          }),
+        ask: (req) => (this.headless ? Promise.resolve(this.headless.ask(req)) : this.requestPermission(req)),
         todos: (items) => {
           this.session.todos = items
           this.emit()
@@ -490,13 +618,7 @@ export class Store {
             this.emit()
           }
         },
-        question: (q) =>
-          this.headless ? Promise.resolve(this.headless.question(q)) :
-          new Promise<string>((resolve) => {
-            this.activity = "Waiting for your answer"
-            this.question = { ...q, selected: 0, checked: new Set(), resolve }
-            this.emit(true)
-          }),
+        question: (q) => (this.headless ? Promise.resolve(this.headless.question(q)) : this.requestAnswer(q)),
         beforeChange: () => this.takeCheckpoint(),
         spend: (usd) => this.spend(usd),
         usage: (u) => {
@@ -648,14 +770,13 @@ export class Store {
     this.busy = null
     this.activity = ""
     this.streamText = null
-    if (this.permission) {
-      this.permission.resolve("deny")
-      this.permission = null
-    }
-    if (this.question) {
-      this.question.resolve("")
-      this.question = null
-    }
+    this.steering = null
+    // Messages sent mid-turn that never reached the model: send them next, or
+    // give them back if the turn stopped early.
+    const unsent = this.steers.splice(0).map((x) => x.text)
+    if (error || aborted) this.restoreToInput(unsent)
+    else this.queue.unshift(...unsent)
+    this.dropPrompts()
     for (const e of this.session.transcript) if (e.kind === "tool" && e.status === "running") e.status = aborted ? "denied" : "failed"
     this.session.messages.push(...messages)
     this.finishCheckpoint()
@@ -738,17 +859,141 @@ export class Store {
       this.busy = null
       this.info("Sign-in cancelled.")
     } else this.activity = "Interrupting…"
-    this.queue = []
+    this.restoreToInput(this.queue.splice(0))
     this.emit(true)
     return true
+  }
+
+  // ---- MCP & self-setup -------------------------------------------------------------
+
+  private mcpCommand(args: string) {
+    const [sub = "", ...rest] = args.trim().split(/\s+/)
+    const name = rest.join(" ")
+    if (sub === "login" || sub === "signin") return name ? this.mcpSignIn(name) : this.notify("Usage: /mcp login <server>", true)
+    if (sub === "logout" || sub === "signout") {
+      if (!name) return this.notify("Usage: /mcp logout <server>", true)
+      return void this.mcp.signOut(name).then((ok) => (ok ? this.info(`Signed out of **${name}**`) : this.notify(`Not signed in to ${name}`, true)))
+    }
+    if (sub === "reload") return void this.setupApi.reloadMcp().then((r) => this.info(r))
+    if (!this.mcp.servers.length)
+      return this.info(
+        'No MCP servers yet. Ask oah to add one ("add the Linear MCP server"), run **/import** to bring over Claude Code\'s, or add them to `~/.config/oah/mcp.json`, `./.oah/mcp.json` or `./.mcp.json`:\n```json\n{ "mcpServers": { "docs": { "url": "https://example.com/mcp" }, "fs": { "command": "npx", "args": ["-y", "some-mcp-server"] } } }\n```',
+      )
+    this.openPicker(
+      "mcp",
+      "MCP servers · enter: sign in / details / retry",
+      this.mcp.servers.map((x) => ({ label: x.name, detail: `${mcpState(x)}${x.signedIn && x.state === "ready" ? " · signed in" : ""} · ${x.source}`, value: x.name })),
+    )
+  }
+
+  private mcpPicked(name: string) {
+    const x = this.mcp.get(name)
+    if (!x) return
+    if (x.state === "needs-auth") return this.mcpSignIn(name)
+    if (x.state === "failed") {
+      this.notify(`Reconnecting ${name}…`)
+      return void this.mcp.reconnect(name).then(() => this.notify(`${name}: ${mcpState(this.mcp.get(name)!)}`, this.mcp.get(name)?.state !== "ready"))
+    }
+    if (x.state === "starting") return this.notify(`${name} is still connecting`)
+    this.info(`**${name}** — ${x.tools.length} tools _(${x.source})_${x.signedIn ? " · signed in (/mcp logout " + name + ")" : ""}\n${x.tools.join(", ")}`)
+  }
+
+  /** /mcp: browser sign-in to a server that needs authentication. */
+  mcpSignIn(name: string) {
+    if (!this.mcp.get(name)) return this.notify(`No MCP server named ${name}`, true)
+    if (this.busy) return this.notify("Busy — finish or interrupt the current turn first", true)
+    const abort = new AbortController()
+    this.busy = { kind: "login", started: Date.now(), abort }
+    this.activity = `Waiting for ${name} sign-in in your browser · c to copy link`
+    this.emit(true)
+    this.runMcpSignIn(name, abort.signal)
+      .then((msg) => this.info(msg))
+      .catch((e) => {
+        if (!abort.signal.aborted) this.error(`Sign-in to ${name} failed: ${e?.message ?? e}`)
+      })
+      .finally(() => {
+        if (this.busy?.kind === "login") this.busy = null
+        this.activity = ""
+        this.emit(true)
+      })
+  }
+
+  private async runMcpSignIn(name: string, signal: AbortSignal): Promise<string> {
+    if (!this.mcp.get(name)) throw new Error(`no MCP server named '${name}'`)
+    const ctl = new AbortController()
+    const stop = () => ctl.abort()
+    signal.addEventListener("abort", stop, { once: true })
+    const timer = setTimeout(stop, 5 * 60_000)
+    try {
+      await this.mcp.signIn(name, {
+        signal: ctl.signal,
+        onUrl: (url) => {
+          this.login = { url, cancel: stop }
+          const opened = auth.openBrowser(url)
+          this.info(`**Sign in to ${name}** — ${opened ? "your browser should open. If it doesn't, open this link:" : "open this link in a browser:"}\n${url}\n\nWaiting for sign-in… press **c** to copy the link, esc to cancel.`)
+        },
+      })
+      const x = this.mcp.get(name)
+      return x?.state === "ready" ? `Signed in to **${name}** · ${x.tools.length} tools` : `Signed in to ${name}, but it is ${x ? mcpState(x) : "gone"}`
+    } catch (e: any) {
+      if (ctl.signal.aborted && !signal.aborted) throw new Error("timed out waiting for the browser sign-in")
+      throw e
+    } finally {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", stop)
+      this.login = null
+    }
+  }
+
+  /** What the oah_setup tool calls into. */
+  readonly setupApi: SetupApi = {
+    status: () => {
+      const servers = this.mcp.servers.map((x) => `- ${x.name}: ${mcpState(x)}${x.signedIn ? " (signed in)" : ""} — ${x.source}`)
+      const skills = this.skills.list.map((x) => `${x.name} (${x.scope})`)
+      return [
+        `MCP servers (${servers.length}):`,
+        ...(servers.length ? servers : ["- none"]),
+        `Config files: ${this.mcp.files().map((f) => f.replace(this.cwd, ".")).join(", ")} (later wins)`,
+        "",
+        `Skills (${skills.length}): ${skills.join(", ") || "none"}`,
+        "Skill folders: ~/.config/oah/skills (global), ./.oah/skills (project); also read: ./.claude/skills, ./.agents/skills, ~/.claude/skills, ~/.agents/skills",
+      ].join("\n")
+    },
+    reloadMcp: async () => {
+      const r = await this.mcp.reload()
+      const lines = [...r.added, ...r.changed].map((n) => {
+        const x = this.mcp.get(n)
+        return `${n}: ${x ? mcpState(x) : "?"}${x?.state === "needs-auth" ? " — run oah_setup mcp_sign_in (or the user can pick it in /mcp)" : ""}`
+      })
+      if (r.removed.length) lines.push(`removed: ${r.removed.join(", ")}`)
+      this.emit()
+      return lines.join("\n") || "No MCP config changes."
+    },
+    reloadSkills: () => {
+      this.skills.reload()
+      this.emit()
+    },
+    signInMcp: (name, signal) => this.runMcpSignIn(name, signal),
+  }
+
+  /** The full ChatGPT sign-in link while a sign-in is waiting. */
+  get loginUrl(): string | undefined {
+    return this.login?.url
+  }
+
+  copyLoginUrl() {
+    const url = this.loginUrl
+    if (!url) return
+    this.copy(url) ? this.notify("Copied sign-in link") : this.notify("Clipboard unavailable", true)
   }
 
   /** Answer the pending ask_user question ("" dismisses it). */
   answerQuestion(answer: string) {
     const q = this.question
     if (!q) return
-    this.question = null
-    this.activity = "Thinking"
+    this.answers.push({ q: q.question, a: answer || "(dismissed)" })
+    this.question = this.waitingQuestions.shift() ?? null
+    this.activity = this.question ? "Waiting for your answer" : this.permission ? "Waiting for permission" : this.workingActivity()
     q.resolve(answer)
     this.emit(true)
   }
@@ -764,8 +1009,8 @@ export class Store {
   answerPermission(r: Reply) {
     const p = this.permission
     if (!p) return
-    this.permission = null
-    this.activity = "Thinking"
+    this.permission = this.waitingPermissions.shift() ?? null
+    this.activity = this.permission ? "Waiting for permission" : this.question ? "Waiting for your answer" : this.workingActivity()
     p.resolve(r)
     this.emit(true)
   }
@@ -826,15 +1071,31 @@ export class Store {
         return this.memoryCommand(args)
       case "skills":
         if (!this.skills.list.length) return this.info("No skills found. Add folders with a `SKILL.md` to `~/.config/oah/skills` or `./.oah/skills` (`.claude/skills` and `.agents/skills` work too).")
-        return this.info("**Skills** — run with /<name>, or the model loads them when relevant:\n" + this.skills.list.map((s) => `- **${s.name}** (${s.scope}) — ${s.description}`).join("\n"))
-      case "mcp":
-        if (!this.mcp.servers.length) return this.info('No MCP servers configured. Add them to `~/.config/oah/mcp.json`, `./.oah/mcp.json` or `./.mcp.json`:\n```json\n{ "mcpServers": { "name": { "command": "npx", "args": ["-y", "some-mcp-server"] } } }\n```')
-        return this.info(
-          "**MCP servers**\n" +
-            this.mcp.servers
-              .map((s) => `- **${s.name}** — ${s.state === "ready" ? `ready · ${s.tools.length} tools` : s.state === "failed" ? `failed: ${s.error}` : "starting…"} _(${s.source})_${s.tools.length ? `\n  ${s.tools.join(", ")}` : ""}`)
-              .join("\n"),
+        return this.openPicker(
+          "skills",
+          `Skills · ${this.skills.list.length} — enter inserts /<name>; the model also loads them when relevant`,
+          [...this.skills.list]
+            .sort((a, b) => (a.scope === b.scope ? a.name.localeCompare(b.name) : a.scope === "project" ? -1 : 1))
+            .map((s) => ({ label: s.name, detail: "", value: s.name, group: s.scope === "project" ? "Project" : "User", keywords: s.description })),
         )
+      case "mcp":
+        return this.mcpCommand(args)
+      case "import": {
+        const valid = ["mcp", "skills", "sessions"] as const
+        const words = args.toLowerCase().split(/[\s,]+/).filter(Boolean)
+        if (words.some((w) => !(valid as readonly string[]).includes(w))) return this.notify("Usage: /import [mcp] [skills] [sessions]", true)
+        const what = new Set((words.length ? words : valid) as (typeof valid)[number][])
+        const r = importFromClaude({ cwd: this.cwd, what, model: this.settings.model, effort: this.settings.effort, mode: this.settings.mode })
+        if (r.skillsChanged) this.skills.reload()
+        this.info("**Imported from Claude Code**\n" + r.lines.join("\n"))
+        if (r.mcpChanged)
+          void this.mcp.reload().then(() => {
+            const need = this.mcp.servers.filter((x) => x.state === "needs-auth").map((x) => x.name)
+            if (need.length) this.info(`${need.join(", ")} need${need.length === 1 ? "s" : ""} authentication — sign in from /mcp`)
+            this.emit(true)
+          })
+        return
+      }
       case "tools":
         return this.info("**Built-in tools**\n" + [...TOOLS.map((t) => `- **${t.name}**${t.buildOnly ? " _(build mode)_" : ""}${t.openaiOnly ? " _(GPT models)_" : ""} — ${t.description.split("\n")[0]}`), "- **task** — delegate research to a read-only sub-agent", "- **ask_user** — ask you a question with options instead of assuming"].join("\n") + (this.mcp.readyNames().length ? `\n\nPlus MCP tools from: ${this.mcp.readyNames().join(", ")}` : ""))
       case "init":
@@ -967,6 +1228,10 @@ export class Store {
         return this.authAction(item.value)
       case "undo":
         return void this.undoTo(item.value)
+      case "skills":
+        return this.setInput(`/${item.value} `)
+      case "mcp":
+        return this.mcpPicked(item.value)
     }
   }
 
@@ -1063,14 +1328,14 @@ export class Store {
       case "chatgpt":
         if (this.busy) return this.notify("Busy — finish or interrupt the current turn first", true)
         this.busy = { kind: "login", started: Date.now(), abort: new AbortController() }
-        this.activity = "Waiting for ChatGPT sign-in in your browser"
+        this.activity = "Waiting for ChatGPT sign-in in your browser · c to copy link"
         this.emit(true)
         auth
           .beginChatGptLogin()
           .then((p) => {
             this.login = p
             const opened = auth.openBrowser(p.url)
-            this.info(`**Continue with ChatGPT** — ${opened ? "your browser should open. If it doesn't, open this link:" : "open this link in a browser:"}\n${p.displayUrl}\n\nWaiting for sign-in… press esc to cancel.`)
+            this.info(`**Continue with ChatGPT** — ${opened ? "your browser should open. If it doesn't, open this link:" : "open this link in a browser:"}\n${p.displayUrl}\n\nWaiting for sign-in… press **c** to copy the link, esc to cancel.`)
             return p.done
           })
           .then((s) => {
@@ -1104,9 +1369,8 @@ export class Store {
 
   shutdown() {
     killAllShells()
-    this.question?.resolve("")
     this.busy?.abort.abort()
-    this.permission?.resolve("deny")
+    this.dropPrompts()
     this.persistSettings()
     saveSession(this.session)
   }
@@ -1134,3 +1398,16 @@ const PROVIDER_ALIASES: Partial<Record<Provider, string>> = {
 }
 
 const EFFORTS_SET = new Set<string>(["minimal", "low", "medium", "high", "xhigh", "max"])
+
+export function mcpState(x: McpServer): string {
+  switch (x.state) {
+    case "ready":
+      return `ready · ${x.tools.length} tool${x.tools.length === 1 ? "" : "s"}`
+    case "needs-auth":
+      return "needs authentication"
+    case "failed":
+      return `failed: ${oneLine(x.error ?? "", 80)}`
+    default:
+      return "connecting…"
+  }
+}

@@ -11,7 +11,7 @@ import { createOpenAI } from "@ai-sdk/openai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createXai } from "@ai-sdk/xai"
 import { createOpenRouter } from "@openrouter/ai-sdk-provider"
-import type { LanguageModel } from "ai"
+import { streamText, type LanguageModel, type LanguageModelUsage } from "ai"
 import * as auth from "./auth"
 import { clampEffort, lookup } from "./catalog"
 import { localBaseURL, type LocalProvider } from "./local"
@@ -129,3 +129,21 @@ export function maxOutputTokens(full: string): number | undefined {
 }
 
 export { adaptiveThinking }
+
+/**
+ * A one-shot completion, streamed: some backends (the ChatGPT plan) reject
+ * non-streaming requests, so this is used instead of `generateText`.
+ */
+export async function complete(args: Parameters<typeof streamText>[0]): Promise<{ text: string; usage: LanguageModelUsage }> {
+  // onError: the error is rethrown below; the default handler would print it over the TUI.
+  const r = streamText({ ...args, onError: () => {} })
+  let text = ""
+  let error: unknown
+  for await (const part of r.fullStream) {
+    if (part.type === "text-delta") text += part.text
+    else if (part.type === "error") error = part.error
+    else if (part.type === "abort") error = new Error("aborted")
+  }
+  if (error) throw error
+  return { text, usage: await r.totalUsage }
+}

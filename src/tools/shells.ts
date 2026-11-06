@@ -2,6 +2,7 @@
 // runs) that the model starts with `bash background: true`, then polls with
 // `bash_output` and stops with `bash_kill`.
 import { stripAnsi } from "./index"
+import { killTree, spawnCommand } from "../platform"
 
 const MAX_BUFFER = 1 << 20
 
@@ -30,13 +31,7 @@ export function setShellListener(fn: () => void) {
 
 export function startShell(command: string, cwd: string): Shell {
   const id = `bg${++counter}`
-  const proc = Bun.spawn(["bash", "-c", command], {
-    cwd,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, OAH: "1", TERM: "dumb", PAGER: "cat", GIT_PAGER: "cat" },
-  })
+  const proc = spawnCommand(command, { cwd, env: { ...process.env, OAH: "1", TERM: "dumb", PAGER: "cat", GIT_PAGER: "cat" } })
   const sh: Shell = { id, command, cwd, started: Date.now(), exitCode: null, output: "", readPos: 0, dropped: 0, proc }
   shells.set(id, sh)
   const pump = async (stream: ReadableStream<Uint8Array>) => {
@@ -81,8 +76,8 @@ export function readShell(sh: Shell, filter?: RegExp): string {
 }
 
 export function killShell(sh: Shell) {
-  if (sh.exitCode === null) sh.proc.kill("SIGTERM")
-  setTimeout(() => sh.exitCode === null && sh.proc.kill("SIGKILL"), 2000)
+  killTree(sh.proc, "SIGTERM")
+  setTimeout(() => killTree(sh.proc), 2000)
 }
 
 export function runningShells(): Shell[] {
@@ -95,9 +90,7 @@ export function allShells(): Shell[] {
 
 export function killAllShells() {
   for (const s of runningShells()) {
-    try {
-      s.proc.kill("SIGKILL")
-    } catch {}
+    killTree(s.proc)
   }
 }
 

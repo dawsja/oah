@@ -1,7 +1,8 @@
 // Built-in tools. Each returns text for the model plus a short summary and
 // preview lines for the transcript. Permission gating happens in the agent.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
-import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
+import { killTree, spawnCommand } from "../platform"
 import { homedir } from "node:os"
 import type { Mode } from "../config"
 import type { Memory } from "../memory"
@@ -9,7 +10,7 @@ import type { Skills } from "../skills"
 import { applyPatch } from "./patch"
 import { getShell, killShell, readShell, runningShells, shellStatus, startShell } from "./shells"
 
-export type Risk = "internal" | "read" | "read-outside" | "write" | "safe-exec" | "exec" | "external"
+export type Risk = "internal" | "read" | "read-outside" | "write" | "write-outside" | "safe-exec" | "exec" | "external"
 
 export interface Outcome {
   output: string
@@ -26,6 +27,15 @@ export interface ToolCtx {
   mode: Mode
   onTodos: (items: Todo[]) => void
   onGoalComplete: (summary: string) => void
+  /** oah's own configuration (MCP servers, skills); absent in sub-agents. */
+  setup?: SetupApi
+}
+
+export interface SetupApi {
+  status(): string
+  reloadMcp(): Promise<string>
+  reloadSkills(): void
+  signInMcp(name: string, signal: AbortSignal): Promise<string>
 }
 
 export interface Todo {
@@ -108,6 +118,8 @@ export function isSafeCommand(cmd: string, extra: string[] = []): boolean {
   if (!c || /[>`]|\$\(/.test(c)) return false
   const SAFE = new Set("ls pwd cat head tail wc echo grep rg fd find tree stat file which whoami date uname env printenv du df sort uniq cut tr diff less more basename dirname realpath readlink type true nl column jq sha256sum md5sum".split(" "))
   const GIT = new Set("status diff log show branch remote rev-parse ls-files blame describe tag".split(" "))
+  // PowerShell read-only cmdlets and their aliases (matched case-insensitively).
+  const PS = new Set("get-childitem gci dir get-content gc select-string sls get-location gl test-path get-item gi resolve-path rvpa measure-object measure select-object select sort-object where-object format-table ft format-list fl out-string get-command gcm get-filehash write-output".split(" "))
   return c
     .split(/[|;&]/)
     .map((s) => s.trim())
@@ -118,7 +130,7 @@ export function isSafeCommand(cmd: string, extra: string[] = []): boolean {
       if (first === "find" && /-exec|-delete|-ok/.test(seg)) return false
       if (first === "git") return GIT.has(second) && !/branch\s+-[dD]/.test(seg)
       if (first === "cargo") return ["check", "metadata", "tree", "--version"].includes(second)
-      return SAFE.has(first)
+      return SAFE.has(first) || PS.has(first.toLowerCase())
     })
 }
 
@@ -140,12 +152,17 @@ export function risk(name: string, args: any, cwd: string, extraSafe: string[]):
       return !args?.path || inside(cwd, resolvePath(cwd, args.path)) ? "read" : "read-outside"
     case "write_file":
     case "edit_file":
-    case "apply_patch":
-      return "write"
+      return inside(cwd, resolvePath(cwd, String(args?.path ?? ""))) ? "write" : "write-outside"
+    case "apply_patch": {
+      const files = [...String(args?.patch ?? "").matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)].map((m) => (m[1] ?? m[2])!.trim())
+      return files.every((f) => inside(cwd, resolvePath(cwd, f))) ? "write" : "write-outside"
+    }
     case "bash":
       return isSafeCommand(String(args?.command ?? ""), extraSafe) ? "safe-exec" : "exec"
     case "web_fetch":
       return "external"
+    case "oah_setup":
+      return ["status", "reload", "mcp_sign_in"].includes(args?.action) ? "internal" : "external"
     default:
       return "external"
   }
@@ -191,6 +208,8 @@ export function title(name: string, args: any, cwd: string): string {
       return `Skill ${args?.name ?? ""}`
     case "goal_complete":
       return "Goal complete"
+    case "oah_setup":
+      return `Setup ${String(args?.action ?? "").replace("_", " ")} ${args?.name ?? args?.source ?? args?.url ?? ""}`.trim()
   }
   if (name.startsWith("mcp__")) {
     const [, server, tool] = name.split("__")
@@ -388,7 +407,7 @@ function grepJs(pattern: string, root: string, o: GrepOpts & { limit: number }, 
   const filter = o.glob ? globToRegex(o.glob) : null
   const out: string[] = []
   const search = (p: string) => {
-    if (filter && !filter.test(p.split("/").pop()!) && !filter.test(relative(root, p))) return true
+    if (filter && !filter.test(basename(p)) && !filter.test(relative(root, p))) return true
     let buf: Buffer
     try {
       if (statSync(p).size > 4 << 20) return true
@@ -535,7 +554,7 @@ export const TOOLS: ToolDef[] = [
         if ((type === "file" || minSize !== null || maxSize !== null) && isDir) return
         if (type === "dir" && !isDir) return
         const relp = relative(root, p)
-        if (nameRe && !nameRe.test(p.split("/").pop()!)) return
+        if (nameRe && !nameRe.test(basename(p))) return
         if (pathRe && !pathRe.test(relp)) return
         if (needStat) {
           try {
@@ -710,22 +729,54 @@ export const TOOLS: ToolDef[] = [
         }
       }
       const timeout = Math.min(600_000, Math.max(1000, Number(a.timeout_ms) || 120_000))
-      const proc = Bun.spawn(["bash", "-c", command], {
-        cwd: ctx.cwd,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, OAH: "1", TERM: "dumb", PAGER: "cat", GIT_PAGER: "cat" },
-      })
-      const kill = () => proc.kill("SIGKILL")
-      ctx.signal.addEventListener("abort", kill, { once: true })
-      const timer = setTimeout(kill, timeout)
-      const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+      const proc = spawnCommand(command, { cwd: ctx.cwd, env: { ...process.env, OAH: "1", TERM: "dumb", PAGER: "cat", GIT_PAGER: "cat" } })
+      let timedOut = false
+      let stopped: (() => void) | undefined
+      const stoppedP = new Promise<void>((res) => (stopped = res))
+      const kill = () => {
+        killTree(proc)
+        // Don't wait forever for the pipes: a process that left the group could hold them open.
+        setTimeout(() => stopped?.(), 3000)
+      }
+      const onAbort = () => kill()
+      ctx.signal.addEventListener("abort", onAbort, { once: true })
+      const timer = setTimeout(() => {
+        timedOut = true
+        kill()
+      }, timeout)
+      const chunks = { out: "", err: "" }
+      const pump = async (stream: ReadableStream<Uint8Array>, key: "out" | "err") => {
+        const dec = new TextDecoder()
+        const reader = stream.getReader()
+        stoppedP.then(() => reader.cancel().catch(() => {}))
+        try {
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            chunks[key] += dec.decode(value, { stream: true })
+          }
+        } catch {}
+      }
+      // Once the shell exits, stop reading after a moment: something it left running (`server &`) may hold the pipes.
+      proc.exited.then(() => setTimeout(() => stopped?.(), 2000))
+      const finished = Promise.all([pump(proc.stdout as ReadableStream<Uint8Array>, "out"), pump(proc.stderr as ReadableStream<Uint8Array>, "err"), proc.exited])
+      await Promise.race([finished, stoppedP])
       clearTimeout(timer)
-      ctx.signal.removeEventListener("abort", kill)
+      ctx.signal.removeEventListener("abort", onAbort)
       if (ctx.signal.aborted) return fail("interrupted")
+      const code = proc.exitCode ?? (timedOut ? 124 : -1)
+      const { out, err } = chunks
       let text = stripAnsi(out + (err.trim() ? (out && !out.endsWith("\n") ? "\n" : "") + err : "")).trimEnd()
       const lines = text ? text.split("\n").length : 0
+      if (timedOut) {
+        const secs = Math.round(timeout / 1000)
+        return {
+          output: `${text ? truncate(text) + "\n" : ""}Timed out after ${secs}s and was stopped (with everything it started). If it needs longer, raise timeout_ms (max 600000) or run it with background=true and poll bash_output.`,
+          summary: `timed out after ${secs}s`,
+          detail: preview(text, 6),
+          ok: false,
+        }
+      }
       return { output: `${text ? truncate(text) : "(no output)"}\nexit code: ${code}`, summary: `exit ${code} · ${lines} lines`, detail: preview(text, 6), ok: code === 0 }
     },
   },
@@ -818,6 +869,85 @@ export const TOOLS: ToolDef[] = [
     run(a, ctx) {
       const body = ctx.skills.load(String(a.name))
       return body ? ok(body, `loaded skill ${a.name}`) : fail(`no skill named '${a.name}'`)
+    },
+  },
+  {
+    name: "oah_setup",
+    description: `Configure oah itself — the harness you are running in. Use it when the user asks to add/connect an MCP server, install a skill, or check what is set up.
+Actions:
+- status: MCP servers (state, tools, config files) and installed skills.
+- mcp_add: add a server and connect it. Remote: name + url (+ transport "sse" for legacy SSE servers, headers for API keys). Local: name + command + args (+ env). If you only know the product, find its official MCP URL or npm package first (web_fetch its docs). If it reports "needs authentication", run mcp_sign_in.
+- mcp_sign_in: browser OAuth sign-in for a remote server that needs authentication (the user completes it in their browser).
+- mcp_remove: remove a server by name.
+- skill_install: install skills from source = GitHub "owner/repo" or a github.com URL (/tree/<branch>/<path> narrows it), a git URL, a raw SKILL.md URL, or a local folder. If the source holds several skills pass name (or all: true). To find a skill, look for a repo containing SKILL.md folders (e.g. the vendor's GitHub org, or skills.sh).
+- skill_remove: remove a skill installed by oah.
+- reload: re-read MCP config files and skill folders.
+scope: "global" (default, all projects: ~/.config/oah) or "project" (this folder: ./.oah). New MCP tools become callable from the user's next message; new skills immediately via load_skill.`,
+    parameters: obj(
+      {
+        action: { type: "string", enum: ["status", "mcp_add", "mcp_remove", "mcp_sign_in", "skill_install", "skill_remove", "reload"] },
+        name: str("Server or skill name"),
+        url: str("mcp_add: remote server URL"),
+        transport: { type: "string", enum: ["http", "sse"], description: "mcp_add with url: default http (Streamable HTTP)" },
+        headers: { type: "object", additionalProperties: { type: "string" }, description: "mcp_add with url: HTTP headers, e.g. an API key" },
+        command: str("mcp_add: local server executable, e.g. npx"),
+        args: { type: "array", items: { type: "string" }, description: "mcp_add with command: arguments" },
+        env: { type: "object", additionalProperties: { type: "string" }, description: "mcp_add with command: environment variables" },
+        source: str("skill_install: owner/repo, GitHub/git URL, raw SKILL.md URL, or local path"),
+        all: { type: "boolean", description: "skill_install: install every skill in the source" },
+        scope: { type: "string", enum: ["global", "project"] },
+      },
+      ["action"],
+    ),
+    async run(a, ctx) {
+      const api = ctx.setup
+      if (!api) return fail("oah_setup isn't available here")
+      const setup = await import("../setup")
+      const scope: "global" | "project" = a.scope === "project" ? "project" : "global"
+      const name = String(a.name ?? "").trim()
+      switch (a.action) {
+        case "status":
+          return ok(api.status(), "listed setup")
+        case "reload": {
+          api.reloadSkills()
+          return ok(`${await api.reloadMcp()}\n\n${api.status()}`, "reloaded")
+        }
+        case "mcp_add": {
+          if (!/^[A-Za-z0-9_-]+$/.test(name)) return fail("name must be letters, digits, - or _")
+          if (!a.url && !a.command) return fail("give url (remote) or command (local)")
+          const cfg = a.url
+            ? { url: String(a.url), ...(a.transport === "sse" ? { type: "sse" as const } : {}), ...(a.headers && Object.keys(a.headers).length ? { headers: a.headers } : {}) }
+            : { command: String(a.command), ...(a.args?.length ? { args: a.args.map(String) } : {}), ...(a.env && Object.keys(a.env).length ? { env: a.env } : {}) }
+          const file = setup.addMcpServer(name, cfg, scope, ctx.cwd)
+          const r = await api.reloadMcp()
+          return ok(`Saved ${name} to ${file}.\n${r}`, `added MCP ${name}`, r.split("\n"))
+        }
+        case "mcp_remove": {
+          const files = setup.removeMcpServer(name, ctx.cwd)
+          if (!files.length) return fail(`no MCP server named '${name}' in oah's config files`)
+          await api.reloadMcp()
+          return ok(`Removed ${name} from ${files.join(", ")}.`, `removed MCP ${name}`)
+        }
+        case "mcp_sign_in": {
+          const r = await api.signInMcp(name, ctx.signal)
+          return ok(r, r.split("\n")[0]!)
+        }
+        case "skill_install": {
+          if (!a.source) return fail("source is required")
+          const r = await setup.installSkill(String(a.source), { name: name || undefined, all: !!a.all, scope, cwd: ctx.cwd, signal: ctx.signal })
+          if (!r.installed.length) return fail(r.message ?? "nothing installed")
+          api.reloadSkills()
+          const list = r.installed.map((i) => `- ${i.name} → ${i.path}`)
+          return ok(`Installed:\n${list.join("\n")}\nAvailable now via load_skill and /<name>.`, `installed ${r.installed.map((i) => i.name).join(", ")}`, list)
+        }
+        case "skill_remove": {
+          const dir = setup.removeSkill(name, ctx.cwd)
+          if (!dir) return fail(`no skill named '${name}' installed by oah (skills in .claude/.agents folders are left alone)`)
+          api.reloadSkills()
+          return ok(`Removed ${dir}.`, `removed skill ${name}`)
+        }
+      }
+      return fail(`unknown action '${a.action}'`)
     },
   },
   {

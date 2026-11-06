@@ -1,15 +1,17 @@
 // The agent loop on the AI SDK: one user turn = `streamText` with tools and a
 // multi-step stop condition. Permission prompts happen inside each tool's
 // `execute`, so the model only sees the result ("denied" included).
-import { APICallError, generateText, jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type ToolSet } from "ai"
+import { APICallError, jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type Experimental_Steering as Steering, type ToolSet } from "ai"
 import { USAGE_URL } from "./auth"
 import { info, shortPath, splitModel, type Effort, type Mode, type Permission, type Settings } from "./config"
 import type { Mcp } from "./mcp"
 import { projectRoot } from "./memory"
 import { costOf, type StepUsage } from "./catalog"
-import { languageModel, maxOutputTokens, providerOptions } from "./providers"
+import { complete, languageModel, maxOutputTokens, providerOptions } from "./providers"
 import { oneLine, permissionPreview, risk, title, TOOLS, type Outcome, type Risk, type Todo, type ToolCtx } from "./tools"
 import { existsSync } from "node:fs"
+import { commandShell } from "./platform"
+import { AUTO_SAFE, blockedMessage, hardStop, review, type Verdict } from "./safety"
 import { join } from "node:path"
 
 export type Reply = "once" | "always" | "deny"
@@ -32,6 +34,12 @@ export interface Hooks {
   question(q: Question): Promise<string>
   /** Called before a tool that may change files runs (checkpoints). */
   beforeChange(): Promise<void>
+  /** A steering message (sent mid-turn) reached the model. */
+  steered?(id: string): void
+  /** Auto mode: the safety monitor started/finished reviewing a tool call. */
+  reviewing?(callId: string, on: boolean): void
+  /** What the user has asked for (recent messages, answers to questions), for the safety monitor. */
+  intent?(): string
 }
 
 export interface Question {
@@ -59,6 +67,8 @@ export interface TurnOptions {
   hooks: Hooks
   /** Restrict built-in tools to this set (sub-agents); also disables task/ask_user/MCP. */
   only?: Set<string>
+  /** Delivers user messages sent mid-turn at the next step boundary. */
+  steering?: Steering
 }
 
 export interface TurnResult {
@@ -72,15 +82,24 @@ const kindLabel: Record<Risk, string> = {
   read: "read",
   "read-outside": "read outside the workspace",
   write: "edit files",
+  "write-outside": "edit files outside the workspace",
   "safe-exec": "run command",
   exec: "run command",
   external: "external tool",
 }
 
+/** The `bash` tool's description for this OS's shell (PowerShell on Windows). */
+function shellToolDescription(base: string, mode: Mode): string {
+  const sh = commandShell().name
+  const syntax = sh === "PowerShell" ? " Commands run in PowerShell on Windows: use PowerShell syntax (Get-ChildItem, Get-Content, $env:NAME, `;` between commands)." : ""
+  if (mode === "plan") return `Run a READ-ONLY ${sh} command (plan mode): inspection only, e.g. git log, ${sh === "PowerShell" ? "Get-ChildItem, Get-Content" : "ls, cat"}. Commands that modify state are refused.${syntax}`
+  return base.replace("with bash", `with ${sh}`) + syntax
+}
+
 export function needsPermission(p: Permission, r: Risk): boolean {
   if (p === "allow") return false
   if (p === "ask") return r !== "internal"
-  return r === "read-outside" || r === "write" || r === "exec" || r === "external"
+  return !AUTO_SAFE.has(r)
 }
 
 export function grantKey(name: string, args: any): string {
@@ -106,25 +125,51 @@ function mcpText(result: any): { text: string; isError: boolean } {
 export function buildTools(o: TurnOptions): ToolSet {
   const ctx: ToolCtx = { ...o.ctx, signal: o.signal, mode: o.mode, onTodos: o.hooks.todos, onGoalComplete: o.hooks.goalComplete }
 
+  // Auto mode: actions the safety monitor blocked this turn (after 2, the next one goes to the user).
+  let blocks = 0
+  const denied = (callId: string, output: string, summary: string) => {
+    o.hooks.toolEnd(callId, { output, summary, detail: [], ok: false }, true)
+    return output
+  }
+  const askUser = (name: string, args: any, r: Risk, note?: string) =>
+    Promise.race([
+      o.hooks.ask({ title: title(name, args, ctx.cwd), kind: kindLabel[r], preview: note ? [`⚠ ${note}`, "", ...permissionPreview(name, args)] : permissionPreview(name, args) }),
+      new Promise<Reply>((res) => o.signal.addEventListener("abort", () => res("deny"), { once: true })),
+    ])
+  const USER_DENIED = "The user denied this tool call. Do not retry it; ask how to proceed if needed."
+
   const gated = async (name: string, args: any, callId: string, run: () => Promise<Outcome>): Promise<string> => {
     o.hooks.toolStart(callId, name, title(name, args, ctx.cwd))
     const r = risk(name, args, ctx.cwd, o.settings.allowedCommands)
     const key = grantKey(name, args)
     if (needsPermission(o.permission, r) && !o.grants.has(key)) {
-      const reply = await Promise.race([
-        o.hooks.ask({ title: title(name, args, ctx.cwd), kind: kindLabel[r], preview: permissionPreview(name, args) }),
-        new Promise<Reply>((res) => o.signal.addEventListener("abort", () => res("deny"), { once: true })),
-      ])
-      if (reply === "deny") {
-        const out = { output: "The user denied this tool call. Do not retry it; ask how to proceed if needed.", summary: "denied", detail: [], ok: false }
-        o.hooks.toolEnd(callId, out, true)
-        return out.output
+      if (o.permission === "auto") {
+        // Reviewed by the safety monitor instead of asking.
+        let v: Verdict | null = hardStop(name, args)
+        if (!v) {
+          o.hooks.reviewing?.(callId, true)
+          v = await review({ model: o.model, settings: o.settings, cwd: ctx.cwd, intent: o.hooks.intent?.() ?? "", name, args, kind: kindLabel[r], signal: o.signal, spend: o.hooks.spend }).catch(() => null)
+          o.hooks.reviewing?.(callId, false)
+        }
+        if (!v || o.signal.aborted) return denied(callId, "Interrupted.", "interrupted")
+        if (!v.allow) {
+          if (v.hard || v.error || ++blocks > 2) {
+            // Catastrophic, monitor unavailable, or the model keeps hitting blocks: the user decides.
+            const reply = await askUser(name, args, r, `Safety monitor: ${v.reason}`)
+            if (reply === "deny") return denied(callId, v.hard ? `The user denied this tool call: ${v.reason}. Do not retry it.` : USER_DENIED, "denied")
+            // "always" for a flagged command would also skip review for every later use of that program.
+            if (reply === "always" && !v.hard && name !== "bash") o.grants.add(key)
+          } else return denied(callId, blockedMessage(v.reason), `blocked · ${oneLine(v.reason, 80)}`)
+        }
+      } else {
+        const reply = await askUser(name, args, r)
+        if (reply === "deny") return denied(callId, USER_DENIED, "denied")
+        if (reply === "always") o.grants.add(key)
       }
-      if (reply === "always") o.grants.add(key)
     }
     let outcome: Outcome
     try {
-      if (r === "write" || r === "exec" || name === "apply_patch") await o.hooks.beforeChange()
+      if (r === "write" || r === "write-outside" || r === "exec" || name === "apply_patch") await o.hooks.beforeChange()
       outcome = await run()
     } catch (e: any) {
       outcome = { output: `Error: ${e?.message ?? e}`, summary: e?.message ?? String(e), detail: [], ok: false }
@@ -144,7 +189,7 @@ export function buildTools(o: TurnOptions): ToolSet {
     if (def.name === "goal_complete" && !o.goalActive) continue
     if (def.name === "load_skill" && !hasSkills) continue
     const description =
-      def.name === "bash" && o.mode === "plan" ? "Run a READ-ONLY shell command (plan mode): inspection only, e.g. git log, ls, cat. Commands that modify state are refused." : def.description
+      def.name === "bash" ? shellToolDescription(def.description, o.mode) : def.description
     tools[def.name] = tool({
       description,
       inputSchema: jsonSchema(def.parameters),
@@ -274,6 +319,7 @@ Date: ${new Date().toISOString().slice(0, 10)}`,
   progress()
   const model = await languageModel(parent.model, parent.settings)
   const result = streamText({
+    onError: () => {}, // errors arrive as stream parts; the default handler prints over the TUI
     model,
     system: sub.instructions,
     messages: [{ role: "user", content: prompt }],
@@ -342,11 +388,15 @@ export function describeError(e: unknown): string {
 
 export async function runTurn(o: TurnOptions): Promise<TurnResult> {
   const collected: ModelMessage[] = []
+  // Steering messages that reached the model; ones whose step never finished
+  // (abort, error) are appended at the end so the session still records them.
+  const steered: ModelMessage[] = []
   let error: string | undefined
   let aborted = false
   try {
     const model = await languageModel(o.model, o.settings)
     const result = streamText({
+    onError: () => {}, // errors arrive as stream parts; the default handler prints over the TUI
       model,
       system: o.instructions,
       messages: o.messages,
@@ -356,8 +406,10 @@ export async function runTurn(o: TurnOptions): Promise<TurnResult> {
       maxOutputTokens: maxOutputTokens(o.model),
       abortSignal: o.signal,
       maxRetries: 3,
+      experimental_steering: o.steering,
       onStepFinish(step: any) {
-        collected.push(...(step.response?.messages ?? []))
+        // Steering messages were input to this step, so they precede its response.
+        collected.push(...(step.experimental_steeringMessages ?? []), ...(step.response?.messages ?? []))
       },
     })
     let inReasoning = false
@@ -384,6 +436,10 @@ export async function runTurn(o: TurnOptions): Promise<TurnResult> {
           if (usd) o.hooks.spend(usd)
           break
         }
+        case "steering-message":
+          steered.push(part.message)
+          o.hooks.steered?.(part.id)
+          break
         case "error":
           error = describeError(part.error)
           break
@@ -396,6 +452,7 @@ export async function runTurn(o: TurnOptions): Promise<TurnResult> {
     if (o.signal.aborted) aborted = true
     else error = describeError(e)
   }
+  for (const m of steered) if (!collected.includes(m)) collected.push(m)
   return { messages: collected, error, aborted: aborted || o.signal.aborted }
 }
 
@@ -407,7 +464,7 @@ export async function compact(o: { model: string; effort: Effort; settings: Sett
     "errors and fixes; the current state; and concrete next steps. Do not call tools."
   if (o.focus.trim()) ask += `\nPay special attention to: ${o.focus.trim()}`
   const model = await languageModel(o.model, o.settings)
-  const { text, usage } = await generateText({
+  const { text, usage } = await complete({
     model,
     system: o.instructions,
     messages: [...o.messages, { role: "user", content: ask }],
@@ -434,6 +491,7 @@ export function systemPrompt(o: { cwd: string; mode: Mode; goal?: string; skills
 - Never invent file contents or command output. If something fails, investigate the cause.
 - Don't run destructive commands (rm -rf, git reset --hard, force pushes) unless the user explicitly asks.
 - When the user states a durable preference or fact worth keeping, save it with the memory tool.
+- You can configure oah itself with oah_setup: add/remove MCP servers (find the official URL or package if the user only names the product), sign in to them, and install skills from GitHub or a URL. Check oah_setup status first when asked what's set up.
 
 # Ask, don't assume
 - The user prefers being asked over having you guess. When requirements are ambiguous, several approaches are reasonable, or a choice is theirs to make (names, scope, trade-offs, anything destructive or hard to undo), call ask_user with concrete options — before doing the work, not after.
@@ -449,6 +507,7 @@ export function systemPrompt(o: { cwd: string; mode: Mode; goal?: string; skills
 - Working directory: ${o.cwd} (${shortPath(o.cwd)})
 - Git repository: ${git ? "yes" : "no"}
 - Platform: ${process.platform} (${process.arch})
+- Shell for the bash tool: ${commandShell().name}${commandShell().name === "PowerShell" ? " (Windows) — write PowerShell, not bash" : ""}
 - Date: ${new Date().toISOString().slice(0, 10)}
 `
   s +=

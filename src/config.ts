@@ -21,6 +21,7 @@ export const paths = {
   get memory() { return join(homeDir(), "memory") },
   get skills() { return join(homeDir(), "skills") },
   get mcp() { return join(homeDir(), "mcp.json") },
+  get mcpAuth() { return join(homeDir(), "mcp-auth.json") },
   get agents() { return join(homeDir(), "AGENTS.md") },
   get modelsCache() { return join(homeDir(), "models.json") },
   get snapshots() { return join(homeDir(), "snapshots") },
@@ -139,7 +140,7 @@ export const effortInfo: Record<Effort, string> = {
 export type Permission = "auto" | "ask" | "allow"
 export const PERMISSIONS: Permission[] = ["auto", "ask", "allow"]
 export const permissionInfo: Record<Permission, { label: string; desc: string }> = {
-  auto: { label: "auto", desc: "reads and safe commands run; edits, writes and other commands ask" },
+  auto: { label: "auto", desc: "works on its own; a safety monitor reviews risky actions and blocks or asks" },
   ask: { label: "always ask", desc: "ask before every tool call" },
   allow: { label: "always allow", desc: "never ask (use with care)" },
 }
@@ -161,6 +162,8 @@ export interface Settings {
   recentModels: string[]
   /** Checkpoints kept per session for /undo; older ones are dropped. */
   maxCheckpoints: number
+  /** Auto mode's safety monitor model (`provider/slug`); empty = a small model of the current provider, else the current model. */
+  safetyModel?: string
   /** Overrides (mainly for testing / proxies). */
   openaiBaseURL?: string
   anthropicBaseURL?: string

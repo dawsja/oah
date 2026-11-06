@@ -10,7 +10,7 @@
 #                      layout: $OAH_DOWNLOAD_URL/latest.txt
 #                              $OAH_DOWNLOAD_URL/v<version>/oah-<os>-<arch>.tar.gz[.sha256]
 #                      GitHub releases use the same layout:
-#                      OAH_DOWNLOAD_URL=https://github.com/dawsja/nar/releases/download
+#                      OAH_DOWNLOAD_URL=https://github.com/dawsja/oah/releases/download
 #   OAH_NO_MODIFY_PATH set to 1 to leave shell profiles alone
 set -eu
 
@@ -18,7 +18,7 @@ BASE="${OAH_DOWNLOAD_URL:-https://oah.sh/download}"
 BASE="${BASE%/}"
 ROOT="${OAH_INSTALL:-${XDG_CONFIG_HOME:-$HOME/.config}/oah}"
 BIN_DIR="$ROOT/bin"
-GITHUB_LATEST="https://github.com/dawsja/nar/releases/latest/download/latest.txt"
+GITHUB_LATEST="https://github.com/dawsja/oah/releases/latest/download/latest.txt"
 
 if [ -t 1 ]; then
   B="$(printf '\033[1m')"; D="$(printf '\033[2m')"; V="$(printf '\033[38;5;141m')"; G="$(printf '\033[32m')"; R="$(printf '\033[31m')"; N="$(printf '\033[0m')"
@@ -44,7 +44,7 @@ arch="$(uname -m)"
 case "$os" in
   Linux) os=linux ;;
   Darwin) os=darwin ;;
-  MINGW* | MSYS* | CYGWIN*) fail "Windows isn't supported yet — use WSL." ;;
+  MINGW* | MSYS* | CYGWIN*) fail "on Windows, run this in PowerShell instead:  irm https://oah.sh/install.ps1 | iex" ;;
   *) fail "unsupported OS: $os" ;;
 esac
 case "$arch" in

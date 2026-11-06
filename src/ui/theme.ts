@@ -10,6 +10,8 @@ export const t = {
   faint: "#5c5c62",
   accent: "#ffd43b",
   accentDeep: "#e0a800",
+  /** Brand ring color (assets/README.md). */
+  brandLight: "#e6edf3",
   cyan: "#6cc7ff",
   green: "#63d297",
   red: "#ff6b7d",

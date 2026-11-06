@@ -28,3 +28,4 @@ jobs:
             dist/*.sha256
             dist/latest.txt
             scripts/install.sh
+            scripts/install.ps1

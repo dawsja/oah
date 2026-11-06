@@ -13,7 +13,7 @@ import { readStdin, runPrint } from "./print"
 import { App } from "./ui/App"
 import { Store } from "./ui/store"
 
-const USAGE = `oah — an AI coding agent for your terminal
+const USAGE = `oah — Open Agent Harness
 
 Usage:
   oah [options] [prompt]   Full-screen app (an optional first prompt)
@@ -127,11 +127,13 @@ function copyNative(text: string): boolean {
       : [
           ...(process.env.WAYLAND_DISPLAY ? [["wl-copy"]] : []),
           ...(process.env.DISPLAY ? [["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]] : []),
+          ["clip.exe"], // WSL: the Windows clipboard
         ]
   for (const cmd of candidates) {
     try {
       const p = Bun.spawn(cmd, { stdin: "pipe", stdout: "ignore", stderr: "ignore" })
-      p.stdin.write(text)
+      // clip.exe reads UTF-16LE (with a BOM) correctly; anything else garbles non-ASCII.
+      p.stdin.write(cmd[0] === "clip.exe" ? Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, "utf16le")]) : text)
       p.stdin.end()
       p.unref()
       return true
@@ -222,6 +224,10 @@ async function main() {
   if (model) store.settings.model = model
   if (session) store.info(`Resumed session ${session.id}`)
   mcp.start()
+  void mcp.settled().then(() => {
+    const need = mcp.servers.filter((x) => x.state === "needs-auth").map((x) => x.name)
+    if (need.length) store.notify(`MCP: ${need.join(", ")} need${need.length === 1 ? "s" : ""} authentication — /mcp to sign in`)
+  })
 
   let exiting = false
   const exit = async () => {
@@ -229,10 +235,16 @@ async function main() {
     exiting = true
     store.shutdown()
     renderer.destroy()
-    await mcp.close().catch(() => {})
+    // A slow MCP server mustn't hold up exiting (or the resume hint).
+    await Promise.race([mcp.close().catch(() => {}), new Promise((r) => setTimeout(r, 2000))])
     if (store.session.messages.length) {
       saveSession(store.session)
       process.stdout.write(`\x1b[2mSession saved.\x1b[0m Resume with:\n\n  \x1b[1moah --resume ${store.session.id}\x1b[0m\n\n`)
+    } else {
+      // Nothing new to save: point at the latest conversation in this folder instead.
+      const last = latestSession(store.cwd)
+      if (last?.messages.length)
+        process.stdout.write(`\x1b[2mNothing new to save. Your last session here — “${last.title || "untitled"}” (${relativeTime(last.updated)}):\x1b[0m\n\n  \x1b[1moah -c\x1b[0m   \x1b[2mor\x1b[0m   \x1b[1moah --resume ${last.id}\x1b[0m\n\n`)
     }
     process.exit(0)
   }

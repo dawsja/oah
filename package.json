@@ -4,7 +4,7 @@
   "description": "A full-screen AI coding agent for your terminal, built on OpenTUI and the AI SDK",
   "type": "module",
   "license": "MIT",
-  "repository": "github:dawsja/nar",
+  "repository": "github:dawsja/oah",
   "bin": {
     "oah": "./src/index.tsx"
   },

@@ -8,6 +8,7 @@ import * as auth from "../auth"
 import { displayName } from "../catalog"
 import { permissionInfo, providerInfo, shortPath, VERSION } from "../config"
 import { Shimmer, Thinking, useTick } from "./Thinking"
+import { markCells } from "./logo"
 import { fmtCost, fmtTokens, t } from "./theme"
 import { Transcript } from "./Transcript"
 import { runningShells } from "../tools/shells"
@@ -110,7 +111,15 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
         store.setInput("")
         return
       }
-      return onExit()
+      // First ctrl+c stops a running turn; when idle, a second press confirms the exit.
+      if (store.busy) return void store.interrupt()
+      if (store.confirmExit()) onExit()
+      return
+    }
+    // While waiting for ChatGPT sign-in, "c" (on an empty input) copies the sign-in link.
+    if (key.name === "c" && !key.ctrl && !key.meta && !key.shift && store.loginUrl && !(input.current?.plainText ?? store.input)) {
+      stop()
+      return store.copyLoginUrl()
     }
     // Permission prompt captures input.
     if (store.permission) {
@@ -224,8 +233,23 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
         return
       case "return":
       case "kpenter":
-        if (key.shift || key.meta || key.ctrl) return // textarea inserts the newline
+        if (key.ctrl) {
+          // ctrl+enter: "send now" — into the running turn, or the queued messages if the input is empty.
+          stop()
+          return store.submit(input.current?.plainText ?? store.input, true)
+        }
+        if (key.shift || key.meta) return // textarea inserts the newline
         stop()
+        {
+          // "\" + enter → newline: works in terminals that send shift+enter as a plain enter.
+          const ta = input.current
+          const { row, col } = ta?.logicalCursor ?? { row: 0, col: 0 }
+          if (ta && col > 0 && ta.plainText.split("\n")[row]?.[col - 1] === "\\") {
+            ta.deleteCharBackward()
+            ta.newLine()
+            return
+          }
+        }
         return store.submit(input.current?.plainText ?? store.input)
       case "pageup":
         stop()
@@ -303,10 +327,12 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
                   : store.question
                     ? "or type your own answer and press enter"
                     : busy
-                      ? "type to queue a message · esc to interrupt"
+                      ? store.busy?.kind === "turn"
+                        ? "enter to queue · ctrl+enter to send now · esc to interrupt"
+                        : "type to queue a message · esc to interrupt"
                       : s.mode === "plan"
                         ? "describe what to plan… (tab for build mode)"
-                        : "ask anything · / for commands · shift+enter for newline"
+                        : "ask anything · / for commands · \\+enter for newline"
               }
               placeholderColor={t.faint}
               keyBindings={[
@@ -353,7 +379,26 @@ function Header({ store, width }: { store: Store; width: number }) {
   )
 }
 
-function Welcome({ store }: { store: Store }) {
+/** The oah mark (open ring + agent node), drawn with crisp half blocks. */
+function Mark({ rows }: { rows: number }) {
+  const cells = useMemo(() => markCells(rows, { ring: t.brandLight, node: t.accent }), [rows])
+  return (
+    <box flexDirection="column" flexShrink={0}>
+      {cells.map((line, i) => (
+        <text key={i} wrapMode="none">
+          {line.map((c, j) => (
+            <span key={j} fg={c.fg} bg={c.bg}>
+              {c.ch}
+            </span>
+          ))}
+        </text>
+      ))}
+    </box>
+  )
+}
+
+export function Welcome({ store }: { store: Store }) {
+  const { width } = useTerminalDimensions()
   const signedIn = auth.available(store.authStatus).length > 0
   const tips: [string, string][] = signedIn
     ? [
@@ -369,11 +414,17 @@ function Welcome({ store }: { store: Store }) {
       ]
   return (
     <box flexDirection="column" paddingTop={1} paddingLeft={1}>
-      <ascii-font text="oah" font="block" color={[t.accent, t.accentDeep]} />
-      <text>
-        <span fg={t.dim}>an AI coding agent for your terminal</span>
-        <span fg={t.faint}> v{VERSION}</span>
-      </text>
+      <box flexDirection="row">
+        {width >= 44 ? <Mark rows={7} /> : null}
+        <box flexDirection="column" marginLeft={width >= 44 ? 3 : 0}>
+          <ascii-font text="oah" font="block" color={[t.accent, t.accentDeep]} />
+          <text>
+            <span fg={t.dim}>open agent harness</span>
+            <span fg={t.faint}> · v{VERSION}</span>
+          </text>
+        </box>
+      </box>
+      <box height={1} />
       <text fg={t.faint}>{shortPath(store.cwd)}</text>
       <box height={1} />
       {tips.map(([k, d]) => (
@@ -415,12 +466,11 @@ function Activity({ store }: { store: Store }) {
         <box flexGrow={1} />
       )}
       {toast ? (
-        <text fg={toast.error ? t.red : t.green}>
-          {toast.error ? "✗ " : "✓ "}
-          {toast.text}
+        <text fg={toast.error ? t.red : t.green}>{toast.text}</text>
+      ) : store.queue.length || store.steers.length ? (
+        <text fg={t.dim}>
+          {[store.steers.length && `${store.steers.length} sending`, store.queue.length && `${store.queue.length} queued · ctrl+enter to send now`].filter(Boolean).join(" · ")}
         </text>
-      ) : store.queue.length ? (
-        <text fg={t.dim}>{store.queue.length} queued</text>
       ) : null}
     </box>
   )
@@ -434,7 +484,7 @@ function PermissionBox({ store }: { store: Store }) {
       border
       borderStyle="rounded"
       borderColor={t.yellow}
-      title={` Permission · ${p.kind} `}
+      title={` Permission · ${p.kind}${store.waitingPrompts ? ` · ${store.waitingPrompts} more waiting` : ""} `}
       flexDirection="column"
       paddingLeft={1}
       paddingRight={1}
