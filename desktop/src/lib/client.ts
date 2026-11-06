@@ -57,7 +57,7 @@ export class Client {
   /** Desktop app updates (background download and install). */
   updater = new Updater(
     () => this.emit(),
-    () => this.t.stop(),
+    () => this.stopEngine(),
     () => this.prefs.autoUpdate !== false,
   )
   history: string[] = []
@@ -397,6 +397,13 @@ export class Client {
 
   restart() {
     void this.start({ cwd: this.started?.cwd, resume: this.state?.session.id })
+  }
+
+  /** Stop the engine for good (before an update): it saves its session and says
+   * "exit", which must not close the window, so its events are dropped first. */
+  stopEngine(): Promise<void> {
+    this.gen++
+    return this.t.stop()
   }
 
   /** Time spent on the goal so far, ticking while it runs (Store.goalElapsed). */
