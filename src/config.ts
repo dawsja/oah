@@ -1,15 +1,15 @@
-// Paths (~/.config/nur), settings and shared enums.
+// Paths (~/.config/oah), settings and shared enums.
 import { mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
 export const VERSION = "0.1.0"
 
-/** `$NUR_HOME`, else `$XDG_CONFIG_HOME/nur`, else `~/.config/nur`. */
+/** `$OAH_HOME`, else `$XDG_CONFIG_HOME/oah`, else `~/.config/oah`. */
 export function homeDir(): string {
-  if (process.env.NUR_HOME) return process.env.NUR_HOME
+  if (process.env.OAH_HOME) return process.env.OAH_HOME
   const xdg = process.env.XDG_CONFIG_HOME
-  return join(xdg && xdg.length > 0 ? xdg : join(homedir(), ".config"), "nur")
+  return join(xdg && xdg.length > 0 ? xdg : join(homedir(), ".config"), "oah")
 }
 
 export const paths = {

@@ -1,7 +1,7 @@
 // Memory: instruction files plus persistent notes.
-//  * Instruction files: ~/.config/nur/AGENTS.md, then for each directory from the
-//    repository root down to cwd the first of AGENTS.md, NUR.md, CLAUDE.md.
-//  * Notes: ~/.config/nur/memory/global.md and a per-project file, added with
+//  * Instruction files: ~/.config/oah/AGENTS.md, then for each directory from the
+//    repository root down to cwd the first of AGENTS.md, OAH.md, CLAUDE.md.
+//  * Notes: ~/.config/oah/memory/global.md and a per-project file, added with
 //    `#note`, `/memory add`, or the model's `memory` tool.
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
@@ -43,7 +43,7 @@ export class Memory {
       d = up
     }
     for (const dir of chain) {
-      const f = ["AGENTS.md", "NUR.md", "CLAUDE.md"].map((n) => join(dir, n)).find(existsSync)
+      const f = ["AGENTS.md", "OAH.md", "CLAUDE.md"].map((n) => join(dir, n)).find(existsSync)
       if (f) out.push(f)
     }
     return out
@@ -71,17 +71,17 @@ export class Memory {
     const file = global ? this.globalFile : this.projectFile
     const e = this.entries(file)
     if (!e.includes(t)) e.push(t)
-    this.write(file, global ? "nur global memory" : `nur memory for ${this.root}`, e)
+    this.write(file, global ? "oah global memory" : `oah memory for ${this.root}`, e)
   }
 
   remove(needle: string, global = false): number {
     const n = needle.trim().toLowerCase()
     let removed = 0
     const targets: [string, string][] = global
-      ? [[this.globalFile, "nur global memory"]]
+      ? [[this.globalFile, "oah global memory"]]
       : [
-          [this.projectFile, `nur memory for ${this.root}`],
-          [this.globalFile, "nur global memory"],
+          [this.projectFile, `oah memory for ${this.root}`],
+          [this.globalFile, "oah global memory"],
         ]
     for (const [file, title] of targets) {
       const e = this.entries(file)

@@ -35,7 +35,7 @@ export function startShell(command: string, cwd: string): Shell {
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, NUR: "1", TERM: "dumb", PAGER: "cat", GIT_PAGER: "cat" },
+    env: { ...process.env, OAH: "1", TERM: "dumb", PAGER: "cat", GIT_PAGER: "cat" },
   })
   const sh: Shell = { id, command, cwd, started: Date.now(), exitCode: null, output: "", readPos: 0, dropped: 0, proc }
   shells.set(id, sh)

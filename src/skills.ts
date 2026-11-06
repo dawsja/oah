@@ -1,7 +1,7 @@
 // Agent Skills: folders with a SKILL.md (front matter `name`, `description`).
 // Only names/descriptions go in the system prompt; `load_skill` (or /<name>)
-// loads the body. Search order (first name wins): ./.nur/skills,
-// ./.agents/skills, ./.claude/skills, ~/.config/nur/skills, ~/.agents/skills,
+// loads the body. Search order (first name wins): ./.oah/skills,
+// ./.agents/skills, ./.claude/skills, ~/.config/oah/skills, ~/.agents/skills,
 // ~/.claude/skills.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
@@ -41,7 +41,7 @@ export class Skills {
 
   constructor(cwd: string) {
     const roots: [string, Skill["scope"]][] = [
-      [join(cwd, ".nur/skills"), "project"],
+      [join(cwd, ".oah/skills"), "project"],
       [join(cwd, ".agents/skills"), "project"],
       [join(cwd, ".claude/skills"), "project"],
       [paths.skills, "user"],

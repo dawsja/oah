@@ -18,7 +18,7 @@ export const COMMANDS: Command[] = [
   { name: "memory", args: "[add|global|remove <text>]", desc: "View or edit persistent memory" },
   { name: "skills", args: "", desc: "List available skills" },
   { name: "mcp", args: "", desc: "Show MCP servers and tools" },
-  { name: "tools", args: "", desc: "List the tools nur can use" },
+  { name: "tools", args: "", desc: "List the tools oah can use" },
   { name: "init", args: "", desc: "Write an AGENTS.md for this project" },
   { name: "copy", args: "", desc: "Copy the last answer to the clipboard" },
   { name: "help", args: "", desc: "Keys and commands" },

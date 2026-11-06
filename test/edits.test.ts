@@ -14,7 +14,7 @@ const run = (name: string, args: any) => TOOLS.find((t) => t.name === name)!.run
 const read = (p: string) => readFileSync(join(dir, p), "utf8")
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), "nur-edits-"))
+  dir = mkdtempSync(join(tmpdir(), "oah-edits-"))
   ctx = { cwd: dir, signal: new AbortController().signal, skills: new Skills(dir), memory: new Memory(dir), mode: "build", onTodos() {}, onGoalComplete() {} }
 })
 afterAll(() => {

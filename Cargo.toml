@@ -1,4 +1,4 @@
-# Rust bindings to OpenTUI's native (Zig) C ABI. The nur app itself is
+# Rust bindings to OpenTUI's native (Zig) C ABI. The oah app itself is
 # TypeScript (src/); this crate is a standalone wrapper over the same core.
 [workspace]
 resolver = "2"

@@ -11,7 +11,7 @@ let ctx: ToolCtx
 const run = (name: string, args: any) => TOOLS.find((t) => t.name === name)!.run(args, ctx)
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), "nur-search-"))
+  dir = mkdtempSync(join(tmpdir(), "oah-search-"))
   mkdirSync(join(dir, "src/deep/er"), { recursive: true })
   mkdirSync(join(dir, "build"))
   mkdirSync(join(dir, ".hidden"))
@@ -78,10 +78,10 @@ describe("find", () => {
 for (const engine of ["ripgrep", "js"] as const) {
   describe(`grep (${engine})`, () => {
     beforeAll(() => {
-      if (engine === "js") process.env.NUR_NO_RG = "1"
-      else delete process.env.NUR_NO_RG
+      if (engine === "js") process.env.OAH_NO_RG = "1"
+      else delete process.env.OAH_NO_RG
     })
-    afterAll(() => delete process.env.NUR_NO_RG)
+    afterAll(() => delete process.env.OAH_NO_RG)
     test("content matches with line numbers, gitignore respected", async () => {
       const o = await run("grep", { pattern: "hello", glob: "*.ts" })
       expect(o.output.split("\n").sort()).toEqual(["src/app.test.ts:1: test('hello', () => {})", "src/app.ts:2: function hello() {}"])

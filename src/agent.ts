@@ -233,7 +233,7 @@ async function runSubagent(parent: TurnOptions, prompt: string, callId: string):
     mode: "plan",
     goalActive: false,
     only: SUBAGENT_TOOLS,
-    instructions: `You are a research sub-agent for nur, a coding agent. Another agent delegated one question to you; it can't see your work, only your final message.
+    instructions: `You are a research sub-agent for oah, a coding agent. Another agent delegated one question to you; it can't see your work, only your final message.
 - Investigate with your read-only tools (read_file, ls, find, grep, web_fetch, and bash for read-only commands). You cannot modify anything.
 - Be efficient: search before reading, read only what you need, run independent lookups in parallel.
 - Finish with a concise, specific report that answers the question: key findings, file paths with line numbers, short code excerpts where useful, and anything you couldn't determine.
@@ -307,7 +307,7 @@ export function describeError(e: unknown): string {
       case "subscription_sharing_usage_limit_exceeded":
         return `You've reached your ChatGPT plan's usage limit. Manage usage: ${USAGE_URL}`
       case "subscription_sharing_user_not_eligible":
-        return "This ChatGPT account isn't eligible to use its plan in nur. Add an API key with /auth."
+        return "This ChatGPT account isn't eligible to use its plan in oah. Add an API key with /auth."
       case "subscription_sharing_invalid_user":
         return "Your ChatGPT session is no longer valid — run /auth to sign in again."
       case "subscription_sharing_usage_unavailable":
@@ -402,7 +402,7 @@ export async function compact(o: { model: string; effort: Effort; settings: Sett
 
 export function systemPrompt(o: { cwd: string; mode: Mode; goal?: string; skills: string; memory: string; mcp: string[] }): string {
   const git = existsSync(join(projectRoot(o.cwd), ".git"))
-  let s = `You are nur, an expert software engineering agent running in the user's terminal. You help with coding tasks by reading and editing files and running commands in the workspace.
+  let s = `You are oah, an expert software engineering agent running in the user's terminal. You help with coding tasks by reading and editing files and running commands in the workspace.
 
 # Working style
 - Be concise and direct. Use GitHub-flavored Markdown; keep answers short unless detail is requested.

@@ -9,7 +9,7 @@ import * as auth from "./auth"
 import { clampEffort, lookup } from "./catalog"
 import { splitModel, VERSION, type Effort, type Settings } from "./config"
 
-const UA = `nur/${VERSION} (${process.platform}; ${process.arch})`
+const UA = `oah/${VERSION} (${process.platform}; ${process.arch})`
 
 /** fetch that injects a fresh ChatGPT access token and retries once after a 401. */
 const chatgptFetch: typeof fetch = Object.assign(

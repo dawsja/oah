@@ -344,7 +344,7 @@ function walkEntries(root: string, signal: AbortSignal, o: { hidden: boolean; gi
 
 let rgPath: string | null | undefined
 function findRg(): string | null {
-  if (process.env.NUR_NO_RG) return null
+  if (process.env.OAH_NO_RG) return null
   if (rgPath === undefined) rgPath = Bun.which("rg") ?? null
   return rgPath
 }
@@ -715,7 +715,7 @@ export const TOOLS: ToolDef[] = [
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
-        env: { ...process.env, NUR: "1", TERM: "dumb", PAGER: "cat", GIT_PAGER: "cat" },
+        env: { ...process.env, OAH: "1", TERM: "dumb", PAGER: "cat", GIT_PAGER: "cat" },
       })
       const kill = () => proc.kill("SIGKILL")
       ctx.signal.addEventListener("abort", kill, { once: true })
@@ -772,7 +772,7 @@ export const TOOLS: ToolDef[] = [
       }
       if (!/^https?:$/.test(url.protocol)) return fail("only http(s) URLs are supported")
       try {
-        const r = await fetch(url, { signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(30_000)]), headers: { "User-Agent": "nur" } })
+        const r = await fetch(url, { signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(30_000)]), headers: { "User-Agent": "oah" } })
         let body = await r.text()
         if ((r.headers.get("content-type") ?? "").includes("html")) body = htmlToText(body)
         body = body.slice(0, 100_000)

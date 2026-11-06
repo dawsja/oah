@@ -1,4 +1,4 @@
-// The conversation. Answer-first: your prompt as a heading, nur's thinking and
+// The conversation. Answer-first: your prompt as a heading, oah's thinking and
 // tool calls folded into one steps line, edits keep their diffs, then the answer.
 import type { SyntaxStyle } from "@opentui/core"
 import type { Entry } from "../session"
@@ -38,7 +38,7 @@ interface Turn {
 
 type Group = Turn | { kind: "note"; entry: Entry }
 
-/** Split the transcript into exchanges (your message + nur's work) and standalone notes. */
+/** Split the transcript into exchanges (your message + oah's work) and standalone notes. */
 export function groupTurns(entries: Entry[]): Group[] {
   const out: Group[] = []
   let cur: Turn | null = null

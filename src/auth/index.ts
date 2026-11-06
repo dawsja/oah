@@ -193,10 +193,10 @@ export async function beginChatGptLogin(): Promise<PendingLogin> {
     if (u.pathname !== "/auth/callback") return new Response("Not found", { status: 404 })
     const ok = u.searchParams.get("state") === state
     const [title, msg] = !ok
-      ? ["Sign-in failed", "The response didn't match this request. Return to nur and try again."]
+      ? ["Sign-in failed", "The response didn't match this request. Return to oah and try again."]
       : u.searchParams.get("error")
         ? ["Sign-in cancelled", "No changes were made. You can close this tab."]
-        : ["Signed in to nur", "You can close this tab and return to your terminal."]
+        : ["Signed in to oah", "You can close this tab and return to your terminal."]
     queueMicrotask(() => (ok ? resolveParams(u.searchParams) : rejectParams(new Error("state mismatch in OAuth callback"))))
     return new Response(
       `<!doctype html><meta charset=utf-8><title>${title}</title><body style="font-family:system-ui;background:#0f1117;color:#e6e8ef;display:grid;place-items:center;height:100vh;margin:0"><div style="text-align:center"><h1 style="font-weight:600">${title}</h1><p style="color:#8a90a6">${msg}</p></div>`,
@@ -215,7 +215,7 @@ export async function beginChatGptLogin(): Promise<PendingLogin> {
   const q = url.searchParams
   q.set("response_type", "code")
   q.set("client_id", clientId ?? REGISTRATION_CLIENT_ID)
-  if (registering) q.set("agent_name_hint", "nur")
+  if (registering) q.set("agent_name_hint", "oah")
   q.set("ext_agent_host_id", host)
   q.set("redirect_uri", redirectUri)
   q.set("scope", SCOPES)
@@ -315,7 +315,7 @@ async function verifyIdToken(token: string, clientId: string, nonce: string): Pr
 export async function logoutChatGpt(): Promise<string> {
   const c = store.chatgpt
   if (!c) return "Not signed in to ChatGPT."
-  let note = "Signed out locally. Revocation couldn't be confirmed — disconnect nur in ChatGPT settings if needed."
+  let note = "Signed out locally. Revocation couldn't be confirmed — disconnect oah in ChatGPT settings if needed."
   try {
     const disco = (await (await fetch(DISCOVERY_URL)).json()) as { revocation_endpoint?: string }
     if (c.refresh_token && disco.revocation_endpoint) {

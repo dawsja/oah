@@ -1,4 +1,4 @@
-# nur
+# oah
 
 A full-screen AI coding agent for your terminal. Built with
 [OpenTUI](https://github.com/anomalyco/opentui) (Zig core, React bindings), the
@@ -6,11 +6,11 @@ A full-screen AI coding agent for your terminal. Built with
 
 Use your **ChatGPT plan** (Sign in with ChatGPT), an **Anthropic API key**, or an **OpenAI API key**.
 
-![nur](docs/screenshot.png)
+![oah](docs/screenshot.png)
 
 ```sh
-curl -fsSL https://nur.sh/install.sh | sh
-nur
+curl -fsSL https://oah.sh/install.sh | sh
+oah
 ```
 
 ## Layout
@@ -31,7 +31,7 @@ the **permission** level on the left and the **context meter** on the right.
 | Esc | interrupt the running turn |
 | PgUp / PgDn, wheel | scroll |
 | mouse drag | select text — copied on release (OSC 52 + wl-copy / xclip / pbcopy) |
-| Ctrl+C | quit — prints `nur --resume <id>` |
+| Ctrl+C | quit — prints `oah --resume <id>` |
 | `#note` | save a note to project memory |
 
 ## Commands
@@ -41,13 +41,13 @@ the **permission** level on the left and the **context meter** on the right.
 
 - **/goal** keeps working turn after turn until the model calls `goal_complete` (Esc pauses, `/goal clear` stops).
 - **Auto-compaction** summarizes the conversation at 85% of the model's context window (from models.dev).
-- **/session** lists saved conversations; `nur -c` continues the latest here, `nur -r <id>` resumes one.
+- **/session** lists saved conversations; `oah -c` continues the latest here, `oah -r <id>` resumes one.
 
 ## Providers
 
 | Provider | Model ids | Auth |
 | --- | --- | --- |
-| ChatGPT plan | `chatgpt/gpt-5.6`, … | `/auth` → Continue with ChatGPT (or `nur login`) |
+| ChatGPT plan | `chatgpt/gpt-5.6`, … | `/auth` → Continue with ChatGPT (or `oah login`) |
 | Anthropic | `anthropic/claude-opus-5-5`, `anthropic/claude-sonnet-5-5`, … | `/auth` → Anthropic API key, or `ANTHROPIC_API_KEY` |
 | OpenAI | `openai/gpt-5.6`, … | `/auth` → OpenAI API key, or `OPENAI_API_KEY` |
 
@@ -76,7 +76,7 @@ come from each model's `reasoning_options`.
 | `bash` | run a shell command (read-only in plan mode); `background: true` for servers and watchers | safe commands run; others ask |
 | `bash_output` / `bash_kill` | read new output from / stop a background shell (`⧗ N bg` in the status bar) | runs |
 | `task` | delegate research to a read-only sub-agent with a fresh context; live progress, runs in parallel | runs (its own tools follow your permissions) |
-| `ask_user` | ask you a question with options, or take your own typed answer — nur asks instead of assuming | runs |
+| `ask_user` | ask you a question with options, or take your own typed answer — oah asks instead of assuming | runs |
 | `web_fetch` | fetch a URL as text | asks |
 | `todo_write` | the live task list | runs |
 | `memory` | add/remove/list persistent notes | runs |
@@ -84,7 +84,7 @@ come from each model's `reasoning_options`.
 | `goal_complete` | finish an active `/goal` | runs |
 | MCP tools | `mcp__<server>__<tool>` from your MCP servers | asks |
 
-When nur asks a question: **↑↓** or **1–9** to pick (space ticks in multi-select), **enter** to answer, or type
+When oah asks a question: **↑↓** or **1–9** to pick (space ticks in multi-select), **enter** to answer, or type
 your own answer in the composer; **esc** dismisses. Background shells are stopped on `/clear` and on exit.
 
 At a prompt: **y** allow once · **a** always allow (this session: per command, per MCP tool, or all edits) ·
@@ -92,12 +92,12 @@ At a prompt: **y** allow once · **a** always allow (this session: per command, 
 
 ## Memory, skills, MCP
 
-- **Instructions:** `~/.config/nur/AGENTS.md`, then from the repo root down to the working directory the
-  first of `AGENTS.md`, `NUR.md`, `CLAUDE.md`. `/init` writes one.
+- **Instructions:** `~/.config/oah/AGENTS.md`, then from the repo root down to the working directory the
+  first of `AGENTS.md`, `OAH.md`, `CLAUDE.md`. `/init` writes one.
 - **Notes:** `#note`, `/memory add|global|remove`, or the model's `memory` tool.
-- **Skills:** folders with a `SKILL.md` in `./.nur/skills`, `./.agents/skills`, `./.claude/skills`,
-  `~/.config/nur/skills`, `~/.agents/skills`, `~/.claude/skills`.
-- **MCP:** `~/.config/nur/mcp.json`, `./.nur/mcp.json` or `./.mcp.json` (stdio and HTTP, via `@ai-sdk/mcp`):
+- **Skills:** folders with a `SKILL.md` in `./.oah/skills`, `./.agents/skills`, `./.claude/skills`,
+  `~/.config/oah/skills`, `~/.agents/skills`, `~/.claude/skills`.
+- **MCP:** `~/.config/oah/mcp.json`, `./.oah/mcp.json` or `./.mcp.json` (stdio and HTTP, via `@ai-sdk/mcp`):
 
   ```json
   { "mcpServers": {
@@ -107,10 +107,10 @@ At a prompt: **y** allow once · **a** always allow (this session: per command, 
 
 ## Files
 
-Everything lives in `~/.config/nur` (`$XDG_CONFIG_HOME/nur`, or `$NUR_HOME`):
+Everything lives in `~/.config/oah` (`$XDG_CONFIG_HOME/oah`, or `$OAH_HOME`):
 
 ```text
-bin/nur              the binary (installed by install.sh)
+bin/oah              the binary (installed by install.sh)
 settings.json        model, effort, permission, mode, autoCompactAt, allowedCommands
 auth.json            credentials (0600)    host_id   ext_agent_host_id for ChatGPT
 sessions/<id>.json   conversations         history.jsonl  prompt history
@@ -120,28 +120,28 @@ memory/  skills/  mcp.json  AGENTS.md  models.json (models.dev cache)
 ## Install & release
 
 ```sh
-curl -fsSL https://nur.sh/install.sh | sh                     # latest
-curl -fsSL https://nur.sh/install.sh | NUR_VERSION=0.1.0 sh   # pinned
+curl -fsSL https://oah.sh/install.sh | sh                     # latest
+curl -fsSL https://oah.sh/install.sh | OAH_VERSION=0.1.0 sh   # pinned
 ```
 
 `scripts/install.sh` detects the platform (Linux/macOS, x64/arm64), downloads
-`$NUR_DOWNLOAD_URL/v<version>/nur-<os>-<arch>.tar.gz`, verifies its `.sha256`, installs to
-`~/.config/nur/bin/nur` and adds that to your shell's PATH.
+`$OAH_DOWNLOAD_URL/v<version>/oah-<os>-<arch>.tar.gz`, verifies its `.sha256`, installs to
+`~/.config/oah/bin/oah` and adds that to your shell's PATH.
 
-Hosting on Cloudflare: serve `scripts/install.sh` at `https://nur.sh/install.sh` and put the release files
-under `https://nur.sh/download/`:
+Hosting on Cloudflare: serve `scripts/install.sh` at `https://oah.sh/install.sh` and put the release files
+under `https://oah.sh/download/`:
 
 ```text
 download/latest.txt                         0.1.0
-download/v0.1.0/nur-linux-x64.tar.gz        + .sha256
-download/v0.1.0/nur-linux-arm64.tar.gz      + .sha256
-download/v0.1.0/nur-darwin-x64.tar.gz       + .sha256
-download/v0.1.0/nur-darwin-arm64.tar.gz     + .sha256
+download/v0.1.0/oah-linux-x64.tar.gz        + .sha256
+download/v0.1.0/oah-linux-arm64.tar.gz      + .sha256
+download/v0.1.0/oah-darwin-x64.tar.gz       + .sha256
+download/v0.1.0/oah-darwin-arm64.tar.gz     + .sha256
 ```
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds all four with `bun scripts/build.ts --all`
-and attaches them (plus `latest.txt` and `install.sh`) to a GitHub release. Until nur.sh is live, install
-from GitHub with `NUR_DOWNLOAD_URL=https://github.com/dawsja/nar/releases/download`.
+and attaches them (plus `latest.txt` and `install.sh`) to a GitHub release. Until oah.sh is live, install
+from GitHub with `OAH_DOWNLOAD_URL=https://github.com/dawsja/nar/releases/download`.
 
 ## Develop
 
@@ -150,17 +150,17 @@ git clone --recursive https://github.com/dawsja/nar && cd nar
 bun install
 bun run dev            # run from source
 bun test && bun run typecheck   # tests live in test/ (bunfig.toml)
-bun run build          # dist/nur-<os>-<arch>.tar.gz for this machine
+bun run build          # dist/oah-<os>-<arch>.tar.gz for this machine
 ```
 
-Each binary is the Bun runtime plus nur plus OpenTUI's prebuilt native library (compiled from Zig), so
+Each binary is the Bun runtime plus oah plus OpenTUI's prebuilt native library (compiled from Zig), so
 users need nothing else installed.
 
 ### AI SDK skills
 
 The repo ships the AI SDK's agent skills (installed with `npx skills add vercel/ai`, pinned in
 `skills-lock.json`): `ai-sdk` and `migrate-ai-sdk-v6-to-v7` in `.agents/skills/`, symlinked into
-`.claude/skills/`. Coding agents working on this repo — including nur itself, which reads both folders — use
+`.claude/skills/`. Coding agents working on this repo — including oah itself, which reads both folders — use
 them to check AI SDK APIs against the version-matched docs in `node_modules/ai/docs`. Update with
 `npx skills update`.
 

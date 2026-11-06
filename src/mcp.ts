@@ -1,5 +1,5 @@
 // MCP servers via @ai-sdk/mcp (stdio and Streamable HTTP). Configured in
-// ~/.config/nur/mcp.json, ./.nur/mcp.json or ./.mcp.json:
+// ~/.config/oah/mcp.json, ./.oah/mcp.json or ./.mcp.json:
 //   { "mcpServers": { "fs": { "command": "npx", "args": ["-y", "…"] },
 //                     "docs": { "url": "https://…/mcp", "headers": { … } } } }
 // Tools are exposed as `mcp__<server>__<tool>`.
@@ -42,7 +42,7 @@ export class Mcp {
   ) {}
 
   start() {
-    const files = [paths.mcp, join(this.cwd, ".nur", "mcp.json"), join(this.cwd, ".mcp.json")]
+    const files = [paths.mcp, join(this.cwd, ".oah", "mcp.json"), join(this.cwd, ".mcp.json")]
     const configs = new Map<string, [ServerConfig, string]>()
     for (const f of files) {
       const raw = readJson<any>(f, null)
@@ -63,7 +63,7 @@ export class Mcp {
         ? { type: cfg.type ?? ("http" as const), url: cfg.url, headers: cfg.headers }
         : new StdioMCPTransport({ command: cfg.command!, args: cfg.args ?? [], env: { ...(process.env as Record<string, string>), ...(cfg.env ?? {}) }, cwd: cfg.cwd ?? this.cwd, stderr: "ignore" })
       if (!cfg.url && !cfg.command) throw new Error('missing "command" or "url"')
-      const client = await createMCPClient({ transport, clientName: "nur", version: VERSION })
+      const client = await createMCPClient({ transport, clientName: "oah", version: VERSION })
       const tools = (await client.tools()) as ToolSet
       const exposed: ToolSet = {}
       for (const [name, t] of Object.entries(tools)) exposed[exposedName(server.name, name)] = t

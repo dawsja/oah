@@ -1,6 +1,6 @@
 // Model catalog from https://models.dev — context windows, reasoning effort
-// levels, costs and capabilities. Cached in ~/.config/nur/models.json for a day;
-// a small built-in table keeps nur working offline.
+// levels, costs and capabilities. Cached in ~/.config/oah/models.json for a day;
+// a small built-in table keeps oah working offline.
 import { statSync } from "node:fs"
 import { defaultModel, paths, providerInfo, readJson, splitModel, writeFileAtomic, type Effort, type Provider } from "./config"
 
@@ -58,7 +58,7 @@ function cacheAge(): number {
 export async function refreshCatalog(force = false): Promise<boolean> {
   if (!force && cacheAge() < TTL_MS) return false
   try {
-    const r = await fetch(process.env.NUR_MODELS_URL ?? URL, { signal: AbortSignal.timeout(10_000) })
+    const r = await fetch(process.env.OAH_MODELS_URL ?? URL, { signal: AbortSignal.timeout(10_000) })
     if (!r.ok) return false
     const all = (await r.json()) as Catalog
     const slim: Catalog = {}
@@ -82,7 +82,7 @@ export function contextWindow(full: string, override?: number): number {
   return m?.limit?.input ?? m?.limit?.context ?? (splitModel(full).provider === "anthropic" ? 1_000_000 : 400_000)
 }
 
-/** Effort levels the model accepts, mapped onto nur's scale. */
+/** Effort levels the model accepts, mapped onto oah's scale. */
 export function effortsFor(full: string): Effort[] {
   const m = lookup(full)
   const values = m?.reasoning_options?.find((o) => o.type === "effort")?.values

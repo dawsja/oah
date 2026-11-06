@@ -1,4 +1,4 @@
-// Saved sessions (~/.config/nur/sessions/<id>.json), the transcript model and
+// Saved sessions (~/.config/oah/sessions/<id>.json), the transcript model and
 // prompt history.
 import { appendFileSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"

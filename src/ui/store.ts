@@ -620,10 +620,10 @@ export class Store {
       case "memory":
         return this.memoryCommand(args)
       case "skills":
-        if (!this.skills.list.length) return this.info("No skills found. Add folders with a `SKILL.md` to `~/.config/nur/skills` or `./.nur/skills` (`.claude/skills` and `.agents/skills` work too).")
+        if (!this.skills.list.length) return this.info("No skills found. Add folders with a `SKILL.md` to `~/.config/oah/skills` or `./.oah/skills` (`.claude/skills` and `.agents/skills` work too).")
         return this.info("**Skills** — run with /<name>, or the model loads them when relevant:\n" + this.skills.list.map((s) => `- **${s.name}** (${s.scope}) — ${s.description}`).join("\n"))
       case "mcp":
-        if (!this.mcp.servers.length) return this.info('No MCP servers configured. Add them to `~/.config/nur/mcp.json`, `./.nur/mcp.json` or `./.mcp.json`:\n```json\n{ "mcpServers": { "name": { "command": "npx", "args": ["-y", "some-mcp-server"] } } }\n```')
+        if (!this.mcp.servers.length) return this.info('No MCP servers configured. Add them to `~/.config/oah/mcp.json`, `./.oah/mcp.json` or `./.mcp.json`:\n```json\n{ "mcpServers": { "name": { "command": "npx", "args": ["-y", "some-mcp-server"] } } }\n```')
         return this.info(
           "**MCP servers**\n" +
             this.mcp.servers
@@ -655,7 +655,7 @@ export class Store {
   private goalCommand(args: string) {
     if (!args) {
       const g = this.session.goal
-      return this.info(g ? (g.done ? `Last goal completed:\n${g.text}` : `**Active goal** (turn ${g.turns}):\n${g.text}`) : "No goal set. Usage: `/goal <objective>` — nur keeps working until it's complete.")
+      return this.info(g ? (g.done ? `Last goal completed:\n${g.text}` : `**Active goal** (turn ${g.turns}):\n${g.text}`) : "No goal set. Usage: `/goal <objective>` — oah keeps working until it's complete.")
     }
     if (["clear", "stop", "off", "cancel"].includes(args)) {
       this.session.goal = undefined

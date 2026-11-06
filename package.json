@@ -1,12 +1,12 @@
 {
-  "name": "nur",
+  "name": "oah",
   "version": "0.1.0",
   "description": "A full-screen AI coding agent for your terminal, built on OpenTUI and the AI SDK",
   "type": "module",
   "license": "MIT",
   "repository": "github:dawsja/nar",
   "bin": {
-    "nur": "./src/index.tsx"
+    "oah": "./src/index.tsx"
   },
   "scripts": {
     "dev": "bun src/index.tsx",

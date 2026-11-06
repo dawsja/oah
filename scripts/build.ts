@@ -1,8 +1,8 @@
-// Build standalone `nur` binaries (Bun runtime + OpenTUI's native Zig library
+// Build standalone `oah` binaries (Bun runtime + OpenTUI's native Zig library
 // embedded) and release tarballs for install.sh:
 //   bun scripts/build.ts            → host target only
 //   bun scripts/build.ts --all      → every supported target
-// Output: dist/nur-<os>-<arch>.tar.gz (+ .sha256) and dist/latest.txt
+// Output: dist/oah-<os>-<arch>.tar.gz (+ .sha256) and dist/latest.txt
 import { $ } from "bun"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -35,19 +35,19 @@ for (const t of targets) {
   // Each target needs its platform's prebuilt OpenTUI library (built with Zig) on disk.
   const pkgDir = `node_modules/${t.pkg}`
   if (!existsSync(pkgDir)) {
-    const tmp = mkdtempSync(join(tmpdir(), "nur-"))
+    const tmp = mkdtempSync(join(tmpdir(), "oah-"))
     await $`npm pack ${t.pkg}@${OPENTUI_VERSION} --pack-destination ${tmp}`.quiet()
     mkdirSync(pkgDir, { recursive: true })
     await $`tar -xzf ${tmp}/*.tgz -C ${pkgDir} --strip-components=1`
   }
-  const dir = `dist/nur-${t.name}`
+  const dir = `dist/oah-${t.name}`
   mkdirSync(dir, { recursive: true })
   // Only this target's native library is embedded; other platforms stay external.
   const external = PLATFORM_PKGS.filter((p) => p !== t.pkg).flatMap((p) => ["--external", p])
-  await $`bun build src/index.tsx --compile --minify --sourcemap=none --target=${t.bun} --define process.env.NODE_ENV='"production"' ${external} --outfile ${dir}/nur`
-  await $`tar -C ${dir} -czf dist/nur-${t.name}.tar.gz nur`
-  const sum = (await $`shasum -a 256 dist/nur-${t.name}.tar.gz`.text()).split(" ")[0]
-  writeFileSync(`dist/nur-${t.name}.tar.gz.sha256`, `${sum}\n`)
-  console.log(`built dist/nur-${t.name}.tar.gz`)
+  await $`bun build src/index.tsx --compile --minify --sourcemap=none --target=${t.bun} --define process.env.NODE_ENV='"production"' ${external} --outfile ${dir}/oah`
+  await $`tar -C ${dir} -czf dist/oah-${t.name}.tar.gz oah`
+  const sum = (await $`shasum -a 256 dist/oah-${t.name}.tar.gz`.text()).split(" ")[0]
+  writeFileSync(`dist/oah-${t.name}.tar.gz.sha256`, `${sum}\n`)
+  console.log(`built dist/oah-${t.name}.tar.gz`)
 }
 writeFileSync("dist/latest.txt", `${version}\n`)

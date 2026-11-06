@@ -314,7 +314,7 @@ function Header({ store, width }: { store: Store; width: number }) {
   return (
     <box height={1} flexShrink={0} flexDirection="row" backgroundColor={t.panel} paddingRight={1}>
       <text bg={t.accent} fg={t.bg}>
-        <b>{" ◆ nur "}</b>
+        <b>{" ◆ oah "}</b>
       </text>
       <text fg={t.dim} flexGrow={1} wrapMode="none">
         {" "}
@@ -341,7 +341,7 @@ function Welcome({ store }: { store: Store }) {
       ]
   return (
     <box flexDirection="column" paddingTop={1} paddingLeft={1}>
-      <ascii-font text="nur" font="block" color={[t.accent, t.cyan]} />
+      <ascii-font text="oah" font="block" color={[t.accent, t.cyan]} />
       <text>
         <span fg={t.dim}>an AI coding agent for your terminal</span>
         <span fg={t.faint}> v{VERSION}</span>
@@ -456,7 +456,7 @@ function QuestionBox({ store }: { store: Store }) {
       border
       borderStyle="rounded"
       borderColor={t.cyan}
-      title=" nur has a question "
+      title=" oah has a question "
       flexDirection="column"
       paddingLeft={1}
       paddingRight={1}

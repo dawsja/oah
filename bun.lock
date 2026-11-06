@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "nur",
+      "name": "oah",
       "dependencies": {
         "@ai-sdk/anthropic": "^4.0.97",
         "@ai-sdk/mcp": "^2.0.91",

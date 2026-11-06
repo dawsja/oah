@@ -1,22 +1,22 @@
 #!/bin/sh
-# nur installer
+# oah installer
 #
-#   curl -fsSL https://nur.sh/install.sh | sh
+#   curl -fsSL https://oah.sh/install.sh | sh
 #
 # Options (environment variables):
-#   NUR_VERSION        version to install, e.g. 0.1.0 (default: latest)
-#   NUR_INSTALL        install root (default: ~/.config/nur); the binary goes in $NUR_INSTALL/bin
-#   NUR_DOWNLOAD_URL   where release files live (default: https://nur.sh/download)
-#                      layout: $NUR_DOWNLOAD_URL/latest.txt
-#                              $NUR_DOWNLOAD_URL/v<version>/nur-<os>-<arch>.tar.gz[.sha256]
+#   OAH_VERSION        version to install, e.g. 0.1.0 (default: latest)
+#   OAH_INSTALL        install root (default: ~/.config/oah); the binary goes in $OAH_INSTALL/bin
+#   OAH_DOWNLOAD_URL   where release files live (default: https://oah.sh/download)
+#                      layout: $OAH_DOWNLOAD_URL/latest.txt
+#                              $OAH_DOWNLOAD_URL/v<version>/oah-<os>-<arch>.tar.gz[.sha256]
 #                      GitHub releases use the same layout:
-#                      NUR_DOWNLOAD_URL=https://github.com/dawsja/nar/releases/download
-#   NUR_NO_MODIFY_PATH set to 1 to leave shell profiles alone
+#                      OAH_DOWNLOAD_URL=https://github.com/dawsja/nar/releases/download
+#   OAH_NO_MODIFY_PATH set to 1 to leave shell profiles alone
 set -eu
 
-BASE="${NUR_DOWNLOAD_URL:-https://nur.sh/download}"
+BASE="${OAH_DOWNLOAD_URL:-https://oah.sh/download}"
 BASE="${BASE%/}"
-ROOT="${NUR_INSTALL:-${XDG_CONFIG_HOME:-$HOME/.config}/nur}"
+ROOT="${OAH_INSTALL:-${XDG_CONFIG_HOME:-$HOME/.config}/oah}"
 BIN_DIR="$ROOT/bin"
 GITHUB_LATEST="https://github.com/dawsja/nar/releases/latest/download/latest.txt"
 
@@ -62,7 +62,7 @@ fi
 target="$os-$arch"
 
 # --- version -------------------------------------------------------------------
-version="${NUR_VERSION:-latest}"
+version="${OAH_VERSION:-latest}"
 if [ "$version" = latest ]; then
   version="$(fetch "$BASE/latest.txt" 2>/dev/null || fetch "$GITHUB_LATEST" 2>/dev/null || true)"
   version="$(printf '%s' "$version" | tr -d ' \r\n')"
@@ -71,14 +71,14 @@ fi
 version="${version#v}"
 
 say ""
-say "  ${V}${B}◆ nur${N} ${D}installer${N}"
+say "  ${V}${B}◆ oah${N} ${D}installer${N}"
 say "  ${D}version${N} $version  ${D}platform${N} $target"
 say ""
 
 # --- download & verify ------------------------------------------------------------
-tmp="$(mktemp -d 2>/dev/null || mktemp -d -t nur)"
+tmp="$(mktemp -d 2>/dev/null || mktemp -d -t oah)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
-file="nur-$target.tar.gz"
+file="oah-$target.tar.gz"
 url="$BASE/v$version/$file"
 say "  ${D}downloading${N} $url"
 fetch "$url" "$tmp/$file" || fail "download failed: $url"
@@ -97,19 +97,19 @@ fi
 # --- install ---------------------------------------------------------------------
 mkdir -p "$BIN_DIR"
 tar -xzf "$tmp/$file" -C "$tmp"
-[ -f "$tmp/nur" ] || fail "archive doesn't contain the nur binary"
-mv -f "$tmp/nur" "$BIN_DIR/nur"
-chmod 755 "$BIN_DIR/nur"
+[ -f "$tmp/oah" ] || fail "archive doesn't contain the oah binary"
+mv -f "$tmp/oah" "$BIN_DIR/oah"
+chmod 755 "$BIN_DIR/oah"
 if [ "$os" = darwin ]; then
-  xattr -d com.apple.quarantine "$BIN_DIR/nur" 2>/dev/null || true
+  xattr -d com.apple.quarantine "$BIN_DIR/oah" 2>/dev/null || true
 fi
-say "  ${D}installed${N}   $BIN_DIR/nur"
+say "  ${D}installed${N}   $BIN_DIR/oah"
 
 # --- PATH ------------------------------------------------------------------------
 on_path=0
 case ":$PATH:" in *":$BIN_DIR:"*) on_path=1 ;; esac
 
-if [ "$on_path" = 0 ] && [ "${NUR_NO_MODIFY_PATH:-0}" != 1 ]; then
+if [ "$on_path" = 0 ] && [ "${OAH_NO_MODIFY_PATH:-0}" != 1 ]; then
   line="export PATH=\"$BIN_DIR:\$PATH\""
   shell_name="$(basename "${SHELL:-sh}")"
   case "$shell_name" in
@@ -125,19 +125,19 @@ if [ "$on_path" = 0 ] && [ "${NUR_NO_MODIFY_PATH:-0}" != 1 ]; then
   esac
   mkdir -p "$(dirname "$profile")"
   if ! grep -qs "$BIN_DIR" "$profile"; then
-    printf '\n# nur\n%s\n' "$line" >>"$profile"
+    printf '\n# oah\n%s\n' "$line" >>"$profile"
     say "  ${D}PATH${N}        added to $profile"
   fi
 fi
 
 say ""
-say "  ${G}✓${N} ${B}nur $version is installed.${N}"
+say "  ${G}✓${N} ${B}oah $version is installed.${N}"
 if [ "$on_path" = 0 ]; then
   say "  Open a new terminal (or run ${B}export PATH=\"$BIN_DIR:\$PATH\"${N}), then:"
 else
   say "  Run:"
 fi
 say ""
-say "    ${B}nur${N}           ${D}start in the current directory${N}"
-say "    ${B}nur login${N}     ${D}continue with ChatGPT — or /auth inside nur for Anthropic / OpenAI keys${N}"
+say "    ${B}oah${N}           ${D}start in the current directory${N}"
+say "    ${B}oah login${N}     ${D}continue with ChatGPT — or /auth inside oah for Anthropic / OpenAI keys${N}"
 say ""

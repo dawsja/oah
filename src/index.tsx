@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// nur — a full-screen AI coding agent for the terminal (OpenTUI + AI SDK).
+// oah — a full-screen AI coding agent for the terminal (OpenTUI + AI SDK).
 import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import * as auth from "./auth"
@@ -12,14 +12,14 @@ import { Skills } from "./skills"
 import { App } from "./ui/App"
 import { Store } from "./ui/store"
 
-const USAGE = `nur — an AI coding agent for your terminal
+const USAGE = `oah — an AI coding agent for your terminal
 
 Usage:
-  nur [options] [prompt]
-  nur sessions            List saved sessions
-  nur login               Continue with ChatGPT (no TUI)
-  nur logout              Sign out of ChatGPT
-  nur models              Refresh the model catalog from models.dev
+  oah [options] [prompt]
+  oah sessions            List saved sessions
+  oah login               Continue with ChatGPT (no TUI)
+  oah logout              Sign out of ChatGPT
+  oah models              Refresh the model catalog from models.dev
 
 Options:
   -r, --resume [id]       Resume a session (default: most recent here)
@@ -59,7 +59,7 @@ function parseArgs(argv: string[]): Args {
         process.exit(0)
       case "-V":
       case "--version":
-        console.log(`nur ${VERSION}`)
+        console.log(`oah ${VERSION}`)
         process.exit(0)
       case "-r":
       case "--resume": {
@@ -122,7 +122,7 @@ async function main() {
   try {
     args = parseArgs(process.argv.slice(2))
   } catch (e: any) {
-    console.error(`nur: ${e.message}\n\n${USAGE}`)
+    console.error(`oah: ${e.message}\n\n${USAGE}`)
     process.exit(2)
   }
   ensureDir(homeDir())
@@ -150,7 +150,7 @@ async function main() {
   if (args.sub === "models") return console.log((await refreshCatalog(true)) ? "Model catalog updated from models.dev." : "Couldn't reach models.dev.")
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error("nur needs an interactive terminal.")
+    console.error("oah needs an interactive terminal.")
     process.exit(1)
   }
 
@@ -163,7 +163,7 @@ async function main() {
   if (args.resume) {
     session = typeof args.resume === "string" ? loadSession(args.resume) : latestSession(process.cwd())
     if (!session && typeof args.resume === "string") {
-      console.error(`nur: no session matches '${args.resume}'. Run \`nur sessions\` to list them.`)
+      console.error(`oah: no session matches '${args.resume}'. Run \`oah sessions\` to list them.`)
       process.exit(1)
     }
     if (session?.cwd) {
@@ -195,7 +195,7 @@ async function main() {
     await mcp.close().catch(() => {})
     if (store.session.messages.length) {
       saveSession(store.session)
-      process.stdout.write(`\x1b[2mSession saved.\x1b[0m Resume with:\n\n  \x1b[1mnur --resume ${store.session.id}\x1b[0m\n\n`)
+      process.stdout.write(`\x1b[2mSession saved.\x1b[0m Resume with:\n\n  \x1b[1moah --resume ${store.session.id}\x1b[0m\n\n`)
     }
     process.exit(0)
   }
