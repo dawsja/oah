@@ -141,7 +141,7 @@ pub fn wrap(spans: &[Span], width: usize, first: &[Span], rest: &[Span], line_bg
         cur.push(Span { text: text.to_string(), ..style.clone() });
     };
 
-    let mut new_line = |cur: &mut Vec<Span>, cur_w: &mut usize, avail: &mut usize, lines: &mut Vec<Line>| {
+    let new_line = |cur: &mut Vec<Span>, cur_w: &mut usize, avail: &mut usize, lines: &mut Vec<Line>| {
         // Drop trailing spaces.
         if let Some(last) = cur.last_mut() {
             if !last.deco {
@@ -295,7 +295,6 @@ pub fn markdown(src: &str, width: usize, first: &[Span], rest: &[Span]) -> Vec<L
     let base = Span::new("", theme::TEXT);
     let mut out: Vec<Line> = Vec::new();
     let mut in_code = false;
-    let mut code_lang = String::new();
     let gutter = |out: &Vec<Line>| if out.is_empty() { first.to_vec() } else { rest.to_vec() };
     let rest_w: usize = rest.iter().map(|s| s.width()).sum();
     let inner = width.saturating_sub(rest_w).max(8);
@@ -311,7 +310,7 @@ pub fn markdown(src: &str, width: usize, first: &[Span], rest: &[Span]) -> Vec<L
                 out.push(Line::new(g));
             } else {
                 in_code = true;
-                code_lang = trimmed.trim_start_matches(['`', '~']).trim().to_string();
+                let code_lang = trimmed.trim_start_matches(['`', '~']).trim().to_string();
                 let mut g = gutter(&out);
                 let label = if code_lang.is_empty() { String::new() } else { format!(" {code_lang}") };
                 let pad = inner.saturating_sub(w(&label));

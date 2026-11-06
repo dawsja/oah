@@ -137,7 +137,6 @@ pub struct SessionSummary {
     pub title: String,
     pub cwd: String,
     pub updated: i64,
-    pub messages: usize,
 }
 
 pub fn list() -> Vec<SessionSummary> {
@@ -150,8 +149,6 @@ pub fn list() -> Vec<SessionSummary> {
         cwd: String,
         #[serde(default)]
         updated: i64,
-        #[serde(default)]
-        transcript: Vec<serde::de::IgnoredAny>,
     }
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(config::sessions_dir()) {
@@ -161,7 +158,7 @@ pub fn list() -> Vec<SessionSummary> {
             }
             if let Ok(bytes) = std::fs::read(e.path()) {
                 if let Ok(h) = serde_json::from_slice::<Head>(&bytes) {
-                    out.push(SessionSummary { id: h.id, title: h.title, cwd: h.cwd, updated: h.updated, messages: h.transcript.len() });
+                    out.push(SessionSummary { id: h.id, title: h.title, cwd: h.cwd, updated: h.updated });
                 }
             }
         }

@@ -123,6 +123,8 @@ fn main() {
     let lib_dir = lib_dir.canonicalize().unwrap_or(lib_dir);
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=dylib=opentui");
+    // This crate's own tests and examples.
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
     println!("cargo:lib_dir={}", lib_dir.display());
     println!("cargo:dylib={}", lib_dir.join(dylib_name()).display());
 }

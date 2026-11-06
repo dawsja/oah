@@ -231,9 +231,7 @@ fn main() {
     let mut app = App::new(settings, session, cwd, agent, auth, mcp, skills, rt.handle().clone(), tx, waker);
     if args.resume.is_some() && !app.session.transcript.is_empty() {
         let id = app.session.id.clone();
-        app.session.transcript.push(session::Entry::Info { text: format!("Resumed session {id}") });
-        app.revs.push(u64::MAX / 2);
-        app.cache.push(None);
+        app.info(format!("Resumed session {id}"));
     }
     if let Some(p) = args.prompt {
         app.editor.set(&p);

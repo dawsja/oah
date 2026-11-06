@@ -28,7 +28,7 @@ pub enum AgentEvent {
     ReasoningBreak,
     ToolStart { call_id: String, title: String },
     ToolEnd { call_id: String, outcome: ToolOutcome, denied: bool },
-    Permission { title: String, kind: String, reply: oneshot::Sender<PermissionReply> },
+    Permission { title: String, kind: String, preview: Vec<String>, reply: oneshot::Sender<PermissionReply> },
     /// Items to append to the conversation, in order.
     Items(Vec<Value>),
     Usage(Usage),
@@ -36,7 +36,7 @@ pub enum AgentEvent {
     GoalComplete(String),
     /// The model produced a final answer (no more tool calls).
     TurnDone { error: Option<String>, cancelled: bool },
-    Compacted { summary: String, usage: Usage, error: Option<String> },
+    Compacted { summary: String, error: Option<String> },
 }
 
 pub type Sink = Arc<dyn Fn(AgentEvent) + Send + Sync>;
@@ -122,7 +122,7 @@ impl Agent {
                     StreamEvent::TextDelta(d) => sink(AgentEvent::TextDelta(d)),
                     StreamEvent::ReasoningDelta(d) => sink(AgentEvent::ReasoningDelta(d)),
                     StreamEvent::ReasoningBreak => sink(AgentEvent::ReasoningBreak),
-                    StreamEvent::ToolCallStarted { .. } => {}
+                    StreamEvent::ToolCallStarted => {}
                     StreamEvent::ItemDone(item) => outputs.push(item),
                     StreamEvent::Completed(u) => sink(AgentEvent::Usage(u)),
                 }
@@ -189,7 +189,7 @@ impl Agent {
         let granted = self.grants.lock().unwrap().contains(&key);
         if needs_permission(cfg.permission, risk) && !granted {
             let (tx, rx) = oneshot::channel();
-            sink(AgentEvent::Permission { title: title.clone(), kind: kind_label(risk).into(), reply: tx });
+            sink(AgentEvent::Permission { title: title.clone(), kind: kind_label(risk).into(), preview: tools::permission_preview(&name, &args), reply: tx });
             let reply = tokio::select! {
                 r = rx => r.unwrap_or(PermissionReply::Deny),
                 _ = ctx.cancel.cancelled() => PermissionReply::Deny,
@@ -270,9 +270,9 @@ impl Agent {
         let reasoning = api::supports_reasoning(&cfg.model);
         let body = api::request_body(&cfg.model, &cfg.instructions, &input, &[], "low", reasoning);
         match self.client.complete_text(body, &cancel).await {
-            Ok((summary, usage)) if !summary.trim().is_empty() => sink(AgentEvent::Compacted { summary, usage, error: None }),
-            Ok(_) => sink(AgentEvent::Compacted { summary: String::new(), usage: Usage::default(), error: Some("empty summary".into()) }),
-            Err(e) => sink(AgentEvent::Compacted { summary: String::new(), usage: Usage::default(), error: Some(e.message) }),
+            Ok((summary, _)) if !summary.trim().is_empty() => sink(AgentEvent::Compacted { summary, error: None }),
+            Ok(_) => sink(AgentEvent::Compacted { summary: String::new(), error: Some("empty summary".into()) }),
+            Err(e) => sink(AgentEvent::Compacted { summary: String::new(), error: Some(e.message) }),
         }
     }
 }
@@ -281,22 +281,6 @@ pub fn user_message(text: &str) -> Value {
     json!({"type":"message","role":"user","content":[{"type":"input_text","text":text}]})
 }
 
-pub fn developer_message(text: &str) -> Value {
-    json!({"type":"message","role":"developer","content":[{"type":"input_text","text":text}]})
-}
-
-/// Text of an assistant message item.
-pub fn message_text(item: &Value) -> String {
-    let mut s = String::new();
-    if let Some(parts) = item["content"].as_array() {
-        for p in parts {
-            if let Some(t) = p["text"].as_str() {
-                s.push_str(t);
-            }
-        }
-    }
-    s
-}
 
 pub fn system_prompt(
     cwd: &PathBuf,

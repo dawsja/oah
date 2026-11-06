@@ -295,8 +295,13 @@ pub fn title(name: &str, args: &Value, cwd: &Path) -> String {
         "load_skill" => format!("Skill {}", arg(args, "name")),
         "goal_complete" => "Goal complete".into(),
         other => {
-            let compact = args.to_string();
-            format!("{} {}", other, one_line(&compact, 100))
+            let compact = if args.as_object().map(|o| o.is_empty()).unwrap_or(true) { String::new() } else { args.to_string() };
+            if let Some(rest) = other.strip_prefix("mcp__") {
+                let (server, tool) = rest.split_once("__").unwrap_or((rest, ""));
+                format!("MCP {server}/{tool} {}", one_line(&compact, 100)).trim_end().to_string()
+            } else {
+                format!("{} {}", other, one_line(&compact, 100)).trim_end().to_string()
+            }
         }
     }
 }
@@ -603,6 +608,37 @@ fn edit_file(args: &Value, ctx: &ToolCtx) -> ToolOutcome {
     o
 }
 
+/// What a permission prompt shows before a call runs.
+pub fn permission_preview(name: &str, args: &Value) -> Vec<String> {
+    match name {
+        "edit_file" => diff_lines(arg(args, "old_string"), arg(args, "new_string"), 10),
+        "write_file" => {
+            let c = arg(args, "content");
+            let mut v: Vec<String> = c.lines().take(8).map(|l| format!("+{l}")).collect();
+            let n = c.lines().count();
+            if n > 8 {
+                v.push(format!("… +{} lines", n - 8));
+            }
+            v
+        }
+        "bash" => {
+            let c = arg(args, "command");
+            if c.lines().count() > 1 || c.chars().count() > 100 {
+                c.lines().take(8).map(|l| format!("$ {l}")).collect()
+            } else {
+                vec![]
+            }
+        }
+        n if n.starts_with("mcp__") => serde_json::to_string_pretty(args)
+            .unwrap_or_default()
+            .lines()
+            .take(8)
+            .map(String::from)
+            .collect(),
+        _ => vec![],
+    }
+}
+
 /// A tiny line diff (common prefix/suffix trimmed) for previews.
 fn diff_lines(old: &str, new: &str, max: usize) -> Vec<String> {
     let a: Vec<&str> = old.lines().collect();
@@ -697,7 +733,7 @@ async fn bash(args: &Value, ctx: &ToolCtx) -> ToolOutcome {
     }
     let text = strip_ansi(&text);
     let lines = text.lines().count();
-    let body = truncate_output(&text);
+    let body = truncate_output(text.trim_end());
     let output = if body.trim().is_empty() { format!("(no output)\nexit code: {code}") } else { format!("{body}\nexit code: {code}") };
     ToolOutcome { output, summary: format!("exit {code} · {lines} lines"), detail: preview(&text, 6), ok: code == 0 }
 }

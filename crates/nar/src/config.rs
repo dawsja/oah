@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const APP_NAME: &str = "nar";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// `~/.nar` (or `$NAR_HOME`).
@@ -154,6 +153,7 @@ pub enum Mode {
 }
 
 impl Mode {
+    #[allow(dead_code)]
     pub fn as_str(self) -> &'static str {
         match self {
             Mode::Plan => "plan",

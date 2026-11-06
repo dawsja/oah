@@ -8,9 +8,9 @@ fn main() {
     let dylib = env::var("DEP_OPENTUI_DYLIB").ok();
     let macos = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos");
     let origin = if macos { "@executable_path" } else { "$ORIGIN" };
-    println!("cargo:rustc-link-arg-bins=-Wl,-rpath,{origin}");
-    println!("cargo:rustc-link-arg-bins=-Wl,-rpath,{origin}/../lib");
-    println!("cargo:rustc-link-arg-bins=-Wl,-rpath,{lib_dir}");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{origin}");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{origin}/../lib");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{lib_dir}");
     if let Some(dylib) = dylib {
         // OUT_DIR = target/<profile>/build/nar-xxxx/out → target/<profile>
         let out = PathBuf::from(env::var("OUT_DIR").unwrap());

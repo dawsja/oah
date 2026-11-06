@@ -308,12 +308,13 @@ pub fn render(app: &mut App, term: &mut Terminal) {
     app.screen_w = term.width();
 
     // Input sizing.
-    let inner_w = (width - 6).max(4) as usize;
+    let inner_w = (width - 8).max(4) as usize;
     let rows = app.editor.rows(inner_w);
     let input_rows = rows.len().clamp(1, 10) as i32;
     let perm_h = if let Some(p) = &app.permission {
         let lines = wrap_plain(&p.title, (width - 6).max(10) as usize, &Span::new("", t::TEXT), &[], &[], None).len().min(6);
-        lines as i32 + 4
+        let preview = p.preview.len().min(12) as i32;
+        lines as i32 + 4 + if preview > 0 { preview + 1 } else { 0 }
     } else {
         0
     };
@@ -401,8 +402,23 @@ pub fn render(app: &mut App, term: &mut Terminal) {
                 None,
             );
             let lines = wrap_plain(&p.title, (bw - 4) as usize, &Span::new("", t::TEXT), &[], &[], None);
+            let shown = lines.len().min(6);
             for (i, l) in lines.iter().take(6).enumerate() {
                 draw_spans(&mut f, 3, input_y + 1 + i as i32, &l.spans, 1 + bw as i32 - 2);
+            }
+            for (i, pl) in p.preview.iter().take(12).enumerate() {
+                let py = input_y + 2 + shown as i32 + i as i32;
+                let (fg, bg) = if pl.starts_with('+') {
+                    (t::DIFF_ADD, Some(t::DIFF_ADD_BG))
+                } else if pl.starts_with('-') {
+                    (t::DIFF_DEL, Some(t::DIFF_DEL_BG))
+                } else {
+                    (t::DIM, None)
+                };
+                if let Some(bg) = bg {
+                    f.fill(3, py, bw - 4, 1, bg);
+                }
+                f.text(3, py, &pl.replace('\t', "    "), fg, bg, 0, bw - 4);
             }
             let oy = input_y + input_h - 2;
             let opts = [("y", "allow once"), ("a", "always allow"), ("n", "deny")];
@@ -532,8 +548,12 @@ fn draw_status(app: &App, f: &mut Frame, y: i32, width: i32) {
     };
     f.text(x, y, mode, mc, None, attr::BOLD, 0);
     x += w(mode) as i32;
-    f.text(x + 1, y, "(shift+tab)", t::FAINT, None, 0, 0);
-    let left_end = x + 12;
+    let left_end = if width >= 110 {
+        f.text(x + 1, y, "(shift+tab)", t::FAINT, None, 0, 0);
+        x + 12
+    } else {
+        x + 1
+    };
 
     // Right: auth + context meter.
     let window = app.context_window();

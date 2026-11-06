@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use opentui::{key, Event, KeyEvent, MouseEvent, MouseKind, Terminal, Waker};
-use serde_json::Value;
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -75,6 +74,7 @@ impl Picker {
 pub struct PendingPermission {
     pub title: String,
     pub kind: String,
+    pub preview: Vec<String>,
     pub reply: Option<oneshot::Sender<PermissionReply>>,
 }
 
@@ -218,7 +218,7 @@ impl App {
         waker: Waker,
     ) -> App {
         let n = session.transcript.len();
-        let mut app = App {
+        let app = App {
             settings,
             session,
             cwd,
@@ -293,17 +293,6 @@ impl App {
         self.send_later(async move { AppMsg::Auth(auth.status().await) });
     }
 
-    pub fn refresh_mcp(&self) {
-        let mcp = self.mcp.clone();
-        let tx = self.tx.clone();
-        let waker = self.waker.clone();
-        self.rt.spawn(async move {
-            let _ = mcp.summary().await;
-            let _ = tx.send(AppMsg::McpChanged);
-            waker.wake();
-        });
-    }
-
     fn toast(&mut self, msg: impl Into<String>) {
         self.toast = Some((msg.into(), Instant::now(), false));
     }
@@ -344,7 +333,7 @@ impl App {
         self.dirty = true;
     }
 
-    fn info(&mut self, text: impl Into<String>) {
+    pub fn info(&mut self, text: impl Into<String>) {
         self.push_entry(Entry::Info { text: text.into() });
     }
 
@@ -614,7 +603,7 @@ impl App {
                 }
             }
             key::BACKSPACE | 8 => {
-                if k.mods.alt() || k.mods.ctrl() || k.code == 8 && k.mods.none() && false {
+                if k.mods.alt() || k.mods.ctrl() {
                     self.editor.delete_word_back();
                 } else {
                     self.editor.backspace();
@@ -698,7 +687,7 @@ impl App {
 
     pub fn input_width(&self) -> usize {
         // box border (2) + padding + prompt glyph: matches view::render.
-        (self.screen_w as usize).saturating_sub(6).max(4)
+        (self.screen_w as usize).saturating_sub(8).max(4)
     }
 
     fn toggle_mode(&mut self) {
@@ -1243,7 +1232,7 @@ impl App {
             })
             .collect();
         if items.is_empty() {
-            self.toast("No saved sessions yet");
+            self.toast("No other saved sessions yet");
             return;
         }
         self.open_picker(PickerKind::Session, "Resume a session", items);
@@ -1484,9 +1473,9 @@ impl App {
                 }
                 self.activity = "Thinking".into();
             }
-            AgentEvent::Permission { title, kind, reply } => {
+            AgentEvent::Permission { title, kind, preview, reply } => {
                 self.activity = "Waiting for permission".into();
-                self.permission = Some(PendingPermission { title, kind, reply: Some(reply) });
+                self.permission = Some(PendingPermission { title, kind, preview, reply: Some(reply) });
                 self.scroll = 0;
                 term.notify("nar", "Permission needed");
             }
@@ -1533,7 +1522,7 @@ impl App {
                     }
                 }
             }
-            AgentEvent::Compacted { summary, usage: _, error } => {
+            AgentEvent::Compacted { summary, error } => {
                 self.busy = None;
                 self.activity.clear();
                 match error {
@@ -1639,9 +1628,6 @@ impl App {
         self.settings.save();
     }
 
-    pub fn last_items(&self) -> &[Value] {
-        &self.session.items
-    }
 }
 
 fn copy_native(text: &str) -> bool {

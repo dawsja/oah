@@ -26,6 +26,7 @@ pub struct Usage {
 
 #[derive(Clone, Debug)]
 pub struct ApiError {
+    #[allow(dead_code)]
     pub status: Option<u16>,
     pub code: Option<String>,
     pub message: String,
@@ -45,7 +46,7 @@ pub enum StreamEvent {
     ReasoningDelta(String),
     /// A reasoning summary part finished (separates paragraphs).
     ReasoningBreak,
-    ToolCallStarted { name: String },
+    ToolCallStarted,
     /// A finished output item (message, reasoning, function_call…), raw JSON.
     ItemDone(Value),
     Completed(Usage),
@@ -274,7 +275,7 @@ impl Client {
             "response.output_item.added" => {
                 let item = &v["item"];
                 if matches!(item["type"].as_str(), Some("function_call") | Some("custom_tool_call")) {
-                    let _ = tx.send(StreamEvent::ToolCallStarted { name: item["name"].as_str().unwrap_or("").to_string() });
+                    let _ = tx.send(StreamEvent::ToolCallStarted);
                 }
             }
             "response.output_item.done" => {
