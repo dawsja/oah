@@ -41,6 +41,8 @@ export interface PickItem {
   value: string
   current?: boolean
   group?: string
+  /** Extra words that match a search (provider names and aliases). */
+  keywords?: string
 }
 
 export interface Picker {
@@ -49,6 +51,8 @@ export interface Picker {
   items: PickItem[]
   selected: number
   filter: string
+  /** First visible row. */
+  scroll?: number
 }
 
 export interface PendingPermission {
@@ -922,7 +926,7 @@ export class Store {
   // ---- pickers ----------------------------------------------------------------
 
   openPicker(kind: PickerKind, title: string, items: PickItem[]) {
-    this.picker = { kind, title, items, selected: Math.max(0, items.findIndex((i) => i.current)), filter: "" }
+    this.picker = { kind, title, items, selected: Math.max(0, items.findIndex((i) => i.current)), filter: "", scroll: 0 }
     this.emit(true)
   }
 
@@ -931,7 +935,7 @@ export class Store {
     if (!p) return []
     const words = p.filter.toLowerCase().split(/\s+/).filter(Boolean)
     return p.items.filter((i) => {
-      const hay = `${i.label} ${i.detail} ${i.group ?? ""}`.toLowerCase()
+      const hay = `${i.label} ${i.detail} ${i.group ?? ""} ${i.keywords ?? ""}`.toLowerCase()
       return words.every((w) => hay.includes(w))
     })
   }
@@ -968,6 +972,7 @@ export class Store {
       value: m.full,
       current: m.full === this.settings.model,
       group,
+      keywords: `${m.provider} ${providerInfo[m.provider].label} ${PROVIDER_ALIASES[m.provider] ?? ""}`,
     })
     const byId = new Map(all.map((m) => [m.full, m]))
     const recent = [...new Set([this.settings.model, ...(this.settings.recentModels ?? [])])].filter((id) => byId.has(id)).slice(0, 5)
@@ -1088,6 +1093,24 @@ export class Store {
     this.persistSettings()
     saveSession(this.session)
   }
+}
+
+/** Other names people search providers by. */
+const PROVIDER_ALIASES: Partial<Record<Provider, string>> = {
+  chatgpt: "openai gpt plan subscription",
+  openai: "gpt",
+  anthropic: "claude",
+  google: "gemini gemma",
+  xai: "grok x.ai",
+  kimi: "moonshot",
+  "kimi-code": "moonshot kimi code plan",
+  zai: "z.ai glm zhipu",
+  "zai-coding": "z.ai zai glm zhipu coding plan",
+  minimax: "mini max",
+  "minimax-coding": "mini max coding plan",
+  ollama: "local",
+  lmstudio: "lm studio local",
+  openrouter: "open router",
 }
 
 const EFFORTS_SET = new Set<string>(["minimal", "low", "medium", "high", "xhigh", "max"])

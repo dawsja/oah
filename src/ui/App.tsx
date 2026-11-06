@@ -551,6 +551,9 @@ function Palette({ store, items }: { store: Store; items: { name: string; args: 
   )
 }
 
+/** Rows a picker shows at once; the rest are a scroll or a search away. */
+const PICKER_ROWS = 8
+
 /** Cut text to `n` columns with an ellipsis. */
 const fit = (s: string, n: number) => (s.length > n ? s.slice(0, Math.max(1, n - 1)) + "…" : s)
 
@@ -558,9 +561,15 @@ function PickerModal({ store, width, height }: { store: Store; width: number; he
   const p = store.picker!
   const vis = store.pickerVisible()
   const bw = Math.max(36, Math.min(92, width - 8))
-  const rows = Math.max(1, Math.min(vis.length || 1, height - 12))
+  // A short window that scrolls with the selection; typing filters the whole list.
+  const rows = Math.max(1, Math.min(vis.length || 1, PICKER_ROWS, height - 14))
   const sel = Math.min(p.selected, Math.max(0, vis.length - 1))
-  const start = sel >= rows ? sel - rows + 1 : 0
+  let start = Math.min(p.scroll ?? 0, Math.max(0, vis.length - rows))
+  if (sel < start) start = sel
+  else if (sel >= start + rows) start = sel - rows + 1
+  p.scroll = start
+  const above = start
+  const below = Math.max(0, vis.length - start - rows)
   const labelW = Math.min(Math.floor(bw / 2), Math.max(12, ...vis.map((i) => i.label.length)) + 2)
   const detailW = Math.max(8, bw - labelW - 8)
   let lastGroup = ""
@@ -582,7 +591,7 @@ function PickerModal({ store, width, height }: { store: Store; width: number; he
     >
       <text>
         <span fg={t.dim}>⌕ </span>
-        {p.filter ? <span fg={t.text}>{p.filter}▏</span> : <span fg={t.faint}>type to filter</span>}
+        {p.filter ? <span fg={t.text}>{p.filter}▏</span> : <span fg={t.faint}>{p.kind === "model" ? "type to search models or providers" : "type to filter"}</span>}
       </text>
       {vis.length === 0 ? <text fg={t.faint}>no matches</text> : null}
       {vis.slice(start, start + rows).map((item, k) => {
@@ -606,7 +615,11 @@ function PickerModal({ store, width, height }: { store: Store; width: number; he
           </box>
         )
       })}
-      <text fg={t.faint}>↑↓ select · enter confirm · esc close</text>
+      <text wrapMode="none">
+        <span fg={t.faint}>↑↓ select · enter confirm · esc close</span>
+        {above || below ? <span fg={t.dim}>{`  ${above ? `↑${above} ` : ""}${below ? `↓${below} more` : "more"}`}</span> : null}
+        {p.filter && vis.length ? <span fg={t.faint}>{`  · ${vis.length} match${vis.length === 1 ? "" : "es"}`}</span> : null}
+      </text>
     </box>
   )
 }
