@@ -158,8 +158,10 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
       }
       return
     }
-    // ctrl+v: attach an image from the clipboard (text pastes arrive as bracketed paste).
-    if (key.ctrl && key.name === "v" && !store.picker && !store.permission && store.inputMode === "prompt") {
+    // ctrl+v: attach an image from the clipboard (text pastes arrive as bracketed paste;
+    // ctrl+shift+v too when the terminal passes it through, and alt+v where ctrl+v is the
+    // terminal's own paste (Windows Terminal).
+    if (key.name === "v" && (key.ctrl || key.meta || key.option) && !store.picker && !store.permission && store.inputMode === "prompt") {
       stop()
       store.pasteClipboardImage()
       return
@@ -618,6 +620,7 @@ function PickerModal({ store, width, height }: { store: Store; width: number; he
       <text wrapMode="none">
         <span fg={t.faint}>↑↓ select · enter confirm · esc close</span>
         {above || below ? <span fg={t.dim}>{`  ${above ? `↑${above} ` : ""}${below ? `↓${below} more` : "more"}`}</span> : null}
+        {store.pickerHidden() ? <span fg={t.dim}>{`  · type to search ${store.pickerHidden()} older`}</span> : null}
         {p.filter && vis.length ? <span fg={t.faint}>{`  · ${vis.length} match${vis.length === 1 ? "" : "es"}`}</span> : null}
       </text>
     </box>

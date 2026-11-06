@@ -40,7 +40,7 @@ on errors, 130 if interrupted. Checkpoints are still taken, so `/undo` in the ap
 | --- | --- |
 | Enter | send · Shift+Enter / Alt+Enter / Ctrl+J newline |
 | ↑ / ↓ | previous / next prompt |
-| **Ctrl+V** | attach an image from the clipboard as `[Image #1]` (dragging in or pasting an image file works too) |
+| **Ctrl+V** | attach an image from the clipboard as `[Image #1]` — Ctrl+Shift+V and Alt+V work too; so does dragging in an image file |
 | **Ctrl+T** | switch model — recent models on top, previous one preselected (Ctrl+T → Enter flips back) |
 | **Tab** | toggle **plan ↔ build** |
 | **Shift+Tab** | cycle permissions: **auto → always ask → always allow** |

@@ -43,6 +43,8 @@ export interface PickItem {
   group?: string
   /** Extra words that match a search (provider names and aliases). */
   keywords?: string
+  /** Only listed while searching (older models). */
+  searchOnly?: boolean
 }
 
 export interface Picker {
@@ -934,10 +936,17 @@ export class Store {
     const p = this.picker
     if (!p) return []
     const words = p.filter.toLowerCase().split(/\s+/).filter(Boolean)
+    if (!words.length) return p.items.filter((i) => !i.searchOnly)
     return p.items.filter((i) => {
       const hay = `${i.label} ${i.detail} ${i.group ?? ""} ${i.keywords ?? ""}`.toLowerCase()
       return words.every((w) => hay.includes(w))
     })
+  }
+
+  /** Items only shown while searching, when the search box is empty. */
+  pickerHidden(): number {
+    const p = this.picker
+    return p && !p.filter.trim() ? p.items.filter((i) => i.searchOnly).length : 0
   }
 
   pick() {
@@ -975,10 +984,18 @@ export class Store {
       keywords: `${m.provider} ${providerInfo[m.provider].label} ${PROVIDER_ALIASES[m.provider] ?? ""}`,
     })
     const byId = new Map(all.map((m) => [m.full, m]))
-    const recent = [...new Set([this.settings.model, ...(this.settings.recentModels ?? [])])].filter((id) => byId.has(id)).slice(0, 5)
+    const recent = [...new Set([this.settings.model, ...(this.settings.recentModels ?? [])])].filter((id) => byId.has(id)).slice(0, 3)
+    // Unfiltered, show only the newest few per provider; typing searches everything.
+    const shown = new Map<string, number>()
     const items: PickItem[] = [
       ...recent.map((id) => item(byId.get(id)!, "Recent")),
-      ...all.filter((m) => !recent.includes(m.full)).map((m) => item(m, auth.label(this.authStatus, m.provider))),
+      ...all
+        .filter((m) => !recent.includes(m.full))
+        .map((m) => {
+          const n = (shown.get(m.provider) ?? 0) + 1
+          shown.set(m.provider, n)
+          return { ...item(m, auth.label(this.authStatus, m.provider)), searchOnly: n > MODELS_PER_PROVIDER }
+        }),
     ]
     if (!items.some((i) => i.current)) items.unshift({ label: displayName(this.settings.model), detail: this.settings.model, value: this.settings.model, current: true, group: "Current" })
     this.openPicker("model", avail.length ? "Model · ctrl+t" : "Model · no credentials yet (/auth)", items)
@@ -1094,6 +1111,9 @@ export class Store {
     saveSession(this.session)
   }
 }
+
+/** Models listed per provider in /model before you start typing. */
+const MODELS_PER_PROVIDER = 3
 
 /** Other names people search providers by. */
 const PROVIDER_ALIASES: Partial<Record<Provider, string>> = {

@@ -134,7 +134,8 @@ export interface ModelChoice {
 function usable(p: Provider, m: CatalogModel): boolean {
   if (!m.tool_call || (m.type && m.type !== "chat") || m.status === "deprecated") return false
   if (/realtime|audio|tts|transcribe|image|imagine|video|embedding|lyria|-vision|deep-research|computer-use|customtools/i.test(m.id)) return false
-  if (info(p).sdk === "openai" && /search|-pro$|codex-mini|^gpt-4|^o\d|chat-latest|\d{8}$/.test(m.id)) return false
+  if (info(p).sdk === "openai" && /search|-pro$|codex-mini|^gpt-4|^o\d|chat-latest/.test(m.id)) return false
+  if (/-\d{8}$|-\d{4}-\d{2}-\d{2}$|-\d{2}-\d{4}$/.test(m.id)) return false // dated snapshots of a model that's listed anyway
   return true
 }
 
