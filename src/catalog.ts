@@ -158,6 +158,31 @@ export function acceptsImages(full: string): boolean {
   return m.modalities?.input ? m.modalities.input.includes("image") : m.attachment !== false
 }
 
+/** Token usage as the AI SDK reports it per step. */
+export interface StepUsage {
+  inputTokens?: number
+  outputTokens?: number
+  inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }
+}
+
+/** Whether this provider bills per token (not a subscription plan or a local server). */
+export function metered(full: string): boolean {
+  const { provider } = splitModel(full)
+  return provider !== "chatgpt" && !info(provider).billing.includes("plan") && !info(provider).local
+}
+
+/** USD for one step from models.dev prices (per million tokens); undefined when unknown or not metered. */
+export function costOf(full: string, u: StepUsage): number | undefined {
+  if (!metered(full)) return undefined
+  const c = lookup(full)?.cost
+  if (!c || (c.input === undefined && c.output === undefined)) return undefined
+  const read = u.inputTokenDetails?.cacheReadTokens ?? 0
+  const write = u.inputTokenDetails?.cacheWriteTokens ?? 0
+  const fresh = u.inputTokenDetails?.noCacheTokens ?? Math.max(0, (u.inputTokens ?? 0) - read - write)
+  const input = c.input ?? 0
+  return (fresh * input + read * (c.cache_read ?? input) + write * (c.cache_write ?? input) + (u.outputTokens ?? 0) * (c.output ?? 0)) / 1e6
+}
+
 export function displayName(full: string): string {
   return lookup(full)?.name ?? splitModel(full).slug
 }

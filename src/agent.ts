@@ -6,6 +6,7 @@ import { USAGE_URL } from "./auth"
 import { info, shortPath, splitModel, type Effort, type Mode, type Permission, type Settings } from "./config"
 import type { Mcp } from "./mcp"
 import { projectRoot } from "./memory"
+import { costOf, type StepUsage } from "./catalog"
 import { languageModel, maxOutputTokens, providerOptions } from "./providers"
 import { oneLine, permissionPreview, risk, title, TOOLS, type Outcome, type Risk, type Todo, type ToolCtx } from "./tools"
 import { existsSync } from "node:fs"
@@ -23,6 +24,8 @@ export interface Hooks {
   todos(items: Todo[]): void
   goalComplete(summary: string): void
   usage(u: { input: number; output: number }): void
+  /** Money spent by a request (USD), for metered providers. */
+  spend(usd: number): void
   /** Live status for a running tool (sub-agents). */
   toolProgress(callId: string, summary: string, detail: string[]): void
   /** Ask the user a question; resolves with their answer text. */
@@ -265,6 +268,7 @@ Date: ${new Date().toISOString().slice(0, 10)}`,
       toolProgress() {},
       question: async () => "",
       beforeChange: async () => {},
+      spend: (usd) => parent.hooks.spend(usd),
     },
   }
   progress()
@@ -283,7 +287,11 @@ Date: ${new Date().toISOString().slice(0, 10)}`,
   let text = ""
   for await (const part of result.fullStream) {
     if (part.type === "text-delta") text += part.text
-    else if (part.type === "finish-step") text = text ? text + "\n" : text
+    else if (part.type === "finish-step") {
+      text = text ? text + "\n" : text
+      const usd = costOf(parent.model, part.usage as StepUsage)
+      if (usd) parent.hooks.spend(usd)
+    }
     else if (part.type === "error") throw new Error(describeError(part.error))
   }
   // Keep the final answer: the last step's text.
@@ -370,9 +378,12 @@ export async function runTurn(o: TurnOptions): Promise<TurnResult> {
           if (inReasoning) o.hooks.reasoningEnd()
           inReasoning = false
           break
-        case "finish-step":
+        case "finish-step": {
           o.hooks.usage({ input: part.usage.inputTokens ?? 0, output: part.usage.outputTokens ?? 0 })
+          const usd = costOf(o.model, part.usage as StepUsage)
+          if (usd) o.hooks.spend(usd)
           break
+        }
         case "error":
           error = describeError(part.error)
           break
@@ -389,14 +400,14 @@ export async function runTurn(o: TurnOptions): Promise<TurnResult> {
 }
 
 /** Summarize the conversation so it can continue in a fresh context. */
-export async function compact(o: { model: string; effort: Effort; settings: Settings; instructions: string; messages: ModelMessage[]; focus: string; signal: AbortSignal }): Promise<string> {
+export async function compact(o: { model: string; effort: Effort; settings: Settings; instructions: string; messages: ModelMessage[]; focus: string; signal: AbortSignal; spend?: (usd: number) => void }): Promise<string> {
   let ask =
     "Your context window is being compacted. Write a detailed handoff summary of the conversation so far so you can continue seamlessly. " +
     "Include: the user's goals and constraints; key decisions; files read or changed (with paths) and what changed; commands run and important results; " +
     "errors and fixes; the current state; and concrete next steps. Do not call tools."
   if (o.focus.trim()) ask += `\nPay special attention to: ${o.focus.trim()}`
   const model = await languageModel(o.model, o.settings)
-  const { text } = await generateText({
+  const { text, usage } = await generateText({
     model,
     system: o.instructions,
     messages: [...o.messages, { role: "user", content: ask }],
@@ -405,6 +416,8 @@ export async function compact(o: { model: string; effort: Effort; settings: Sett
     abortSignal: o.signal,
     maxRetries: 3,
   })
+  const usd = costOf(o.model, usage as StepUsage)
+  if (usd) o.spend?.(usd)
   return text
 }
 

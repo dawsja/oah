@@ -8,7 +8,7 @@ import * as auth from "../auth"
 import { displayName } from "../catalog"
 import { permissionInfo, providerInfo, shortPath, VERSION } from "../config"
 import { Shimmer, Thinking, useTick } from "./Thinking"
-import { fmtTokens, t } from "./theme"
+import { fmtCost, fmtTokens, t } from "./theme"
 import { Transcript } from "./Transcript"
 import { runningShells } from "../tools/shells"
 import type { Store } from "./store"
@@ -649,6 +649,12 @@ function StatusBar({ store, width }: { store: Store; width: number }) {
         {width >= 90 ? (
           <>
             <span fg={auth.has(store.authStatus, store.provider) ? t.dim : t.yellow}>{authLabel}</span>
+            <span fg={t.faint}> · </span>
+          </>
+        ) : null}
+        {store.session.cost ? (
+          <>
+            <span fg={t.text}>{fmtCost(store.session.cost)}</span>
             <span fg={t.faint}> · </span>
           </>
         ) : null}

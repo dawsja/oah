@@ -48,3 +48,9 @@ export function mix(a: string, b: string, k: number): string {
   const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16))
   return "#" + pa.map((x, i) => Math.round(x + (pb[i]! - x) * k).toString(16).padStart(2, "0")).join("")
 }
+
+/** $0.42 · $12.30 · <$0.01 */
+export function fmtCost(usd: number): string {
+  if (usd > 0 && usd < 0.005) return "<$0.01"
+  return `$${usd < 100 ? usd.toFixed(2) : Math.round(usd).toLocaleString("en-US")}`
+}

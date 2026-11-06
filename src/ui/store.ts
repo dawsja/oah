@@ -468,6 +468,7 @@ export class Store {
             this.emit(true)
           }),
         beforeChange: () => this.takeCheckpoint(),
+        spend: (usd) => this.spend(usd),
         usage: (u) => {
           this.session.contextTokens = u.input + u.output
           this.session.totalTokens += u.input + u.output
@@ -513,6 +514,11 @@ export class Store {
 
   get liveText() {
     return this.streamText
+  }
+
+  spend(usd: number) {
+    this.session.cost = (this.session.cost ?? 0) + usd
+    this.emit()
   }
 
   // ---- checkpoints ------------------------------------------------------------------
@@ -656,7 +662,7 @@ export class Store {
     this.busy = { kind: "compact", started: Date.now(), abort }
     this.activity = automatic ? "Auto-compacting conversation" : "Compacting conversation"
     this.emit(true)
-    compact({ model: this.settings.model, effort: this.settings.effort, settings: this.settings, instructions: this.instructions(), messages: this.session.messages, focus, signal: abort.signal })
+    compact({ model: this.settings.model, effort: this.settings.effort, settings: this.settings, instructions: this.instructions(), messages: this.session.messages, focus, signal: abort.signal, spend: (usd) => this.spend(usd) })
       .then((summary) => {
         this.busy = null
         this.activity = ""

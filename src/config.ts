@@ -72,6 +72,8 @@ export interface ProviderDef {
   defaultModel: string
   /** Shown in /auth next to the key option. */
   blurb: string
+  /** A server on this machine: no key, models listed by the server. */
+  local?: boolean
 }
 
 export const providerInfo = {

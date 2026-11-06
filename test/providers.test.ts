@@ -103,3 +103,24 @@ test("MiniMax gets the model's output limit, not the SDK's 4096 default", async 
   expect(maxOutputTokens("anthropic/claude-opus-5-5")).toBeUndefined()
   expect(maxOutputTokens("google/gemini-4-argon")).toBeUndefined()
 })
+
+test("cost uses models.dev prices, including cache reads/writes, and skips plans", async () => {
+  const { costOf } = await import("../src/catalog")
+  const { writeFileSync } = await import("node:fs")
+  const { join } = await import("node:path")
+  writeFileSync(
+    join(home, "models.json"),
+    JSON.stringify({
+      anthropic: { id: "anthropic", name: "Anthropic", models: { "claude-x": { id: "claude-x", name: "X", cost: { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 } } } },
+      "zai-coding-plan": { id: "zai-coding-plan", name: "Z", models: { "glm-5.3": { id: "glm-5.3", name: "GLM", cost: { input: 1, output: 4 } } } },
+    }),
+  )
+  process.env.OAH_HOME = home
+  ;(await import("../src/catalog")).reloadCatalog()
+  // 1M fresh input ($5) + 2M cache reads ($1) + 1M cache writes ($6.25) + 0.1M output ($2.50)
+  const u = { inputTokens: 4_000_000, outputTokens: 100_000, inputTokenDetails: { noCacheTokens: 1_000_000, cacheReadTokens: 2_000_000, cacheWriteTokens: 1_000_000 } }
+  expect(costOf("anthropic/claude-x", u)).toBeCloseTo(14.75, 6)
+  expect(costOf("anthropic/claude-x", { inputTokens: 1_000_000, outputTokens: 0 })).toBeCloseTo(5, 6)
+  expect(costOf("zai-coding/glm-5.3", u)).toBeUndefined() // subscription plan
+  expect(costOf("chatgpt/gpt-5.6", u)).toBeUndefined()
+})
