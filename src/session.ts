@@ -7,7 +7,12 @@ import { ensureDir, paths, writeFileAtomic, type Effort, type Mode } from "./con
 
 export type ToolStatus = "running" | "ok" | "failed" | "denied"
 
-export type Entry =
+export type Entry = EntryBody & {
+  /** When the entry was added (ms). Older sessions may not have it. */
+  at?: number
+}
+
+type EntryBody =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; model: string }
   | { kind: "reasoning"; text: string; started: number; ms?: number }

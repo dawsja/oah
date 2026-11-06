@@ -167,7 +167,7 @@ export class Store {
   }
 
   push(e: Entry): number {
-    this.session.transcript.push(e)
+    this.session.transcript.push({ ...e, at: e.at ?? Date.now() })
     this.emit()
     return this.session.transcript.length - 1
   }
@@ -613,7 +613,7 @@ export class Store {
       case "build":
         return this.setMode("build")
       case "design": {
-        const d = args.toLowerCase().slice(0, 1) as Design
+        const d = (args.toLowerCase().replace(/^c1$/, "c") as Design)
         if (DESIGNS.includes(d)) return this.setDesign(d)
         return this.openPicker("design", "Transcript design", DESIGNS.map((x) => ({ label: designInfo[x].name, detail: designInfo[x].desc, value: x, current: x === this.settings.design })))
       }

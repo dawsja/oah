@@ -27,7 +27,7 @@ Options:
   -m, --model <p/model>   e.g. chatgpt/gpt-5.6, anthropic/claude-opus-5-5, openai/gpt-5.6
   -e, --effort <level>    minimal | low | medium | high | xhigh | max
   -p, --permission <lvl>  auto | ask | allow
-  -d, --design <a|b|c>    A panels · B bubbles · C timeline
+  -d, --design <name>     a panels · b bubbles · c1–c4 timelines
       --plan              Start in plan mode
   -h, --help · -V, --version
 
@@ -88,8 +88,8 @@ function parseArgs(argv: string[]): Args {
         break
       case "-d":
       case "--design":
-        a.design = next().toLowerCase() as Design
-        if (!DESIGNS.includes(a.design)) throw new Error("design must be a, b or c")
+        a.design = next().toLowerCase().replace(/^c1$/, "c") as Design
+        if (!DESIGNS.includes(a.design)) throw new Error("design must be a, b, c (c1), c2, c3 or c4")
         break
       case "--plan":
         a.plan = true

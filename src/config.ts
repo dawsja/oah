@@ -101,12 +101,15 @@ export const permissionInfo: Record<Permission, { label: string; desc: string }>
 export const nextPermission = (p: Permission): Permission => PERMISSIONS[(PERMISSIONS.indexOf(p) + 1) % PERMISSIONS.length]!
 
 export type Mode = "plan" | "build"
-export type Design = "a" | "b" | "c"
-export const DESIGNS: Design[] = ["a", "b", "c"]
+export type Design = "a" | "b" | "c" | "c2" | "c3" | "c4"
+export const DESIGNS: Design[] = ["a", "b", "c", "c2", "c3", "c4"]
 export const designInfo: Record<Design, { name: string; desc: string }> = {
   a: { name: "A · Panels", desc: "tinted panel for you, labelled column for nur" },
   b: { name: "B · Bubbles", desc: "chat bubbles: you on the right, nur on the left" },
-  c: { name: "C · Timeline", desc: "one vertical rail with a node per event" },
+  c: { name: "C1 · Rail", desc: "one vertical rail with a node per event" },
+  c2: { name: "C2 · Compact rail", desc: "no gaps, one line per tool and thought, times on the right" },
+  c3: { name: "C3 · Lanes", desc: "rail colored by speaker, time dividers between turns" },
+  c4: { name: "C4 · Tree", desc: "one nur node per turn, tools and thinking branch off it" },
 }
 
 export interface Settings {

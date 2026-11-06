@@ -16,7 +16,7 @@ const entries: Entry[] = [
   { kind: "error", text: "boom" },
 ]
 
-for (const design of ["a", "b", "c"] as const) {
+for (const design of ["a", "b", "c", "c2", "c3", "c4"] as const) {
   test(`design ${design} renders every entry kind`, async () => {
     let style!: SyntaxStyle
     const setup = await testRender(<box />, { width: 100, height: 60 })

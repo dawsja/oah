@@ -22,6 +22,15 @@ Three transcript looks. Switch any time with `/design` or start with `nur -d b`.
 | ![A](docs/design-a.png) | ![B](docs/design-b.png) | ![C](docs/design-c.png) |
 | you: tinted panel with a cyan bar · nur: `◆ nur · model` column | you: bubble on the right · nur: bubble on the left | one rail, a node per event: `●` you, `◆` nur, `○` tools, `∴` thinking |
 
+### Timeline variants
+
+`/design c1` … `c4` (or `nur -d c4`):
+
+| C1 · Rail | C2 · Compact rail | C3 · Lanes | C4 · Tree |
+| --- | --- | --- | --- |
+| ![C1](docs/design-c1.png) | ![C2](docs/design-c2.png) | ![C3](docs/design-c3.png) | ![C4](docs/design-c4.png) |
+| a node per event, spacing between events | no gaps; one line per tool and thought; times on the right | rail colored by speaker; a time divider before each of your messages | one `◆ nur` node per turn; thinking and tools branch off it (`├─` / `└─`); time gutter |
+
 Everywhere: a spinner + shimmering "Thinking" line while the model works, `∴ Thought for 4s` summaries,
 tool calls as `✓ Bash cargo test · 2s` with a `⎿ exit 0 · 3 lines` result and inline diffs, a live task
 list, and a status bar with **model · effort · permission · plan/build** on the left and the **context
