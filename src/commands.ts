@@ -65,6 +65,7 @@ export const HELP = `## Keys
 - **ctrl+t** switch model (recent on top; ctrl+t → enter flips back) · **tab** plan ↔ build · **shift+tab** cycle permissions (auto → always ask → always allow)
 - **esc** interrupt the running turn · **ctrl+c** quit (prints how to resume)
 - **pgup / pgdn**, mouse wheel — scroll · drag to select text (copied on release)
+- **ctrl+v** attach an image from the clipboard · drag in or paste an image file → **[Image #N]**
 - **#note** saves a note to project memory
 
 ## Commands

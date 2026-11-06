@@ -2,7 +2,7 @@
 // composer (or permission prompt) · status bar. Overlays: command palette
 // above the composer, centered pickers.
 import { RGBA, SyntaxStyle, TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
-import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentui/react"
+import { useKeyboard, usePaste, useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react"
 import * as auth from "../auth"
 import { displayName } from "../catalog"
@@ -62,6 +62,17 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
     if (text.trim()) store.copy(text) ? store.notify(`Copied ${text.length} characters`) : store.notify("Clipboard unavailable", true)
   })
 
+  // Pasted (or dragged-in) image files become [Image #N] attachments; an empty paste
+  // usually means the clipboard holds an image the terminal couldn't send as text.
+  usePaste((e) => {
+    if (store.picker || store.permission || store.inputMode !== "prompt") return
+    const text = new TextDecoder().decode(e.bytes)
+    if (!text.trim()) {
+      e.preventDefault()
+      store.pasteClipboardImage()
+    } else if (store.pasteText(text)) e.preventDefault()
+  })
+
   // Let the store replace the composer text synchronously (history, clear, …).
   useEffect(() => {
     store.applyInput = (text: string) => {
@@ -70,8 +81,16 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
       ta.setText(text)
       ta.cursorOffset = text.length
     }
+    store.insertInput = (text: string) => {
+      const ta = input.current
+      if (!ta) return
+      ta.insertText(text)
+      store.input = ta.plainText
+      store.emit(true)
+    }
     return () => {
       store.applyInput = null
+      store.insertInput = null
     }
   }, [store])
 
@@ -137,6 +156,12 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
         stop()
         return store.submit(input.current?.plainText ?? store.input)
       }
+      return
+    }
+    // ctrl+v: attach an image from the clipboard (text pastes arrive as bracketed paste).
+    if (key.ctrl && key.name === "v" && !store.picker && !store.permission && store.inputMode === "prompt") {
+      stop()
+      store.pasteClipboardImage()
       return
     }
     // ctrl+t: quick model switch (recent models on top, previous one preselected).

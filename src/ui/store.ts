@@ -2,7 +2,7 @@
 import type { ModelMessage } from "ai"
 import { compact, runTurn, systemPrompt, userMessage, type Question, type Reply } from "../agent"
 import * as auth from "../auth"
-import { clampEffort, contextWindow, defaultFor, displayName, effortsFor, modelsFor, pickDefault, refreshCatalog } from "../catalog"
+import { acceptsImages, clampEffort, contextWindow, defaultFor, displayName, effortsFor, modelsFor, pickDefault, refreshCatalog } from "../catalog"
 import { HELP, matchCommands, resolveCommand, type Command } from "../commands"
 import {
   effortInfo,
@@ -29,6 +29,7 @@ import type { Skills } from "../skills"
 import { oneLine, TOOLS, type Outcome } from "../tools"
 import { fmtTokens } from "./theme"
 import { Snapshots, type Checkpoint } from "../checkpoints"
+import { clipboardImage, imageFromFile, pastedPaths, referenced, userContent, type PastedImage } from "../images"
 import { killAllShells, setShellListener } from "../tools/shells"
 
 export type PickerKind = "model" | "effort" | "permission" | "session" | "auth" | "undo"
@@ -86,6 +87,11 @@ export class Store {
   inputMode: "prompt" | `key:${Provider}` = "prompt"
   /** Set by the UI: replaces the composer's text immediately. */
   applyInput: ((text: string) => void) | null = null
+  /** Insert text at the composer's cursor (set by App). */
+  insertInput: ((text: string) => void) | null = null
+  /** Images attached in this conversation, by [Image #N]. */
+  images = new Map<number, PastedImage>()
+  private imageCount = 0
 
   busy: Busy | null = null
   activity = ""
@@ -182,6 +188,38 @@ export class Store {
 
   error(text: string) {
     this.push({ kind: "error", text })
+  }
+
+  // ---- images ---------------------------------------------------------------------
+
+  /** Attach an image and put its [Image #N] marker at the cursor. */
+  attachImage(img: Omit<PastedImage, "n">) {
+    const n = ++this.imageCount
+    this.images.set(n, { ...img, n })
+    this.insertInput?.(`[Image #${n}] `)
+    const kb = img.bytes < 1048576 ? `${Math.max(1, Math.round(img.bytes / 1024))} KB` : `${(img.bytes / 1048576).toFixed(1)} MB`
+    this.notify(`Attached ${img.name === "clipboard" ? "image from clipboard" : img.name} as [Image #${n}] · ${kb}${acceptsImages(this.settings.model) ? "" : ` — ${displayName(this.settings.model)} can't see images`}`, !acceptsImages(this.settings.model))
+  }
+
+  /** ctrl+v: attach the clipboard's image, if it holds one. */
+  async pasteClipboardImage() {
+    const r = await clipboardImage()
+    if (typeof r === "string") return this.notify(r, true)
+    if (!r) return this.notify("No image on the clipboard — paste text with your terminal's paste, or drag in an image file", true)
+    this.attachImage(r)
+  }
+
+  /** Bracketed paste: image file paths become attachments. Returns true if handled. */
+  pasteText(text: string): boolean {
+    const paths = pastedPaths(text)
+    if (!paths.length) return false
+    const found = paths.map((p) => imageFromFile(p, this.cwd))
+    if (found.some((f) => f === null)) return false // not purely image paths: paste as text
+    for (const f of found) {
+      if (typeof f === "string") this.notify(f, true)
+      else if (f) this.attachImage(f)
+    }
+    return true
   }
 
   setInput(text: string) {
@@ -308,6 +346,8 @@ export class Store {
     }
     text = text.replace(/\s+$/, "")
     if (!text.trim()) return
+    if (!text.startsWith("/") && referenced(text, this.images).length && !acceptsImages(this.settings.model))
+      return this.notify(`${displayName(this.settings.model)} can't see images — switch models with ctrl+t, or remove the [Image] markers`, true)
     this.setInput("")
     this.histIdx = null
     if (this.history.at(-1) !== text) {
@@ -339,7 +379,7 @@ export class Store {
     }
     if (!this.session.title) this.session.title = oneLine(display ?? text, 60)
     this.push({ kind: "user", text: display ?? text })
-    this.session.messages.push(userMessage(this.pendingNote ? `${this.pendingNote}\n\n${text}` : text))
+    this.session.messages.push({ role: "user", content: userContent(this.pendingNote ? `${this.pendingNote}\n\n${text}` : text, this.images) })
     this.pendingNote = ""
     this.startTurn()
   }
@@ -810,6 +850,8 @@ export class Store {
   }
 
   newConversation() {
+    this.images.clear()
+    this.imageCount = 0
     killAllShells()
     this.busy?.abort.abort()
     this.busy = null

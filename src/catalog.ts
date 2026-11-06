@@ -18,6 +18,8 @@ export interface CatalogModel {
   type?: string
   reasoning_options?: { type: string; values?: string[] }[]
   limit?: { context?: number; input?: number; output?: number }
+  modalities?: { input?: string[]; output?: string[] }
+  attachment?: boolean
   cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number }
 }
 
@@ -147,6 +149,13 @@ export function defaultFor(p: Provider): string {
   const models = catalog[info(p).catalog]?.models
   if (!models || models[preferred]) return `${p}/${preferred}`
   return modelsFor([p])[0]?.full ?? `${p}/${preferred}`
+}
+
+/** Whether the model accepts image input (unknown models get the benefit of the doubt). */
+export function acceptsImages(full: string): boolean {
+  const m = lookup(full)
+  if (!m) return true
+  return m.modalities?.input ? m.modalities.input.includes("image") : m.attachment !== false
 }
 
 export function displayName(full: string): string {

@@ -27,6 +27,7 @@ the **permission** level on the left and the **context meter** on the right.
 | --- | --- |
 | Enter | send · Shift+Enter / Alt+Enter / Ctrl+J newline |
 | ↑ / ↓ | previous / next prompt |
+| **Ctrl+V** | attach an image from the clipboard as `[Image #1]` (dragging in or pasting an image file works too) |
 | **Ctrl+T** | switch model — recent models on top, previous one preselected (Ctrl+T → Enter flips back) |
 | **Tab** | toggle **plan ↔ build** |
 | **Shift+Tab** | cycle permissions: **auto → always ask → always allow** |

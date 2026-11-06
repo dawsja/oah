@@ -155,7 +155,17 @@ function FocusTurn({ turn, style, tick, live, liveText }: { turn: Turn; style: S
         <box backgroundColor={t.userBg} paddingLeft={1} paddingRight={1} paddingTop={1} paddingBottom={1}>
           <text>
             <b fg={t.you}>› </b>
-            <b fg={t.text}>{turn.user.text}</b>
+            {turn.user.text.split(/(\[Image #\d+\])/).map((part, k) =>
+              /^\[Image #\d+\]$/.test(part) ? (
+                <b key={k} fg={t.accent}>
+                  {part}
+                </b>
+              ) : (
+                <b key={k} fg={t.text}>
+                  {part}
+                </b>
+              ),
+            )}
           </text>
         </box>
       ) : null}
