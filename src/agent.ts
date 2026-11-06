@@ -66,7 +66,7 @@ export function needsPermission(p: Permission, r: Risk): boolean {
 export function grantKey(name: string, args: any): string {
   if (name === "write_file" || name === "edit_file") return "write"
   if (name === "bash") return `bash:${String(args?.command ?? "").trim().split(/\s+/)[0]}`
-  if (["read_file", "list_dir", "glob", "grep"].includes(name)) return "read"
+  if (["read_file", "ls", "find", "glob", "grep"].includes(name)) return "read"
   return name
 }
 

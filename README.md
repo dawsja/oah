@@ -74,9 +74,10 @@ come from each model's `reasoning_options`.
 | Tool | What it does | Permission in `auto` |
 | --- | --- | --- |
 | `read_file` | numbered lines, offset/limit | runs (asks outside the workspace) |
-| `list_dir` | directory listing | runs |
-| `glob` | find files by pattern, .gitignore-aware | runs |
-| `grep` | regex search across files | runs |
+| `ls` | list a directory; `all` for dotfiles, `long` for sizes/dates, `depth` 1–3 | runs |
+| `find` | find files/dirs by name glob, path glob, type, depth, size, modified age; .gitignore-aware | runs |
+| `glob` | find files by a glob pattern like `src/**/*.ts` | runs |
+| `grep` | search contents (ripgrep when installed, built-in fallback): regex or literal, case-insensitive, file glob, context lines, `content` / `files` / `count` output | runs |
 | `write_file` | create/overwrite a file *(build mode)* | asks, with a preview |
 | `edit_file` | exact string replace *(build mode)* | asks, with a diff |
 | `bash` | run a shell command (read-only in plan mode) | safe commands run; others ask |
@@ -149,7 +150,7 @@ from GitHub with `NUR_DOWNLOAD_URL=https://github.com/dawsja/nar/releases/downlo
 git clone --recursive https://github.com/dawsja/nar && cd nar
 bun install
 bun run dev            # run from source
-bun test && bun run typecheck
+bun test && bun run typecheck   # tests live in test/ (bunfig.toml)
 bun run build          # dist/nur-<os>-<arch>.tar.gz for this machine
 ```
 

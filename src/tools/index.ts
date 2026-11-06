@@ -126,7 +126,8 @@ export function risk(name: string, args: any, cwd: string, extraSafe: string[]):
     case "goal_complete":
       return "internal"
     case "read_file":
-    case "list_dir":
+    case "ls":
+    case "find":
     case "glob":
     case "grep":
       return !args?.path || inside(cwd, resolvePath(cwd, args.path)) ? "read" : "read-outside"
@@ -148,8 +149,10 @@ export function title(name: string, args: any, cwd: string): string {
   switch (name) {
     case "read_file":
       return `Read ${path()}`
-    case "list_dir":
+    case "ls":
       return `List ${path()}`
+    case "find":
+      return `Find ${[args?.name, args?.path_pattern, args?.type && args.type !== "any" ? args.type : "", args?.modified_within ? `modified < ${args.modified_within}` : ""].filter(Boolean).join(" ") || "*"}${args?.path ? ` in ${path()}` : ""}`
     case "glob":
       return `Glob ${args?.pattern ?? ""}`
     case "grep":
@@ -253,6 +256,137 @@ export function globToRegex(glob: string): RegExp {
 
 const isBinary = (b: Buffer) => b.subarray(0, 8192).includes(0)
 
+const SKIP_DIRS = new Set([".git", "node_modules", "target"])
+
+export function humanSize(n: number): string {
+  if (n < 1024) return `${n}B`
+  const units = ["K", "M", "G", "T"]
+  let v = n / 1024
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) (v /= 1024), i++
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)}${units[i]}`
+}
+
+export function parseSize(s: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)\s*([kmgt]?)b?$/i.exec(s.trim())
+  if (!m) return null
+  const mult = { "": 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4 }[m[2]!.toLowerCase() as "" | "k" | "m" | "g" | "t"]
+  return Math.round(Number(m[1]) * mult)
+}
+
+export function parseAge(s: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)\s*(s|m|h|d|w)$/i.exec(s.trim())
+  if (!m) return null
+  const mult = { s: 1e3, m: 6e4, h: 36e5, d: 864e5, w: 6048e5 }[m[2]!.toLowerCase() as "s" | "m" | "h" | "d" | "w"]
+  return Number(m[1]) * mult
+}
+
+/** Walk files and directories with depth / hidden / .gitignore control. Return false from `on` to stop. */
+function walkEntries(root: string, signal: AbortSignal, o: { hidden: boolean; gitignore: boolean; maxDepth: number }, on: (path: string, isDir: boolean) => boolean | void) {
+  const ignored = o.gitignore ? loadGitignore(root) : []
+  const stack: [string, number][] = [[root, 0]]
+  while (stack.length) {
+    if (signal.aborted) return
+    const [dir, depth] = stack.pop()!
+    let entries: import("node:fs").Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const e of entries) {
+      if (SKIP_DIRS.has(e.name)) continue
+      if (!o.hidden && e.name.startsWith(".")) continue
+      const p = join(dir, e.name)
+      const r = relative(root, p)
+      if (ignored.some((g) => g.test(r) || g.test(e.name))) continue
+      const isDir = e.isDirectory()
+      if (on(p, isDir) === false) return
+      if (isDir && depth + 1 < o.maxDepth) stack.push([p, depth + 1])
+    }
+  }
+}
+
+let rgPath: string | null | undefined
+function findRg(): string | null {
+  if (process.env.NUR_NO_RG) return null
+  if (rgPath === undefined) rgPath = Bun.which("rg") ?? null
+  return rgPath
+}
+
+type GrepOpts = { glob?: string; case_insensitive?: boolean; fixed_strings?: boolean; context: number; mode: "content" | "files" | "count" }
+
+/** ripgrep output lines, or null when rg isn't available. A string is an error. */
+async function ripgrep(pattern: string, root: string, o: GrepOpts, ctx: ToolCtx): Promise<string[] | string | null> {
+  const rg = findRg()
+  if (!rg) return null
+  const args = [rg, "--no-heading", "--with-filename", "--no-require-git", "--color", "never", "--max-columns", "300", "--max-columns-preview", "--max-filesize", "4M"]
+  if (o.mode === "files") args.push("--files-with-matches")
+  else if (o.mode === "count") args.push("--count")
+  else args.push("--line-number")
+  if (o.mode === "content" && o.context) args.push("-C", String(o.context))
+  if (o.case_insensitive) args.push("-i")
+  if (o.fixed_strings) args.push("-F")
+  if (o.glob) args.push("--glob", o.glob)
+  args.push("-e", pattern, "--", inside(ctx.cwd, root) ? relative(ctx.cwd, root) || "." : root)
+  const proc = Bun.spawn(args, { cwd: ctx.cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" })
+  const kill = () => proc.kill()
+  ctx.signal.addEventListener("abort", kill, { once: true })
+  const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+  ctx.signal.removeEventListener("abort", kill)
+  if (code === 1) return []
+  if (code !== 0) return err.trim().split("\n")[0] || `ripgrep exited with ${code}`
+  const lines = out.split("\n").filter(Boolean).map((l) => l.replace(/^\.\//, ""))
+  // Match the JS fallback's "path:line: text" shape.
+  return o.mode === "content" ? lines.map((l) => (l === "--" ? "--" : l.replace(/^(.+?)([:-])(\d+)\2/, (_m, f, sep, n) => `${f}${sep}${n}${sep} `))) : lines
+}
+
+const GREP_CAP = 5000
+
+function grepJs(pattern: string, root: string, o: GrepOpts & { limit: number }, ctx: ToolCtx): string[] | string {
+  let re: RegExp
+  try {
+    re = new RegExp(o.fixed_strings ? pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : pattern, o.case_insensitive ? "i" : "")
+  } catch (e: any) {
+    return `bad regex: ${e.message}`
+  }
+  const filter = o.glob ? globToRegex(o.glob) : null
+  const out: string[] = []
+  const search = (p: string) => {
+    if (filter && !filter.test(p.split("/").pop()!) && !filter.test(relative(root, p))) return true
+    let buf: Buffer
+    try {
+      if (statSync(p).size > 4 << 20) return true
+      buf = readFileSync(p)
+    } catch {
+      return true
+    }
+    if (isBinary(buf)) return true
+    const lines = buf.toString("utf8").split("\n")
+    const name = rel(ctx.cwd, p)
+    let count = 0
+    let lastShown = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (!re.test(lines[i]!)) continue
+      count++
+      if (o.mode !== "content") continue
+      const from = Math.max(0, i - o.context, lastShown + 1)
+      if (o.context && lastShown >= 0 && from > lastShown + 1) out.push("--")
+      for (let j = from; j <= Math.min(lines.length - 1, i + o.context); j++) {
+        out.push(`${name}${j === i ? ":" : "-"}${j + 1}${j === i ? ":" : "-"} ${oneLine(lines[j]!, 300)}`)
+        lastShown = j
+      }
+      if (out.length >= GREP_CAP) return false
+    }
+    if (count && o.mode === "files") out.push(name)
+    if (count && o.mode === "count") out.push(`${name}:${count}`)
+    return out.length < GREP_CAP
+  }
+  if (statSync(root).isFile()) search(root)
+  else walkEntries(root, ctx.signal, { hidden: false, gitignore: true, maxDepth: Infinity }, (p, isDir) => (isDir ? undefined : search(p)))
+  return out
+}
+
 export const TOOLS: ToolDef[] = [
   {
     name: "read_file",
@@ -279,17 +413,111 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: "list_dir",
-    description: "List a directory (non-recursive). Directories end with '/'.",
-    parameters: obj({ path: str("Directory (default: workspace root)") }),
+    name: "ls",
+    description:
+      "List a directory like `ls`. Directories end with '/'. Set all=true to include dotfiles, long=true for sizes and modification times, depth (1-3) to include subdirectories.",
+    parameters: obj({
+      path: str("Directory (default: workspace root)"),
+      all: { type: "boolean", description: "Include hidden entries (dotfiles)" },
+      long: { type: "boolean", description: "Show size and modification time" },
+      depth: { type: "integer", description: "Levels to list (1-3, default 1)" },
+    }),
     run(a, ctx) {
-      const p = a.path ? resolvePath(ctx.cwd, a.path) : ctx.cwd
-      try {
-        const entries = readdirSync(p, { withFileTypes: true }).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort()
-        return ok(entries.join("\n") || "(empty)", `${entries.length} entries`)
-      } catch (e: any) {
-        return fail(`${rel(ctx.cwd, p)}: ${e.code ?? e.message}`)
+      const root = a.path ? resolvePath(ctx.cwd, a.path) : ctx.cwd
+      const depth = Math.min(3, Math.max(1, Number(a.depth) || 1))
+      const out: string[] = []
+      let count = 0
+      const visit = (dir: string, level: number) => {
+        let entries: import("node:fs").Dirent[]
+        try {
+          entries = readdirSync(dir, { withFileTypes: true })
+        } catch (e: any) {
+          if (level === 0) throw e
+          return
+        }
+        entries.sort((x, y) => Number(y.isDirectory()) - Number(x.isDirectory()) || x.name.localeCompare(y.name))
+        for (const e of entries) {
+          if (!a.all && e.name.startsWith(".")) continue
+          if (count >= 1000) return
+          count++
+          const p = join(dir, e.name)
+          const name = "  ".repeat(level) + e.name + (e.isDirectory() ? "/" : e.isSymbolicLink() ? "@" : "")
+          if (a.long) {
+            let size = "-"
+            let mtime = ""
+            try {
+              const st = statSync(p)
+              size = e.isDirectory() ? "-" : humanSize(st.size)
+              mtime = st.mtime.toISOString().slice(0, 16).replace("T", " ")
+            } catch {}
+            out.push(`${size.padStart(7)}  ${mtime}  ${name}`)
+          } else out.push(name)
+          if (e.isDirectory() && level + 1 < depth && !SKIP_DIRS.has(e.name)) visit(p, level + 1)
+        }
       }
+      try {
+        visit(root, 0)
+      } catch (e: any) {
+        return fail(`${rel(ctx.cwd, root)}: ${e.code ?? e.message}`)
+      }
+      if (count >= 1000) out.push("… (truncated at 1000 entries)")
+      return ok(out.join("\n") || "(empty)", `${count} entries`)
+    },
+  },
+  {
+    name: "find",
+    description:
+      "Find files and directories like `find`: filter by name glob (e.g. '*.test.ts' or '{Dockerfile,*.yml}'), type, depth, size and modification age. Respects .gitignore unless no_ignore=true. Returns up to `limit` paths (default 200).",
+    parameters: obj({
+      path: str("Directory to search (default: workspace root)"),
+      name: str("Glob matched against the file name, e.g. '*.rs'"),
+      path_pattern: str("Glob matched against the path relative to `path`, e.g. 'src/**/test_*'"),
+      type: { type: "string", enum: ["file", "dir", "any"], description: "Default: any" },
+      max_depth: { type: "integer", description: "Maximum depth below `path`" },
+      min_size: str("e.g. '10k', '2M'"),
+      max_size: str("e.g. '500k'"),
+      modified_within: str("Only entries modified within this long, e.g. '30m', '2h', '7d'"),
+      hidden: { type: "boolean", description: "Include dotfiles and dot-directories" },
+      no_ignore: { type: "boolean", description: "Don't apply .gitignore" },
+      limit: { type: "integer", description: "Maximum results (default 200, max 1000)" },
+    }),
+    run(a, ctx) {
+      const root = a.path ? resolvePath(ctx.cwd, a.path) : ctx.cwd
+      if (!existsSync(root)) return fail(`${rel(ctx.cwd, root)}: no such directory`)
+      const nameRe = a.name ? globToRegex(String(a.name)) : null
+      const pathRe = a.path_pattern ? globToRegex(String(a.path_pattern)) : null
+      const type = a.type ?? "any"
+      const maxDepth = a.max_depth === undefined ? Infinity : Math.max(1, Number(a.max_depth))
+      const minSize = a.min_size ? parseSize(String(a.min_size)) : null
+      const maxSize = a.max_size ? parseSize(String(a.max_size)) : null
+      const within = a.modified_within ? parseAge(String(a.modified_within)) : null
+      if ((a.min_size && minSize === null) || (a.max_size && maxSize === null)) return fail("sizes look like '10k', '2M' or '1G'")
+      if (a.modified_within && within === null) return fail("modified_within looks like '30m', '2h' or '7d'")
+      const limit = Math.min(1000, Math.max(1, Number(a.limit) || 200))
+      const needStat = minSize !== null || maxSize !== null || within !== null
+      const out: string[] = []
+      walkEntries(root, ctx.signal, { hidden: !!a.hidden, gitignore: !a.no_ignore, maxDepth }, (p, isDir) => {
+        if ((type === "file" || minSize !== null || maxSize !== null) && isDir) return
+        if (type === "dir" && !isDir) return
+        const relp = relative(root, p)
+        if (nameRe && !nameRe.test(p.split("/").pop()!)) return
+        if (pathRe && !pathRe.test(relp)) return
+        if (needStat) {
+          try {
+            const st = statSync(p)
+            if (!isDir && minSize !== null && st.size < minSize) return
+            if (!isDir && maxSize !== null && st.size > maxSize) return
+            if (within !== null && Date.now() - st.mtimeMs > within) return
+          } catch {
+            return
+          }
+        }
+        out.push(rel(ctx.cwd, p) + (isDir ? "/" : ""))
+        return out.length < limit
+      })
+      out.sort()
+      const more = out.length >= limit ? `\n… (stopped at ${limit} results; narrow the search or raise limit)` : ""
+      return out.length ? ok(out.join("\n") + more, `${out.length} result${out.length === 1 ? "" : "s"}`) : ok("Nothing found.", "no matches")
     },
   },
   {
@@ -312,44 +540,36 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "grep",
-    description: "Search file contents with a regular expression (JavaScript syntax), respecting .gitignore. Returns 'path:line: text' (max 300).",
-    parameters: obj({ pattern: str(), path: str("File or directory (default: workspace root)"), glob: str("Only files matching this glob, e.g. '*.ts'"), case_insensitive: { type: "boolean" } }, ["pattern"]),
-    run(a, ctx) {
-      let re: RegExp
-      try {
-        re = new RegExp(String(a.pattern), a.case_insensitive ? "i" : "")
-      } catch (e: any) {
-        return fail(`bad regex: ${e.message}`)
-      }
-      const filter = a.glob ? globToRegex(String(a.glob)) : null
+    description:
+      "Search file contents like `grep -rn` (uses ripgrep when installed), respecting .gitignore. Regex syntax (or fixed_strings=true for literal text). output: 'content' (path:line: text, default), 'files' (matching paths) or 'count' (matches per file). context adds lines around each match.",
+    parameters: obj(
+      {
+        pattern: str("Regular expression (or literal text with fixed_strings)"),
+        path: str("File or directory (default: workspace root)"),
+        glob: str("Only search files matching this glob, e.g. '*.ts' or '*.{ts,tsx}'"),
+        case_insensitive: { type: "boolean" },
+        fixed_strings: { type: "boolean", description: "Treat pattern as literal text" },
+        context: { type: "integer", description: "Lines of context before and after each match (0-5)" },
+        output: { type: "string", enum: ["content", "files", "count"] },
+        limit: { type: "integer", description: "Maximum output lines (default 300, max 2000)" },
+      },
+      ["pattern"],
+    ),
+    async run(a, ctx) {
       const root = a.path ? resolvePath(ctx.cwd, a.path) : ctx.cwd
-      const out: string[] = []
-      let files = 0
-      const search = (p: string) => {
-        if (filter && !filter.test(p.split("/").pop()!) && !filter.test(relative(root, p))) return true
-        let buf: Buffer
-        try {
-          if (statSync(p).size > 4 << 20) return true
-          buf = readFileSync(p)
-        } catch {
-          return true
-        }
-        if (isBinary(buf)) return true
-        let hit = false
-        const lines = buf.toString("utf8").split("\n")
-        for (let i = 0; i < lines.length; i++) {
-          if (re.test(lines[i]!)) {
-            hit = true
-            out.push(`${rel(ctx.cwd, p)}:${i + 1}: ${oneLine(lines[i]!, 300)}`)
-            if (out.length >= 300) return false
-          }
-        }
-        if (hit) files++
-        return true
-      }
-      if (existsSync(root) && statSync(root).isFile()) search(root)
-      else walk(root, ctx.signal, search)
-      return out.length ? ok(out.join("\n"), `${out.length} matches in ${files} files`) : ok("No matches.", "no matches")
+      if (!existsSync(root)) return fail(`${rel(ctx.cwd, root)}: no such file or directory`)
+      const limit = Math.min(2000, Math.max(1, Number(a.limit) || 300))
+      const context = Math.min(5, Math.max(0, Number(a.context) || 0))
+      const mode: "content" | "files" | "count" = a.output === "files" || a.output === "count" ? a.output : "content"
+      const rgOut = await ripgrep(String(a.pattern), root, { ...a, context, mode }, ctx)
+      const lines = rgOut ?? grepJs(String(a.pattern), root, { ...a, context, mode, limit }, ctx)
+      if (typeof lines === "string") return fail(lines)
+      if (!lines.length) return ok("No matches.", "no matches")
+      const shown = lines.slice(0, limit)
+      const more = lines.length > limit ? `\n… (${lines.length - limit} more lines; narrow the search or raise limit)` : ""
+      const files = new Set(shown.map((l) => l.split(/[:-]\d+[:-]/)[0])).size
+      const summary = mode === "files" ? `${shown.length} files` : mode === "count" ? `${shown.length} files with matches` : `${shown.filter((l) => /^.+?:\d+: /.test(l)).length} matches in ${files} files`
+      return ok(shown.join("\n") + more, summary)
     },
   },
   {
