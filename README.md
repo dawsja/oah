@@ -1,212 +1,159 @@
-# nar
+# nur
 
-A full-screen AI coding agent for your terminal, written in Rust and rendered with
-[OpenTUI](https://github.com/anomalyco/opentui)'s native (Zig) core. It uses your
-**ChatGPT plan** through Sign in with ChatGPT, or an OpenAI API key.
+A full-screen AI coding agent for your terminal. Built with
+[OpenTUI](https://github.com/anomalyco/opentui) (Zig core, React bindings), the
+[AI SDK](https://ai-sdk.dev) and the [models.dev](https://models.dev) catalog — the same stack as opencode.
 
-![nar](docs/screenshot.png)
+Use your **ChatGPT plan** (Sign in with ChatGPT), an **Anthropic API key**, or an **OpenAI API key**.
 
-## The look
-
-nar takes over the whole terminal (alternate screen, mouse, bracketed paste, Kitty keyboard):
-
-```text
- ◆ nar  ~/code/project                                    ◎ goal · turn 2 · session 3f2a91c0   ← header
- ▌ you                                                                                         │
- ▌ add a --json flag to the export command                                                     │ ← scrollable
-                                                                                               │   transcript
- ∴ Looking at how flags are parsed in src/cli.rs…                                              ┃   (scrollbar)
- ⏺ Read src/cli.rs                                                                             ┃
-   ⎿ 214 of 214 lines                                                                          ┃
- ⏺ Edit src/cli.rs                                                                             ┃
-   ⎿ +6 -1                                                                                     │
-     -    let fmt = Format::Text;                                                              │   diffs inline
-     +    let fmt = if args.json { Format::Json } else { Format::Text };                       │
- ● Added `--json`. Tests pass (`cargo test`: 48 passed).                                       │
- ☰ Tasks  2/3                                                                                  │ ← live todo list
-   ☒ Parse the flag   ☒ Emit JSON   ◐ Update docs                                              │
- ⠹ Running Bash cargo test… 14s · esc to interrupt                                             ← activity line
-╭──────────────────────────────────────────────────────────────────────────────────────────────╮
-│ › ask anything · / for commands · shift+enter for newline                                     │ ← input
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
- gpt-5.5 · high · auto · ◆ build (shift+tab)          Using ChatGPT plan · 41k / 272k ▰▰▱▱▱▱▱▱▱▱ 15%
- └ model  └ effort └ permission └ plan/build mode                               context of the model ┘
-```
-
-* **Transcript** — your messages on a tinted panel (`▌`), answers as Markdown (`●`, headings,
-  lists, code blocks, inline code, links), reasoning summaries dimmed (`∴`), tool calls with a
-  status glyph (`◌` running, `⏺` green/red done/failed, `⊘` denied), a one-line result (`⎿`)
-  and inline diffs or output previews.
-* **Activity line** — spinner, what's happening and elapsed time; toasts appear here too.
-* **Input** — multi-line, soft-wrapped. Border is violet in build mode and amber in plan mode.
-* **Status bar** — model · effort · permission · mode on the left; auth and a live context meter
-  (green → amber → red) on the far right.
-* **Overlays** — the `/` command palette opens above the input; pickers (`/model`, `/effort`,
-  `/permissions`, `/session`, `/auth`) open as centered, filterable modals; permission requests
-  replace the input with an amber `y` / `a` / `n` prompt.
-
-## Features
-
-* Scrollable history (wheel, PgUp/PgDn, Ctrl+Home/End) with a scrollbar and "↓ more" indicator
-* Drag to select text in the transcript; it is copied on release (OSC 52, plus `wl-copy`,
-  `xclip`, `xsel` or `pbcopy` when available). Gutters and bullets are never copied.
-* ↑ / ↓ walks through previous prompts (persisted across sessions)
-* `/model`, `/effort`, `/auth`, `/permissions`, `/plan`, `/build`
-* `/session` and `nar --resume <id>`: every conversation is saved; **Ctrl+C** quits and prints
-  the exact resume command
-* `/goal <objective>` — keeps going turn after turn until the model calls `goal_complete`
-  (esc pauses, `/goal clear` stops)
-* `/compact [focus]` and **automatic compaction** near the context limit (85% by default)
-* `/clear` for a fresh conversation
-* **Memory** — `AGENTS.md` / `NAR.md` / `CLAUDE.md` instruction files (global and per directory),
-  plus persistent notes saved with `#note`, `/memory add`, or by the model's `memory` tool
-* **Skills** — `SKILL.md` folders; listed to the model, loaded on demand, or run with `/<name>`
-* **MCP** — stdio and Streamable HTTP servers; tools appear as `mcp__<server>__<tool>`
-* Three permission levels: **auto**, **always ask**, **always allow**
-* Plan mode (read-only research → plan) and build mode, toggled with **Shift+Tab**
-
-## Install
-
-Requirements: Rust 1.80+, [Zig 0.17](https://ziglang.org/download/), git.
+![nur](docs/screenshot.png)
 
 ```sh
-git clone --recursive https://github.com/dawsja/nar
-cd nar
-cargo build --release          # builds OpenTUI's native library with Zig, then nar
-./target/release/nar
+curl -fsSL https://nur.sh/install.sh | sh
+nur
 ```
 
-The build copies `libopentui.so` (or `.dylib`) next to the binary, which finds it through an
-`$ORIGIN` rpath. To install, copy both files into the same directory (or the library into
-`../lib`).
+## Designs
 
-Already have the OpenTUI library? Skip Zig with
-`OPENTUI_LIB_DIR=/path/to/dir/with/libopentui cargo build --release`. The prebuilt
-`libopentui.so` in the `@opentui/core-<platform>@0.8.2` npm packages works too, since it
-exports the same C ABI. `OPENTUI_SRC_DIR` points the build at another OpenTUI checkout, and
-`OPENTUI_REBUILD=1` forces a rebuild.
+Three transcript looks. Switch any time with `/design` or start with `nur -d b`.
 
-Supported: Linux and macOS (x86_64, aarch64).
+| A · Panels | B · Bubbles | C · Timeline |
+| --- | --- | --- |
+| ![A](docs/design-a.png) | ![B](docs/design-b.png) | ![C](docs/design-c.png) |
+| you: tinted panel with a cyan bar · nur: `◆ nur · model` column | you: bubble on the right · nur: bubble on the left | one rail, a node per event: `●` you, `◆` nur, `○` tools, `∴` thinking |
 
-## Sign in
-
-Run `/auth` (or `nar login`) and choose **Continue with ChatGPT**. nar follows the
-[open-source ChatGPT plan usage flow](https://developers.openai.com/siwc/token-sharing-open-source):
-
-* a stable, opaque host id (`urn:uuid:…`) is created once in `~/.nar/host_id`
-* the first sign-in registers nar as a user-defined agent (`dynamic_agent_client`) and stores
-  the issued client id; later sign-ins reuse it
-* PKCE (S256), state and nonce, loopback redirect on `127.0.0.1:1455`
-* the ID token is verified against OpenAI's JWKS, and the granted scopes must include
-  `chatgpt.tokens.use.direct`
-* tokens refresh automatically and are stored with `0600` permissions; `/auth logout` revokes them
-
-Requests go to `POST https://api.openai.com/v1/responses` with `store: false` and `stream: true`,
-replaying history (including encrypted reasoning) on each turn. Usage-limit errors link to
-[chatgpt.com/settings/usage](https://chatgpt.com/settings/usage).
-
-Prefer an API key? Choose **Use an OpenAI API key** in `/auth`, or set `OPENAI_API_KEY`.
+Everywhere: a spinner + shimmering "Thinking" line while the model works, `∴ Thought for 4s` summaries,
+tool calls as `✓ Bash cargo test · 2s` with a `⎿ exit 0 · 3 lines` result and inline diffs, a live task
+list, and a status bar with **model · effort · permission · plan/build** on the left and the **context
+meter** on the right.
 
 ## Keys
 
-| Key | Action |
+| Key | |
 | --- | --- |
-| Enter | send |
-| Shift+Enter, Alt+Enter, Ctrl+J | newline |
-| ↑ / ↓ | previous / next prompt (from the first / last line) |
-| Shift+Tab | toggle plan ↔ build |
+| Enter | send · Shift+Enter / Alt+Enter / Ctrl+J newline |
+| ↑ / ↓ | previous / next prompt |
+| **Tab** | toggle **plan ↔ build** |
+| **Shift+Tab** | cycle permissions: **auto → always ask → always allow** |
 | Esc | interrupt the running turn |
-| PgUp / PgDn, wheel | scroll · Ctrl+Home / Ctrl+End jump |
-| mouse drag | select and copy |
-| Ctrl+A/E, Ctrl+U/K/W, Alt+←/→ | line and word editing |
-| Ctrl+C | quit (prints the resume command) |
+| PgUp / PgDn, wheel | scroll |
+| mouse drag | select text — copied on release (OSC 52 + wl-copy / xclip / pbcopy) |
+| Ctrl+C | quit — prints `nur --resume <id>` |
+| `#note` | save a note to project memory |
 
 ## Commands
 
-| Command | |
-| --- | --- |
-| `/model [slug]` | choose the model (listed from the API) |
-| `/effort [minimal…xhigh]` | reasoning effort |
-| `/permissions [auto\|ask\|allow]` | permission level |
-| `/plan`, `/build` | switch mode |
-| `/auth [login\|apikey\|logout\|status]` | authentication |
-| `/goal <objective>` · `/goal clear` | autonomous mode until complete |
-| `/compact [focus]` | summarize history to free context |
-| `/clear` | new conversation |
-| `/session [id]` | browse and resume sessions |
-| `/memory [add\|global\|remove\|clear]` | persistent memory |
-| `/skills`, `/mcp` | list skills and MCP servers |
-| `/init` | have the agent write an `AGENTS.md` |
-| `/copy` | copy the last answer |
-| `/help`, `/exit` | |
+`/model` `/effort` `/permissions` `/plan` `/build` `/design` `/auth` `/goal <objective>` `/compact [focus]`
+`/clear` `/session [id]` `/memory` `/skills` `/mcp` `/tools` `/init` `/copy` `/help` `/exit`, plus `/<skill>`.
 
-CLI: `nar [prompt]`, `nar -c` (continue latest here), `nar -r [id]`, `nar sessions`,
-`nar login`, `nar logout`, `-m <model>`, `-e <effort>`, `-p <auto|ask|allow>`, `--plan`.
+- **/goal** keeps working turn after turn until the model calls `goal_complete` (Esc pauses, `/goal clear` stops).
+- **Auto-compaction** summarizes the conversation at 85% of the model's context window (from models.dev).
+- **/session** lists saved conversations; `nur -c` continues the latest here, `nur -r <id>` resumes one.
 
-## Permissions
+## Providers
 
-| Level | Reads in workspace | Safe commands (`ls`, `git status`, …) | Edits, other commands, MCP, reads outside |
-| --- | --- | --- | --- |
-| auto | run | run | ask |
-| always ask | ask | ask | ask |
-| always allow | run | run | run |
+| Provider | Model ids | Auth |
+| --- | --- | --- |
+| ChatGPT plan | `chatgpt/gpt-5.6`, … | `/auth` → Continue with ChatGPT (or `nur login`) |
+| Anthropic | `anthropic/claude-opus-5-5`, `anthropic/claude-sonnet-5-5`, … | `/auth` → Anthropic API key, or `ANTHROPIC_API_KEY` |
+| OpenAI | `openai/gpt-5.6`, … | `/auth` → OpenAI API key, or `OPENAI_API_KEY` |
 
-At a prompt: **y** allow once, **a** always allow (this session; per command name, per MCP
-tool, or all edits), **n** / Esc deny. Add your own safe command prefixes to
-`allowed_commands` in `~/.nar/settings.json`. Plan mode only exposes read-only tools.
+`/model` lists tool-calling models from models.dev for the providers you have credentials for; effort levels
+come from each model's `reasoning_options`.
 
-## Memory, skills and MCP
+- **ChatGPT plan** follows OpenAI's open-source Sign in with ChatGPT flow: a stable `ext_agent_host_id`,
+  dynamic client registration on first sign-in (the issued client id is reused), PKCE + state + nonce on a
+  127.0.0.1 loopback, ID-token verification against OpenAI's JWKS, the `chatgpt.tokens.use.direct` scope
+  check, automatic refresh, and revocation on sign-out. Requests go to `/v1/responses` with `store: false`,
+  and replay encrypted reasoning.
+- **Anthropic** uses adaptive thinking with summarized display, `effort` (low → max), server-side refusal
+  fallbacks on models that support them, and prompt caching.
 
-* Instruction files: `~/.nar/AGENTS.md`, then for each directory from the repository root down to
-  the working directory the first of `AGENTS.md`, `NAR.md`, `CLAUDE.md`.
-* Notes: `~/.nar/memory/global.md` and `~/.nar/memory/projects/<project>-<hash>.md`.
-* Skills: `./.nar/skills`, `./.agents/skills`, `./.claude/skills`, `~/.nar/skills`,
-  `~/.agents/skills`, `~/.claude/skills` — each skill is a folder with a `SKILL.md`:
+## Tools
 
-  ```markdown
-  ---
-  name: release-notes
-  description: Write release notes from the git log
-  ---
-  Steps…
-  ```
+| Tool | What it does | Permission in `auto` |
+| --- | --- | --- |
+| `read_file` | numbered lines, offset/limit | runs (asks outside the workspace) |
+| `list_dir` | directory listing | runs |
+| `glob` | find files by pattern, .gitignore-aware | runs |
+| `grep` | regex search across files | runs |
+| `write_file` | create/overwrite a file *(build mode)* | asks, with a preview |
+| `edit_file` | exact string replace *(build mode)* | asks, with a diff |
+| `bash` | run a shell command (read-only in plan mode) | safe commands run; others ask |
+| `web_fetch` | fetch a URL as text | asks |
+| `todo_write` | the live task list | runs |
+| `memory` | add/remove/list persistent notes | runs |
+| `load_skill` | load a skill's instructions | runs |
+| `goal_complete` | finish an active `/goal` | runs |
+| MCP tools | `mcp__<server>__<tool>` from your MCP servers | asks |
 
-* MCP servers: `~/.nar/mcp.json`, `./.nar/mcp.json` or `./.mcp.json`:
+At a prompt: **y** allow once · **a** always allow (this session: per command, per MCP tool, or all edits) ·
+**n**/Esc deny. `always ask` asks for everything; `always allow` never asks.
+
+## Memory, skills, MCP
+
+- **Instructions:** `~/.config/nur/AGENTS.md`, then from the repo root down to the working directory the
+  first of `AGENTS.md`, `NUR.md`, `CLAUDE.md`. `/init` writes one.
+- **Notes:** `#note`, `/memory add|global|remove`, or the model's `memory` tool.
+- **Skills:** folders with a `SKILL.md` in `./.nur/skills`, `./.agents/skills`, `./.claude/skills`,
+  `~/.config/nur/skills`, `~/.agents/skills`, `~/.claude/skills`.
+- **MCP:** `~/.config/nur/mcp.json`, `./.nur/mcp.json` or `./.mcp.json` (stdio and HTTP, via `@ai-sdk/mcp`):
 
   ```json
-  {
-    "mcpServers": {
-      "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] },
-      "docs": { "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer …" } }
-    }
-  }
+  { "mcpServers": {
+      "fs":   { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] },
+      "docs": { "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer …" } } } }
   ```
 
 ## Files
 
-```text
-~/.nar/                 ($NAR_HOME overrides)
-  settings.json         model, effort, permission, mode, api_base, context_window, auto_compact_at
-  auth.json             credentials (0600)
-  host_id               ext_agent_host_id for Sign in with ChatGPT
-  history.jsonl         prompt history
-  sessions/<id>.json    saved conversations
-  memory/               persistent notes
-  skills/, mcp.json, AGENTS.md
-```
-
-## Architecture
+Everything lives in `~/.config/nur` (`$XDG_CONFIG_HOME/nur`, or `$NUR_HOME`):
 
 ```text
-crates/opentui   Safe Rust bindings to OpenTUI's C ABI (opentui.h, ABI v2). The host owns raw
-                 mode, the clock and the event loop; OpenTUI handles terminal setup and
-                 restoration, capability detection, input parsing, diffed rendering and OSC 52.
-                 Frames are drawn immediate-mode into an offscreen buffer and presented.
-crates/nar       The app: ui/ (state, rendering, editor, Markdown), agent (turn loop),
-                 api (Responses streaming), auth (Sign in with ChatGPT), tools, mcp,
-                 skills, memory, session.
-vendor/opentui   OpenTUI v0.8.2 (git submodule), built with Zig by crates/opentui/build.rs.
+bin/nur              the binary (installed by install.sh)
+settings.json        model, effort, permission, mode, design, autoCompactAt, allowedCommands
+auth.json            credentials (0600)    host_id   ext_agent_host_id for ChatGPT
+sessions/<id>.json   conversations         history.jsonl  prompt history
+memory/  skills/  mcp.json  AGENTS.md  models.json (models.dev cache)
 ```
+
+## Install & release
+
+```sh
+curl -fsSL https://nur.sh/install.sh | sh                     # latest
+curl -fsSL https://nur.sh/install.sh | NUR_VERSION=0.1.0 sh   # pinned
+```
+
+`scripts/install.sh` detects the platform (Linux/macOS, x64/arm64), downloads
+`$NUR_DOWNLOAD_URL/v<version>/nur-<os>-<arch>.tar.gz`, verifies its `.sha256`, installs to
+`~/.config/nur/bin/nur` and adds that to your shell's PATH.
+
+Hosting on Cloudflare: serve `scripts/install.sh` at `https://nur.sh/install.sh` and put the release files
+under `https://nur.sh/download/`:
+
+```text
+download/latest.txt                         0.1.0
+download/v0.1.0/nur-linux-x64.tar.gz        + .sha256
+download/v0.1.0/nur-linux-arm64.tar.gz      + .sha256
+download/v0.1.0/nur-darwin-x64.tar.gz       + .sha256
+download/v0.1.0/nur-darwin-arm64.tar.gz     + .sha256
+```
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds all four with `bun scripts/build.ts --all`
+and attaches them (plus `latest.txt` and `install.sh`) to a GitHub release. Until nur.sh is live, install
+from GitHub with `NUR_DOWNLOAD_URL=https://github.com/dawsja/nar/releases/download`.
+
+## Develop
+
+```sh
+bun install
+bun run dev            # run from source
+bun test && bun run typecheck
+bun run build          # dist/nur-<os>-<arch>.tar.gz for this machine
+```
+
+Each binary is the Bun runtime plus nur plus OpenTUI's prebuilt native library (compiled from Zig), so
+users need nothing else installed.
 
 ## License
 

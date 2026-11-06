@@ -1,0 +1,31 @@
+{
+  "name": "nur",
+  "version": "0.1.0",
+  "description": "A full-screen AI coding agent for your terminal, built on OpenTUI and the AI SDK",
+  "type": "module",
+  "license": "MIT",
+  "repository": "github:dawsja/nar",
+  "bin": {
+    "nur": "./src/index.tsx"
+  },
+  "scripts": {
+    "dev": "bun src/index.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun scripts/build.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.97",
+    "@ai-sdk/mcp": "^2.0.91",
+    "@ai-sdk/openai": "^4.0.109",
+    "@opentui/core": "0.8.2",
+    "@opentui/react": "0.8.2",
+    "ai": "^7.0.163",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.1.0",
+    "typescript": "^5.9.0"
+  }
+}
