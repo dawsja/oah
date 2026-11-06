@@ -70,7 +70,7 @@ export async function languageModel(full: string, settings: Settings): Promise<L
     case "deepseek":
       return createDeepSeek({ apiKey, baseURL, headers })(slug)
     case "openrouter":
-      return createOpenRouter({ apiKey, baseURL, headers: { ...headers, "HTTP-Referer": "https://oah.sh", "X-Title": "oah" } })(slug)
+      return createOpenRouter({ apiKey, baseURL, headers: { ...headers, "HTTP-Referer": "https://oah.dev", "X-Title": "oah" } })(slug)
     case "compat":
       return createOpenAICompatible({ name: optionsKey(provider), apiKey, baseURL: baseURL!, headers, includeUsage: true })(slug)
   }

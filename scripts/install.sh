@@ -1,12 +1,12 @@
 #!/bin/sh
 # oah installer
 #
-#   curl -fsSL https://oah.sh/install.sh | sh
+#   curl -fsSL https://oah.dev/install.sh | sh
 #
 # Options (environment variables):
 #   OAH_VERSION        version to install, e.g. 0.1.0 (default: latest)
 #   OAH_INSTALL        install root (default: ~/.config/oah); the binary goes in $OAH_INSTALL/bin
-#   OAH_DOWNLOAD_URL   where release files live (default: https://oah.sh/download)
+#   OAH_DOWNLOAD_URL   where release files live (default: https://oah.dev/download)
 #                      layout: $OAH_DOWNLOAD_URL/latest.txt
 #                              $OAH_DOWNLOAD_URL/v<version>/oah-<os>-<arch>.tar.gz[.sha256]
 #                      GitHub releases use the same layout:
@@ -14,7 +14,7 @@
 #   OAH_NO_MODIFY_PATH set to 1 to leave shell profiles alone
 set -eu
 
-BASE="${OAH_DOWNLOAD_URL:-https://oah.sh/download}"
+BASE="${OAH_DOWNLOAD_URL:-https://oah.dev/download}"
 BASE="${BASE%/}"
 ROOT="${OAH_INSTALL:-${XDG_CONFIG_HOME:-$HOME/.config}/oah}"
 BIN_DIR="$ROOT/bin"
@@ -44,7 +44,7 @@ arch="$(uname -m)"
 case "$os" in
   Linux) os=linux ;;
   Darwin) os=darwin ;;
-  MINGW* | MSYS* | CYGWIN*) fail "on Windows, run this in PowerShell instead:  irm https://oah.sh/install.ps1 | iex" ;;
+  MINGW* | MSYS* | CYGWIN*) fail "on Windows, run this in PowerShell instead:  irm https://oah.dev/install.ps1 | iex" ;;
   *) fail "unsupported OS: $os" ;;
 esac
 case "$arch" in

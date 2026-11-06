@@ -1,6 +1,6 @@
 # Push a tag like v0.1.0 to build every platform and publish a GitHub release.
 # Assets follow the layout scripts/install.sh expects, so you can mirror them to
-# Cloudflare (R2 / Pages) at https://oah.sh/download/ unchanged:
+# Cloudflare (R2 / Pages) at https://oah.dev/download/ unchanged:
 #   download/latest.txt
 #   download/v<version>/oah-<os>-<arch>.tar.gz(.sha256)
 name: release

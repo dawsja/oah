@@ -10,7 +10,7 @@ OpenRouter, Synthetic, Kimi, Z.ai or MiniMax** (including the Kimi Code, GLM Cod
 ![oah](docs/screenshot.png)
 
 ```sh
-curl -fsSL https://oah.sh/install.sh | sh
+curl -fsSL https://oah.dev/install.sh | sh
 oah
 ```
 
@@ -190,14 +190,14 @@ memory/  skills/  mcp.json  mcp-auth.json (MCP OAuth tokens, 0600)  AGENTS.md  m
 ## Install & release
 
 ```sh
-curl -fsSL https://oah.sh/install.sh | sh                     # latest
-curl -fsSL https://oah.sh/install.sh | OAH_VERSION=0.1.0 sh   # pinned
+curl -fsSL https://oah.dev/install.sh | sh                     # latest
+curl -fsSL https://oah.dev/install.sh | OAH_VERSION=0.1.0 sh   # pinned
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://oah.sh/install.ps1 | iex
+irm https://oah.dev/install.ps1 | iex
 ```
 
 `scripts/install.sh` detects the platform (Linux/macOS, x64/arm64), downloads
@@ -206,8 +206,8 @@ irm https://oah.sh/install.ps1 | iex
 (x64/arm64): `~\.config\oah\bin\oah.exe`, added to your user PATH. On Windows the shell tool runs
 PowerShell (`pwsh` when installed, else Windows PowerShell), and the model is told to write PowerShell.
 
-Hosting on Cloudflare: serve `scripts/install.sh` at `https://oah.sh/install.sh` and put the release files
-under `https://oah.sh/download/`:
+Hosting on Cloudflare: serve `scripts/install.sh` at `https://oah.dev/install.sh` and put the release files
+under `https://oah.dev/download/`:
 
 ```text
 download/latest.txt                         0.1.0
@@ -219,11 +219,11 @@ download/v0.1.0/oah-windows-x64.tar.gz      + .sha256   (oah.exe)
 download/v0.1.0/oah-windows-arm64.tar.gz    + .sha256
 ```
 
-and `scripts/install.ps1` at `https://oah.sh/install.ps1`. `bun scripts/build.ts --os darwin,windows` builds
+and `scripts/install.ps1` at `https://oah.dev/install.ps1`. `bun scripts/build.ts --os darwin,windows` builds
 just those platforms.
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds all six with `bun scripts/build.ts --all`
-and attaches them (plus `latest.txt`, `install.sh` and `install.ps1`) to a GitHub release. Until oah.sh is live, install
+and attaches them (plus `latest.txt`, `install.sh` and `install.ps1`) to a GitHub release. Until oah.dev is live, install
 from GitHub with `OAH_DOWNLOAD_URL=https://github.com/dawsja/oah/releases/download`.
 
 ## Develop
