@@ -3,6 +3,7 @@
 import { appendFileSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { ModelMessage } from "ai"
+import type { Checkpoint } from "./checkpoints"
 import { ensureDir, paths, writeFileAtomic, type Effort, type Mode } from "./config"
 
 export type ToolStatus = "running" | "ok" | "failed" | "denied"
@@ -50,6 +51,10 @@ export interface SessionData {
   goal?: Goal
   todos: { text: string; status: string }[]
   compactions: number
+  /** Workspace snapshots for /undo, oldest first. */
+  checkpoints?: Checkpoint[]
+  /** Total cost in USD for metered providers. */
+  cost?: number
 }
 
 export const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 12)

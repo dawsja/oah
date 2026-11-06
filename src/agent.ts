@@ -27,6 +27,8 @@ export interface Hooks {
   toolProgress(callId: string, summary: string, detail: string[]): void
   /** Ask the user a question; resolves with their answer text. */
   question(q: Question): Promise<string>
+  /** Called before a tool that may change files runs (checkpoints). */
+  beforeChange(): Promise<void>
 }
 
 export interface Question {
@@ -119,6 +121,7 @@ export function buildTools(o: TurnOptions): ToolSet {
     }
     let outcome: Outcome
     try {
+      if (r === "write" || r === "exec" || name === "apply_patch") await o.hooks.beforeChange()
       outcome = await run()
     } catch (e: any) {
       outcome = { output: `Error: ${e?.message ?? e}`, summary: e?.message ?? String(e), detail: [], ok: false }
@@ -261,6 +264,7 @@ Date: ${new Date().toISOString().slice(0, 10)}`,
       },
       toolProgress() {},
       question: async () => "",
+      beforeChange: async () => {},
     },
   }
   progress()

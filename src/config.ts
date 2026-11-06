@@ -23,6 +23,8 @@ export const paths = {
   get mcp() { return join(homeDir(), "mcp.json") },
   get agents() { return join(homeDir(), "AGENTS.md") },
   get modelsCache() { return join(homeDir(), "models.json") },
+  get snapshots() { return join(homeDir(), "snapshots") },
+  get images() { return join(homeDir(), "images") },
 }
 
 export function ensureDir(p: string) {
@@ -153,6 +155,8 @@ export interface Settings {
   allowedCommands: string[]
   /** Recently used models (`provider/slug`), newest first — pinned at the top of /model. */
   recentModels: string[]
+  /** Checkpoints kept per session for /undo; older ones are dropped. */
+  maxCheckpoints: number
   /** Overrides (mainly for testing / proxies). */
   openaiBaseURL?: string
   anthropicBaseURL?: string
@@ -168,6 +172,7 @@ export const defaultSettings: Settings = {
   autoCompactAt: 0.85,
   allowedCommands: [],
   recentModels: [],
+  maxCheckpoints: 20,
 }
 
 export function loadSettings(): Settings {

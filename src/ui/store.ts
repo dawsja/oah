@@ -24,13 +24,14 @@ import {
 } from "../config"
 import type { Mcp } from "../mcp"
 import type { Memory } from "../memory"
-import { appendHistory, listSessions, loadHistory, loadSession, newSession, relativeTime, saveSession, type Entry, type SessionData } from "../session"
+import { appendHistory, listSessions, loadHistory, loadSession, newId, newSession, relativeTime, saveSession, type Entry, type SessionData } from "../session"
 import type { Skills } from "../skills"
 import { oneLine, TOOLS, type Outcome } from "../tools"
 import { fmtTokens } from "./theme"
+import { Snapshots, type Checkpoint } from "../checkpoints"
 import { killAllShells, setShellListener } from "../tools/shells"
 
-export type PickerKind = "model" | "effort" | "permission" | "session" | "auth"
+export type PickerKind = "model" | "effort" | "permission" | "session" | "auth" | "undo"
 
 export interface PickItem {
   label: string
@@ -338,7 +339,8 @@ export class Store {
     }
     if (!this.session.title) this.session.title = oneLine(display ?? text, 60)
     this.push({ kind: "user", text: display ?? text })
-    this.session.messages.push(userMessage(text))
+    this.session.messages.push(userMessage(this.pendingNote ? `${this.pendingNote}\n\n${text}` : text))
+    this.pendingNote = ""
     this.startTurn()
   }
 
@@ -425,6 +427,7 @@ export class Store {
             this.question = { ...q, selected: 0, checked: new Set(), resolve }
             this.emit(true)
           }),
+        beforeChange: () => this.takeCheckpoint(),
         usage: (u) => {
           this.session.contextTokens = u.input + u.output
           this.session.totalTokens += u.input + u.output
@@ -472,6 +475,85 @@ export class Store {
     return this.streamText
   }
 
+  // ---- checkpoints ------------------------------------------------------------------
+
+  private snaps: Snapshots | null = null
+  private get snapshots(): Snapshots {
+    if (!this.snaps || this.snaps.sessionId !== this.session.id) this.snaps = new Snapshots(this.cwd, this.session.id)
+    return this.snaps
+  }
+  /** Serializes snapshot work (one index per session). */
+  private cpChain: Promise<unknown> = Promise.resolve()
+  /** The checkpoint taken during the running turn, if any. */
+  private turnCheckpoint: Promise<Checkpoint | null> | null = null
+  /** Told to the model with the next message after an /undo. */
+  private pendingNote = ""
+
+  /** Snapshot the workspace once per turn, right before the first file-changing tool. */
+  private takeCheckpoint(): Promise<void> {
+    if (!this.turnCheckpoint) {
+      const label = this.session.transcript.findLast((e) => e.kind === "user")?.text ?? "turn"
+      this.turnCheckpoint = (this.cpChain = this.cpChain.then(async () => {
+        const tree = await this.snapshots.snapshot()
+        if (!tree) return null
+        const cp: Checkpoint = { id: newId(), tree, label: oneLine(label, 80), at: Date.now(), files: [] }
+        ;(this.session.checkpoints ??= []).push(cp)
+        return cp
+      })) as Promise<Checkpoint | null>
+    }
+    return this.turnCheckpoint.then(() => {})
+  }
+
+  /** After a turn: record which files it changed, drop no-op checkpoints, keep the newest N. */
+  private finishCheckpoint() {
+    const pending = this.turnCheckpoint
+    this.turnCheckpoint = null
+    if (!pending) return
+    this.cpChain = this.cpChain.then(async () => {
+      const cp = await pending
+      if (!cp) return
+      const now = await this.snapshots.snapshot()
+      cp.files = now ? await this.snapshots.diff(cp.tree, now) : []
+      const list = (this.session.checkpoints ??= [])
+      if (!cp.files.length) list.splice(list.indexOf(cp), 1)
+      const max = Math.max(1, this.settings.maxCheckpoints || 20)
+      if (list.length > max) list.splice(0, list.length - max)
+      saveSession(this.session)
+      this.emit()
+    })
+  }
+
+  openUndoPicker() {
+    if (this.busy) return this.notify("Busy — finish or interrupt the current turn first", true)
+    const list = this.session.checkpoints ?? []
+    if (!list.length) return this.notify(this.snapshots.disabled ? `No checkpoints: ${this.snapshots.disabled}` : "No checkpoints yet — one is taken before the AI's first change in each turn")
+    const items: PickItem[] = [...list].reverse().map((cp, i) => ({
+      label: `before “${cp.label}”`,
+      detail: `${cp.files.length} file${cp.files.length === 1 ? "" : "s"} · ${relativeTime(cp.at)}${i ? ` · also undoes ${i} later turn${i === 1 ? "" : "s"}` : ""}`,
+      value: cp.id,
+    }))
+    this.openPicker("undo", `Undo · restore files to a checkpoint (${list.length}/${this.settings.maxCheckpoints || 20} kept)`, items)
+  }
+
+  async undoTo(id: string) {
+    const list = this.session.checkpoints ?? []
+    const i = list.findIndex((c) => c.id === id)
+    const cp = list[i]
+    if (!cp) return
+    try {
+      await this.cpChain
+      const touched = await this.snapshots.restore(cp.tree)
+      list.splice(i) // this checkpoint and everything after it are used up
+      const shown = touched.slice(0, 8).map((f) => `\`${f}\``).join(", ") + (touched.length > 8 ? ` and ${touched.length - 8} more` : "")
+      this.info(`↩ Restored files to before “${cp.label}”${touched.length ? ` — ${shown}` : " (nothing had changed)"}`)
+      this.pendingNote = `[oah: the user ran /undo. Files were restored to how they were before the turn that began with “${cp.label}”; changes made from then on are gone. Re-read files before editing them.]`
+      saveSession(this.session)
+    } catch (e: any) {
+      this.error(`Undo failed: ${e?.message ?? e}`)
+    }
+    this.emit(true)
+  }
+
   private turnDone(messages: ModelMessage[], error: string | undefined, aborted: boolean) {
     this.endReasoning()
     this.busy = null
@@ -487,6 +569,7 @@ export class Store {
     }
     for (const e of this.session.transcript) if (e.kind === "tool" && e.status === "running") e.status = aborted ? "denied" : "failed"
     this.session.messages.push(...messages)
+    this.finishCheckpoint()
     if (error) this.error(error)
     if (aborted) this.info("Interrupted.")
     saveSession(this.session)
@@ -643,6 +726,9 @@ export class Store {
         if (this.busy) return this.notify("Busy — wait for the current turn or press esc", true)
         this.after = { kind: "none" }
         return this.startCompact(args, false)
+      case "undo":
+      case "rewind":
+        return this.openUndoPicker()
       case "clear":
         return this.newConversation()
       case "session":
@@ -781,6 +867,8 @@ export class Store {
         return this.resume(item.value)
       case "auth":
         return this.authAction(item.value)
+      case "undo":
+        return void this.undoTo(item.value)
     }
   }
 

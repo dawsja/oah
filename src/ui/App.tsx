@@ -526,6 +526,9 @@ function Palette({ store, items }: { store: Store; items: { name: string; args: 
   )
 }
 
+/** Cut text to `n` columns with an ellipsis. */
+const fit = (s: string, n: number) => (s.length > n ? s.slice(0, Math.max(1, n - 1)) + "…" : s)
+
 function PickerModal({ store, width, height }: { store: Store; width: number; height: number }) {
   const p = store.picker!
   const vis = store.pickerVisible()
@@ -534,6 +537,7 @@ function PickerModal({ store, width, height }: { store: Store; width: number; he
   const sel = Math.min(p.selected, Math.max(0, vis.length - 1))
   const start = sel >= rows ? sel - rows + 1 : 0
   const labelW = Math.min(Math.floor(bw / 2), Math.max(12, ...vis.map((i) => i.label.length)) + 2)
+  const detailW = Math.max(8, bw - labelW - 8)
   let lastGroup = ""
   return (
     <box
@@ -567,11 +571,11 @@ function PickerModal({ store, width, height }: { store: Store; width: number; he
             <box flexDirection="row" backgroundColor={on ? t.panelHi : t.panel}>
               <text fg={on ? t.accent : t.panel}>▌</text>
               <text fg={t.green}>{item.current ? "● " : "  "}</text>
-              <text width={labelW} wrapMode="none" fg={on ? t.text : t.dim}>
-                {on ? <b>{item.label}</b> : item.label}
+              <text width={labelW} flexShrink={0} wrapMode="none" fg={on ? t.text : t.dim}>
+                {on ? <b>{fit(item.label, labelW - 1)}</b> : fit(item.label, labelW - 1)}
               </text>
               <text fg={t.faint} flexGrow={1} wrapMode="none">
-                {item.detail}
+                {fit(item.detail, detailW)}
               </text>
             </box>
           </box>

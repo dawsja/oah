@@ -12,6 +12,7 @@ export const COMMANDS: Command[] = [
   { name: "build", args: "", desc: "Build mode: edit files, run commands (also tab)" },
   { name: "auth", args: "[provider]", desc: "Sign in with ChatGPT, or add a provider key (Anthropic, Gemini, Grok…)" },
   { name: "goal", args: "<objective>|clear", desc: "Keep working autonomously until the goal is done" },
+  { name: "undo", args: "", desc: "Restore files to a checkpoint from before an AI change" },
   { name: "compact", args: "[focus]", desc: "Summarize the conversation to free context" },
   { name: "clear", args: "", desc: "Start a fresh conversation" },
   { name: "session", args: "[id]", desc: "Browse and resume saved sessions" },
@@ -30,6 +31,9 @@ const ALIASES: Record<string, string> = {
   permission: "permissions",
   new: "clear",
   reset: "clear",
+  rewind: "undo",
+  checkpoint: "undo",
+  checkpoints: "undo",
   sessions: "session",
   resume: "session",
   login: "auth",
@@ -67,6 +71,7 @@ export const HELP = `## Keys
 - **/model** [name] — e.g. /model glm, /model opus; **/effort**, **/permissions**, **/plan**, **/build**
 - **/auth** [provider] — continue with ChatGPT (uses your plan), or add a key: Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter, Synthetic, Kimi, Z.ai, MiniMax
 - **/goal** <objective> — keep going until done (**/goal clear** stops)
+- **/undo** — pick a checkpoint and restore files to before that turn (one per turn that changed files)
 - **/compact** [focus] — summarize history; auto-compaction runs near the context limit
 - **/clear** new conversation · **/session** resume one · **/memory** · **/init**
 - **/skills**, **/mcp**, **/tools** · **/<skill>** runs a skill · **/copy** · **/exit**`
