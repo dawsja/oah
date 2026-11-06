@@ -7,6 +7,7 @@ import { fmtMs } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useTick } from "./hooks"
 import { SPINNER } from "./icons"
+import { Tip } from "./Tip"
 
 export function TodoList() {
   const s = useClient().state!
@@ -34,8 +35,8 @@ export function GoalClock({ className }: { className?: string }) {
   useTick(1000, !!g?.running)
   if (!g || g.done) return null
   return (
-    <Badge variant="outline" className={cn("border-warn/40 font-mono text-warn", className)} title={g.text}>
+    <Tip content={g.text} side="bottom"><Badge variant="outline" className={cn("border-warn/40 font-mono text-warn", className)}>
       ◎ goal · {fmtMs(c.goalElapsed())}
-    </Badge>
+    </Badge></Tip>
   )
 }

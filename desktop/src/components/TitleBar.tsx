@@ -11,6 +11,7 @@ import { Mark, WinClose, WinMax, WinMin } from "./icons"
 import { TargetIcon } from "./Remote"
 import { GoalClock } from "./Todos"
 import { UpdateButton } from "./Updates"
+import { Tip } from "./Tip"
 
 /** The window's title bar: drag region, session title and window controls. */
 export function TitleBar() {
@@ -30,15 +31,15 @@ export function TitleBar() {
       <Separator orientation="vertical" className="mx-1 h-4!" />
       <span data-tauri-drag-region className="truncate text-[13px] font-medium">{title}</span>
       {c.target.kind !== "local" ? (
-        <span data-tauri-drag-region className="flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-cyan/10 px-1.5 py-0.5 text-[11px] font-medium text-cyan" title={`Working on ${targetLabel(c.target)}`}>
+        <Tip content={`Working on ${targetLabel(c.target)}`} side="bottom"><span data-tauri-drag-region className="flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-cyan/10 px-1.5 py-0.5 text-[11px] font-medium text-cyan">
           <TargetIcon t={c.target} className="size-3" />
           {targetLabel(c.target)}
-        </span>
+        </span></Tip>
       ) : null}
       {c.started && c.view === "chat" ? (
-        <span data-tauri-drag-region className="truncate font-mono text-xs text-muted-foreground" title={c.started.cwd}>
+        <Tip content={c.started.cwd} side="bottom"><span data-tauri-drag-region className="truncate font-mono text-xs text-muted-foreground">
           {c.started.cwdShort}
-        </span>
+        </span></Tip>
       ) : null}
       <div data-tauri-drag-region className="h-full flex-1" onDoubleClick={() => custom && t.win.toggleMaximize()} />
       <UpdateButton />

@@ -12,6 +12,7 @@ import { useClient } from "@/lib/client"
 import { fmtCost, fmtTokens } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { TodoList } from "./Todos"
+import { Tip } from "./Tip"
 
 function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -47,7 +48,7 @@ export function Inspector() {
             <Progress value={Math.min(100, Math.max(pct ? 2 : 0, pct))} className={cn("h-1.5 bg-muted", meterBar)} aria-label="Context used" />
             <div className="flex justify-between gap-3 font-mono text-xs text-muted-foreground">
               <span>{fmtTokens(used)} / {fmtTokens(window)}</span>
-              <span className={cn("truncate", !s.model.ready && "text-warn")} title={s.model.providerLabel}>{s.model.providerLabel}</span>
+              <Tip content={s.model.providerLabel}><span className={cn("truncate", !s.model.ready && "text-warn")}>{s.model.providerLabel}</span></Tip>
             </div>
             {s.session.cost || s.cacheHit !== null || s.session.compactions || s.shells ? (
               <div className="flex flex-wrap gap-1.5">
@@ -78,7 +79,7 @@ export function Inspector() {
             {files.length ? (
               <ul className="flex flex-col gap-1">
                 {files.slice(0, 30).map((f) => (
-                  <li key={f} className="truncate font-mono text-xs [direction:rtl] text-left" title={f}>{f}</li>
+                  <Tip key={f} content={f} side="left"><li className="truncate font-mono text-xs [direction:rtl] text-left">{f}</li></Tip>
                 ))}
               </ul>
             ) : (

@@ -90,20 +90,29 @@ function writeMeta(s: Pick<SessionData, "id" | "title" | "cwd" | "updated">) {
   } catch {}
 }
 
+/** What counts as activity in a session: messages exchanged, model calls, compactions.
+ * Saving without any (opening it, switching away, shutting down) keeps its time, so
+ * merely looking at a session doesn't move it to the top of the lists. */
+const activity = (s: SessionData) => `${s.messages.length}|${s.totalTokens}|${s.compactions}`
+const savedActivity = new WeakMap<SessionData, string>()
+
 export function saveSession(s: SessionData) {
   if (!s.messages.length) return
-  s.updated = Date.now()
+  const now = activity(s)
+  if (savedActivity.get(s) !== now) s.updated = Date.now()
+  savedActivity.set(s, now)
   writeFileAtomic(file(s.id), JSON.stringify(s), true)
   writeMeta(s)
 }
 
 export function loadSession(idOrPrefix: string): SessionData | undefined {
+  const loaded = (s: SessionData) => (savedActivity.set(s, activity(s)), s)
   try {
-    return JSON.parse(readFileSync(file(idOrPrefix), "utf8"))
+    return loaded(JSON.parse(readFileSync(file(idOrPrefix), "utf8")))
   } catch {}
   try {
     const matches = readdirSync(paths.sessions).filter((f) => f.startsWith(idOrPrefix) && f.endsWith(".json"))
-    if (matches.length === 1) return JSON.parse(readFileSync(join(paths.sessions, matches[0]!), "utf8"))
+    if (matches.length === 1) return loaded(JSON.parse(readFileSync(join(paths.sessions, matches[0]!), "utf8")))
   } catch {}
   return undefined
 }

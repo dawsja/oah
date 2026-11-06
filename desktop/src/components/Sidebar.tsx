@@ -27,6 +27,7 @@ import type { SessionMeta } from "@/lib/protocol"
 import { cn } from "@/lib/utils"
 import { modKey } from "./hooks"
 import { LocationMenu } from "./Remote"
+import { Tip } from "./Tip"
 
 const PER_GROUP = 8
 
@@ -90,14 +91,16 @@ export function AppSidebar() {
           return (
             <Collapsible key={g.cwd} open={open} onOpenChange={(o) => setOpen(g.cwd, o)} className="group/collapsible">
               <SidebarGroup className="py-1">
-                <SidebarGroupLabel asChild className="font-mono text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground">
-                  <CollapsibleTrigger title={g.short} className="pr-8">
-                    <Folder className="mr-1.5" />
-                    <span className="truncate">{g.name}</span>
-                    <span className="ml-auto pr-1 font-sans text-faint">{g.items.length}</span>
-                    <ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90" />
-                  </CollapsibleTrigger>
-                </SidebarGroupLabel>
+                <Tip content={g.short} side="right">
+                  <SidebarGroupLabel asChild className="font-mono text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground">
+                    <CollapsibleTrigger className="pr-8">
+                      <Folder className="mr-1.5" />
+                      <span className="truncate">{g.name}</span>
+                      <span className="ml-auto pr-1 font-sans text-faint">{g.items.length}</span>
+                      <ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                    </CollapsibleTrigger>
+                  </SidebarGroupLabel>
+                </Tip>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <SidebarGroupAction className="top-2.5 opacity-0 group-hover/collapsible:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100" aria-label={`Folder actions for ${g.name}`}>
@@ -130,7 +133,7 @@ export function AppSidebar() {
                         const live = active && !!s?.busy
                         return (
                           <SidebarMenuItem key={x.id}>
-                            <SidebarMenuButton size="lg" isActive={active} onClick={() => c.openSession(x)} title={`${x.title || "(untitled)"}\n${x.cwdShort} · ${x.id}`} className="h-auto flex-col items-start gap-0.5 py-2">
+                            <SidebarMenuButton size="lg" isActive={active} onClick={() => c.openSession(x)} className="h-auto flex-col items-start gap-0.5 py-2">
                               <span className="flex w-full items-center gap-2 pr-5">
                                 <span className="truncate">{x.title || (active ? "New session" : "(untitled)")}</span>
                                 {active ? <span className={cn("ml-auto size-1.5 shrink-0 rounded-full bg-primary", live && "animate-pulse")} /> : null}

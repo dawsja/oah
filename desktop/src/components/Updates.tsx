@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch"
 import { useClient } from "@/lib/client"
 import { relativeTime } from "@/lib/format"
 import type { UpdateState } from "@/lib/updates"
+import { Tip } from "./Tip"
 
 const pct = (s: Extract<UpdateState, { kind: "downloading" }>) => (s.total ? Math.min(100, Math.round((s.got / s.total) * 100)) : null)
 
@@ -30,10 +31,10 @@ export function UpdateButton() {
   if (s.kind === "downloading") {
     const p = pct(s)
     return (
-      <span className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground" title={`Downloading oah ${s.version}`}>
+      <Tip content={`Downloading oah ${s.version}`} side="bottom"><span className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
         <Loader2 className="size-3.5 animate-spin" />
         Updating{p !== null ? ` ${p}%` : "…"}
-      </span>
+      </span></Tip>
     )
   }
   if (s.kind === "installing")
@@ -45,10 +46,10 @@ export function UpdateButton() {
     )
   if (s.kind !== "ready") return null
   return (
-    <Button size="sm" variant="outline" className="h-7 border-primary/40 text-xs text-primary hover:text-primary" onClick={() => void c.updater.restart()} title={`oah ${s.version}${s.notes ? `\n\n${s.notes}` : ""}`}>
+    <Tip content={<span className="whitespace-pre-line">{`oah ${s.version}${s.notes ? `\n\n${s.notes}` : ""}`}</span>} side="bottom"><Button size="sm" variant="outline" className="h-7 border-primary/40 text-xs text-primary hover:text-primary" onClick={() => void c.updater.restart()}>
       <ArrowUpCircle />
       {s.installed ? "Restart to finish update" : "Restart to update"}
-    </Button>
+    </Button></Tip>
   )
 }
 

@@ -19,6 +19,7 @@ import { modKey } from "./hooks"
 import { PERMISSION } from "./icons"
 import { DiffLines } from "./Transcript"
 import { toast } from "sonner"
+import { Tip } from "./Tip"
 
 const EFFORT_CLASS: Record<string, string> = { high: "text-primary", xhigh: "text-orange", max: "text-orange", low: "text-muted-foreground", minimal: "text-muted-foreground" }
 
@@ -151,7 +152,7 @@ function LoginCard({ url }: { url: string }) {
       <Loader2 className="animate-spin text-primary" />
       <AlertTitle>Waiting for sign-in in your browser</AlertTitle>
       <AlertDescription className="gap-2">
-        <span className="block w-full truncate font-mono text-xs select-text" title={url}>{url}</span>
+        <Tip content={url}><span className="block w-full truncate font-mono text-xs select-text">{url}</span></Tip>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" onClick={() => void c.t.copy(url)}><Copy />Copy link</Button>
           <Button size="sm" variant="outline" onClick={() => void c.t.openUrl(url)}><ExternalLink />Open</Button>
@@ -364,8 +365,8 @@ export function Composer() {
             />
             <div className="flex flex-wrap items-center gap-1.5">
               <ToggleGroup type="single" variant="outline" size="sm" value={s.settings.mode} onValueChange={(v) => v && c.send({ op: "mode", value: v as "plan" | "build" })} aria-label="Mode">
-                <ToggleGroupItem value="plan" className="px-3 text-xs data-[state=on]:bg-cyan data-[state=on]:text-background" title="Plan: read-only research (Tab)">Plan</ToggleGroupItem>
-                <ToggleGroupItem value="build" className="px-3 text-xs data-[state=on]:bg-primary data-[state=on]:text-primary-foreground" title="Build: edit files and run commands (Tab)">Build</ToggleGroupItem>
+                <Tip content="Plan: read-only research (Tab)"><ToggleGroupItem value="plan" className="px-3 text-xs data-[state=on]:bg-cyan data-[state=on]:text-background">Plan</ToggleGroupItem></Tip>
+                <Tip content="Build: edit files and run commands (Tab)"><ToggleGroupItem value="build" className="px-3 text-xs data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">Build</ToggleGroupItem></Tip>
               </ToggleGroup>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -377,15 +378,15 @@ export function Composer() {
                 <TooltipContent>{s.model.providerLabel} · {modKey}T</TooltipContent>
               </Tooltip>
               {s.model.efforts.length ? (
-                <Button variant="outline" size="sm" className="bg-transparent text-xs" onClick={() => c.submit("/effort")} title="Reasoning effort">
+                <Tip content="Reasoning effort"><Button variant="outline" size="sm" className="bg-transparent text-xs" onClick={() => c.submit("/effort")}>
                   <span className={EFFORT_CLASS[s.settings.effort]}>{s.settings.effort}</span>
                   <ChevronDown className="opacity-60" />
-                </Button>
+                </Button></Tip>
               ) : null}
-              <Button variant="outline" size="sm" className={cn("bg-transparent text-xs", perm.className)} onClick={() => c.submit("/permissions")} title="Permissions (Shift+Tab cycles)">
+              <Tip content="Permissions (Shift+Tab cycles)"><Button variant="outline" size="sm" className={cn("bg-transparent text-xs", perm.className)} onClick={() => c.submit("/permissions")}>
                 <perm.icon />
                 {perm.label}
-              </Button>
+              </Button></Tip>
               <div className="flex-1" />
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -396,13 +397,13 @@ export function Composer() {
                 <TooltipContent>Attach images (or paste / drop them)</TooltipContent>
               </Tooltip>
               {busy && !text.trim() ? (
-                <Button variant="secondary" size="icon" className="size-8 rounded-lg" aria-label="Stop" title="Stop (Esc)" onClick={() => c.send({ op: "interrupt" })}>
+                <Tip content="Stop (Esc)"><Button variant="secondary" size="icon" className="size-8 rounded-lg" aria-label="Stop" onClick={() => c.send({ op: "interrupt" })}>
                   <Square className="fill-current" />
-                </Button>
+                </Button></Tip>
               ) : (
-                <Button size="icon" className="size-8 rounded-lg" aria-label="Send" title="Send (Enter)" disabled={!canSend} onClick={() => submit()}>
+                <Tip content="Send (Enter)"><Button size="icon" className="size-8 rounded-lg" aria-label="Send" disabled={!canSend} onClick={() => submit()}>
                   <ArrowUp />
-                </Button>
+                </Button></Tip>
               )}
             </div>
           </>

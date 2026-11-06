@@ -74,3 +74,26 @@ test("newest first, corrupt files skipped, prefix resume ignores the meta folder
   expect(listSessions().map((x) => x.title)).toEqual(["b", "a"])
   expect(loadSession(a.id.slice(0, 6))?.title).toBe("a")
 })
+
+test("saving without activity keeps a session's time, so opening one doesn't reorder the list", async () => {
+  const a = make("a")
+  saveSession(a)
+  await Bun.sleep(5)
+  const b = make("b")
+  saveSession(b)
+  const first = a.updated
+  await Bun.sleep(5)
+
+  // Opened (loaded) and saved again on switching away or shutting down: no activity.
+  const opened = loadSession(a.id)!
+  saveSession(opened)
+  expect(opened.updated).toBe(first)
+  expect(loadSession(a.id)!.updated).toBe(first)
+  expect(listSessions()[0]!.id).toBe(b.id)
+
+  // A new message is activity: it moves to the top.
+  opened.messages.push({ role: "assistant", content: "hello" })
+  saveSession(opened)
+  expect(opened.updated).toBeGreaterThan(first)
+  expect(listSessions()[0]!.id).toBe(a.id)
+})

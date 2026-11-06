@@ -12,6 +12,7 @@ import { mod, modKey, useTick } from "./components/hooks"
 import { Mark, SPINNER } from "./components/icons"
 import { Inspector } from "./components/Inspector"
 import { Picker } from "./components/Picker"
+import { Tip } from "./components/Tip"
 import { FolderBrowser, RemoteDialog } from "./components/Remote"
 import { Settings } from "./components/Settings"
 import { AppSidebar } from "./components/Sidebar"
@@ -47,10 +48,12 @@ function Welcome() {
       <Mark size={64} />
       <h1 className="font-mono text-4xl font-extrabold tracking-tight text-primary">oah</h1>
       <p className="-mt-2 text-muted-foreground">open agent harness · v{c.hello?.version}</p>
-      <Button variant="outline" size="sm" className="rounded-full font-mono text-xs text-muted-foreground" onClick={() => void c.openFolder()} title="Open another folder">
+      <Tip content="Open another folder">
+      <Button variant="outline" size="sm" className="rounded-full font-mono text-xs text-muted-foreground" onClick={() => void c.openFolder()}>
         <FolderOpen />
         {c.started?.cwdShort}
       </Button>
+      </Tip>
       <div className="mt-3 grid w-full gap-2 sm:grid-cols-2">
         {tips.map(([k, d, cmd]) => (
           <button
@@ -213,6 +216,10 @@ function Stopped() {
   )
 }
 
+/** Engine notices worth a toast (besides errors): saved or removed memory,
+ * copies, a removed key, unsent messages moved back, nothing to compact or resume. */
+const WORTH_A_TOAST = /^(Saved to (project|global) memory|Removed \d+ entr|Copied|Key removed|\d+ unsent message|Nothing to compact|No other saved sessions)/
+
 export function App() {
   const c = useClient()
   const s = c.state
@@ -221,12 +228,15 @@ export function App() {
     void c.init()
   }, [])
 
-  // The engine's notices (model switched, copied, errors…) as toasts.
+  // The engine's notices as toasts, but only what you need to know: errors, and
+  // results you can't see anywhere else. Echoes of what the UI already shows
+  // (model, effort, permissions, a new conversation…) stay quiet.
   const toastAt = s?.toast?.at
   useEffect(() => {
     if (!s?.toast) return
     const t = s.toast
-    ;(t.error ? toast.error : toast.success)(t.text, { id: `engine-${t.at}`, duration: 4000 })
+    if (t.error) toast.error(t.text, { id: `engine-${t.at}`, duration: 6000 })
+    else if (WORTH_A_TOAST.test(t.text)) toast.success(t.text, { id: `engine-${t.at}`, duration: 3000 })
   }, [toastAt])
 
   // Shortcuts that work anywhere (the composer handles its own keys; Ctrl+B is the sidebar's).

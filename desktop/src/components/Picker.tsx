@@ -9,6 +9,7 @@ import { filterItems } from "@/lib/format"
 import type { PickItem } from "@/lib/protocol"
 import { cn } from "@/lib/utils"
 import { PERMISSION } from "./icons"
+import { Tip } from "./Tip"
 
 export function Picker() {
   const c = useClient()
@@ -74,7 +75,7 @@ export function Picker() {
                       <span className={item.current ? "size-1.5 shrink-0 rounded-full bg-green" : "size-1.5 shrink-0"} />
                     )}
                     <span className="max-w-[50%] shrink-0 truncate group-data-[selected=true]:font-semibold group-data-[selected=true]:text-primary">{item.label}</span>
-                    <span className="truncate text-xs text-muted-foreground" title={item.detail}>{item.detail}</span>
+                    <Tip content={item.detail} side="bottom"><span className="truncate text-xs text-muted-foreground">{item.detail}</span></Tip>
                   </CommandItem>
                 ))}
               </CommandGroup>
