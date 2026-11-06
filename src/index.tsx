@@ -10,6 +10,7 @@ import { Memory } from "./memory"
 import { latestSession, listSessions, loadSession, relativeTime, saveSession } from "./session"
 import { Skills } from "./skills"
 import { readStdin, runPrint } from "./print"
+import { runServe } from "./serve"
 import { App } from "./ui/App"
 import { Store } from "./ui/store"
 import { checkForUpdate, cleanupOldBinary, compareVersions, fetchRelease, installedBinary, keptConfigNote, uninstall, update } from "./update"
@@ -20,6 +21,7 @@ Usage:
   oah [options] [prompt]   Full-screen app (an optional first prompt)
   oah -p "prompt"         Run once, print the answer, exit (also: echo … | oah -p)
   oah sessions            List saved sessions
+  oah serve [--cwd <dir>]  Run the engine headless over JSON lines (for the desktop app)
   oah login               Continue with ChatGPT (no TUI)
   oah logout              Sign out of ChatGPT
   oah models              Refresh the model catalog from models.dev
@@ -54,6 +56,8 @@ interface Args {
   sub?: string
   /** Arguments after `update` / `uninstall`. */
   subArgs?: string[]
+  /** `oah serve --cwd <dir>`: the workspace to run in. */
+  cwd?: string
 }
 
 function parseArgs(argv: string[]): Args {
@@ -116,9 +120,12 @@ function parseArgs(argv: string[]): Args {
       case "--plan":
         a.plan = true
         break
+      case "--cwd":
+        a.cwd = next()
+        break
       default:
         if (s.startsWith("-")) throw new Error(`unknown option ${s}`)
-        if (!rest.length && !a.sub && ["sessions", "login", "logout", "models"].includes(s)) a.sub = s
+        if (!rest.length && !a.sub && ["sessions", "login", "logout", "models", "serve"].includes(s)) a.sub = s
         else rest.push(s)
     }
   }
@@ -227,7 +234,16 @@ async function main() {
   if (args.sub === "logout") return console.log(await auth.logoutChatGpt())
   if (args.sub === "models") return console.log((await refreshCatalog(true)) ? "Model catalog updated from models.dev." : "Couldn't reach models.dev.")
 
-  const headless = !!args.print || !process.stdin.isTTY || !process.stdout.isTTY
+  if (args.cwd) {
+    try {
+      process.chdir(args.cwd)
+    } catch {
+      console.error(`oah: can't open ${args.cwd}`)
+      process.exit(1)
+    }
+  }
+  const serving = args.sub === "serve"
+  const headless = !serving && (!!args.print || !process.stdin.isTTY || !process.stdout.isTTY)
   let prompt = args.prompt ?? ""
   if (headless) {
     const piped = (await readStdin(prompt ? 400 : undefined)).trim()
@@ -259,6 +275,7 @@ async function main() {
   const cwd = process.cwd()
   const model = args.model ? joinModel(splitModel(args.model).provider, splitModel(args.model).slug) : undefined
 
+  if (serving) process.exit(await runServe({ settings, session, cwd, model }))
   if (headless) process.exit(await runPrint({ prompt, settings, session, cwd, json: !!args.json, quiet: !!args.quiet, model }))
 
   // Anything written to stderr lands on top of the full-screen UI: silence the AI
