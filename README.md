@@ -200,6 +200,11 @@ Windows (PowerShell):
 irm https://oah.dev/install.ps1 | iex
 ```
 
+Update with `oah update` (or `/update` inside oah; `oah update --check` only checks, `oah update 0.1.0` installs
+that version). oah checks for a new release once a day and mentions it on the welcome screen
+(`OAH_NO_UPDATE_CHECK=1` turns that off). `oah uninstall` removes the binary and the PATH entry the installer
+added; `--purge` also removes `~/.config/oah` (settings, sessions, credentials).
+
 `scripts/install.sh` detects the platform (Linux/macOS, x64/arm64), downloads
 `$OAH_DOWNLOAD_URL/v<version>/oah-<os>-<arch>.tar.gz`, verifies its `.sha256`, installs to
 `~/.config/oah/bin/oah` and adds that to your shell's PATH. `scripts/install.ps1` does the same on Windows
@@ -210,6 +215,7 @@ Release files live in a Cloudflare R2 bucket (`oah-releases`) served at **https:
 the installers' default:
 
 ```text
+latest.json                         version, date, and each build's path/sha256/size (no-cache; `oah update` reads it)
 latest.txt                          0.1.0          (no-cache; uploaded last)
 install.sh   install.ps1                           (no-cache)
 v0.1.0/oah-linux-x64.tar.gz         + .sha256      (immutable)
@@ -225,7 +231,7 @@ rule; `curl -L` and `irm` follow it). `bun scripts/build.ts --os darwin,windows`
 
 To release, bump `version` in `package.json` and push a matching `v*` tag. `.github/workflows/release.yml`
 tests, builds all six with `bun scripts/build.ts --all`, attaches them to a GitHub release, and uploads them to
-R2 with `scripts/publish-r2.sh` (repo secrets `CLOUDFLARE_API_TOKEN` with R2 edit access and
+R2 with `scripts/publish-r2.sh`, which never overwrites a published version (its files are cached forever) (repo secrets `CLOUDFLARE_API_TOKEN` with R2 edit access and
 `CLOUDFLARE_ACCOUNT_ID`; repo variable `OAH_R2_BUCKET` overrides the bucket name). The script also works
 locally after `wrangler login`. To install straight from GitHub instead, set
 `OAH_DOWNLOAD_URL=https://github.com/dawsja/oah/releases/download`.

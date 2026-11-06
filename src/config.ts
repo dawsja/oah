@@ -2,8 +2,10 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import pkg from "../package.json" with { type: "json" }
 
-export const VERSION = "0.1.0"
+/** From package.json (bundled into the binary), so a release only bumps one place. */
+export const VERSION: string = pkg.version
 
 /** `$OAH_HOME`, else `$XDG_CONFIG_HOME/oah`, else `~/.config/oah`. */
 export function homeDir(): string {

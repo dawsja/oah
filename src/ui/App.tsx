@@ -400,7 +400,8 @@ function Mark({ rows }: { rows: number }) {
 export function Welcome({ store }: { store: Store }) {
   const { width } = useTerminalDimensions()
   const signedIn = auth.available(store.authStatus).length > 0
-  const tips: [string, string][] = signedIn
+  const tips: [string, string][] = store.updateAvailable ? [["/update", `oah ${store.updateAvailable} is available (you have ${VERSION})`]] : []
+  tips.push(...((signedIn
     ? [
         ["/model", "pick a model"],
         ["tab", "plan ↔ build"],
@@ -411,7 +412,7 @@ export function Welcome({ store }: { store: Store }) {
     : [
         ["/auth", "continue with ChatGPT, or add a key (Anthropic, OpenAI, Gemini, Grok, DeepSeek, OpenRouter, Kimi, Z.ai, MiniMax…)"],
         ["/help", "keys & commands"],
-      ]
+      ]) as [string, string][]))
   return (
     <box flexDirection="column" paddingTop={1} paddingLeft={1}>
       <box flexDirection="row">

@@ -12,6 +12,7 @@ import { Skills } from "./skills"
 import { readStdin, runPrint } from "./print"
 import { App } from "./ui/App"
 import { Store } from "./ui/store"
+import { checkForUpdate, cleanupOldBinary, compareVersions, fetchRelease, installedBinary, keptConfigNote, uninstall, update } from "./update"
 
 const USAGE = `oah — Open Agent Harness
 
@@ -22,6 +23,8 @@ Usage:
   oah login               Continue with ChatGPT (no TUI)
   oah logout              Sign out of ChatGPT
   oah models              Refresh the model catalog from models.dev
+  oah update [version]    Update to the latest release (--check: only check)
+  oah uninstall           Remove oah (--purge: also settings, sessions, credentials; --yes: don't ask)
 
 Options:
   -r, --resume [id]       Resume a session (default: most recent here)
@@ -49,11 +52,14 @@ interface Args {
   quiet?: boolean
   prompt?: string
   sub?: string
+  /** Arguments after `update` / `uninstall`. */
+  subArgs?: string[]
 }
 
 function parseArgs(argv: string[]): Args {
   const a: Args = {}
   const rest: string[] = []
+  if (argv[0] === "update" || argv[0] === "uninstall") return { sub: argv[0], subArgs: argv.slice(1) }
   for (let i = 0; i < argv.length; i++) {
     const s = argv[i]!
     const next = () => {
@@ -142,7 +148,52 @@ function copyNative(text: string): boolean {
   return false
 }
 
+async function updateCommand(a: string[]): Promise<number> {
+  const unknown = a.find((x) => x.startsWith("-") && x !== "--check")
+  if (unknown) return console.error(`oah update: unknown option ${unknown}`), 2
+  const version = a.find((x) => !x.startsWith("-"))
+  try {
+    if (a.includes("--check")) {
+      const rel = await fetchRelease(version)
+      const newer = compareVersions(rel.version, VERSION) > 0
+      console.log(newer ? `oah ${rel.version} is available (you have ${VERSION}) — run: oah update` : `oah ${VERSION} is up to date.`)
+      return 0
+    }
+    const r = await update({ version, onStatus: (s) => process.stderr.write(`\x1b[2m${s}…\x1b[0m\n`) })
+    if (r.status === "current") console.log(`oah ${r.version} is already the latest version.`)
+    else console.log(`Updated oah ${r.from} → ${r.to} (${shortPath(r.path)}).`)
+    return 0
+  } catch (e: any) {
+    console.error(`oah update: ${e?.message ?? e}`)
+    return 1
+  }
+}
+
+async function uninstallCommand(a: string[]): Promise<number> {
+  const unknown = a.find((x) => !["--purge", "--yes", "-y"].includes(x))
+  if (unknown) return console.error(`oah uninstall: unknown option ${unknown}`), 2
+  const purge = a.includes("--purge")
+  const exe = installedBinary()
+  if (!exe) return console.error("oah uninstall: oah is running from source — nothing to uninstall"), 1
+  if (!a.includes("--yes") && !a.includes("-y")) {
+    if (!process.stdin.isTTY) return console.error("oah uninstall: pass --yes to confirm when not running in a terminal"), 2
+    process.stdout.write(`Remove ${shortPath(exe)}${purge ? ` and everything in ${shortPath(homeDir())} (settings, sessions, credentials)` : ""}? [y/N] `)
+    const answer = await new Promise<string>((res) => process.stdin.once("data", (d) => res(String(d).trim().toLowerCase())))
+    process.stdin.pause()
+    if (answer !== "y" && answer !== "yes") return console.log("Cancelled."), 1
+  }
+  try {
+    for (const line of uninstall({ purge })) console.log(`  ${line}`)
+    console.log(`oah is uninstalled.${purge ? "" : ` ${keptConfigNote()}`}`)
+    return 0
+  } catch (e: any) {
+    console.error(`oah uninstall: ${e?.message ?? e}`)
+    return 1
+  }
+}
+
 async function main() {
+  cleanupOldBinary() // before anything that can exit early (--version, --help)
   let args: Args
   try {
     args = parseArgs(process.argv.slice(2))
@@ -152,6 +203,8 @@ async function main() {
   }
   ensureDir(homeDir())
 
+  if (args.sub === "update") process.exit(await updateCommand(args.subArgs ?? []))
+  if (args.sub === "uninstall") process.exit(await uninstallCommand(args.subArgs ?? []))
   if (args.sub === "sessions") {
     const list = listSessions()
     if (!list.length) console.log("No saved sessions.")
@@ -224,6 +277,11 @@ async function main() {
   if (model) store.settings.model = model
   if (session) store.info(`Resumed session ${session.id}`)
   mcp.start()
+  void checkForUpdate().then((v) => {
+    if (!v) return
+    store.updateAvailable = v
+    store.notify(`oah ${v} is available — /update`)
+  })
   void mcp.settled().then(() => {
     const need = mcp.servers.filter((x) => x.state === "needs-auth").map((x) => x.name)
     if (need.length) store.notify(`MCP: ${need.join(", ")} need${need.length === 1 ? "s" : ""} authentication — /mcp to sign in`)

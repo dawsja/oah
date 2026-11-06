@@ -1,7 +1,7 @@
 # Push a tag like v0.1.0 (matching package.json) to build every platform,
 # publish a GitHub release, and upload it to the R2 bucket behind
 # https://dl.oah.dev (scripts/publish-r2.sh):
-#   latest.txt   install.sh   install.ps1
+#   latest.json   latest.txt   install.sh   install.ps1
 #   v<version>/oah-<os>-<arch>.tar.gz(.sha256)
 # R2 needs repo secrets CLOUDFLARE_API_TOKEN (R2 edit) and CLOUDFLARE_ACCOUNT_ID;
 # without them that step is skipped. Repo variable OAH_R2_BUCKET overrides the
@@ -30,6 +30,7 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
             dist/latest.txt
+            dist/latest.json
             scripts/install.sh
             scripts/install.ps1
       - name: Publish to R2 (dl.oah.dev)

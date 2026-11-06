@@ -23,6 +23,7 @@ export const COMMANDS: Command[] = [
   { name: "tools", args: "", desc: "List the tools oah can use" },
   { name: "init", args: "", desc: "Write an AGENTS.md for this project" },
   { name: "copy", args: "", desc: "Copy the last answer to the clipboard" },
+  { name: "update", args: "", desc: "Update oah to the latest release" },
   { name: "help", args: "", desc: "Keys and commands" },
   { name: "exit", args: "", desc: "Quit (prints the resume command)" },
 ]
@@ -78,5 +79,5 @@ export const HELP = `## Keys
 - **/undo** — pick a checkpoint and restore files to before that turn (one per turn that changed files)
 - **/compact** [focus] — summarize history; auto-compaction runs near the context limit
 - **/clear** new conversation · **/session** resume one · **/memory** · **/init**
-- **/skills**, **/mcp** (sign in to servers), **/tools** · **/<skill>** runs a skill · **/import** from Claude Code · **/copy** · **/exit**
+- **/update** installs the latest oah · **/skills**, **/mcp** (sign in to servers), **/tools** · **/<skill>** runs a skill · **/import** from Claude Code · **/copy** · **/exit**
 - Ask oah to set itself up: "add the Linear MCP server", "install the shadcn skill"`

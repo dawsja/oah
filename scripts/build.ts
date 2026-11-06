@@ -4,9 +4,10 @@
 //   bun scripts/build.ts --all            → every supported target
 //   bun scripts/build.ts --os darwin,windows  → those OSes (both architectures)
 // Windows archives hold oah.exe (extract with the built-in tar.exe; see scripts/install.ps1).
-// Output: dist/oah-<os>-<arch>.tar.gz (+ .sha256) and dist/latest.txt
+// Output: dist/oah-<os>-<arch>.tar.gz (+ .sha256), dist/latest.txt and dist/latest.json
+// (version, publish time, and each target's path/sha256/size — what `oah update` reads).
 import { $ } from "bun"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -38,6 +39,7 @@ if (!targets.length) throw new Error(`no targets for ${oses ? oses.join(",") : h
 
 rmSync("dist", { recursive: true, force: true })
 mkdirSync("dist", { recursive: true })
+const files: Record<string, { path: string; sha256: string; size: number }> = {}
 for (const t of targets) {
   // Each target needs its platform's prebuilt OpenTUI library (built with Zig) on disk.
   const pkgDir = `node_modules/${t.pkg}`
@@ -56,6 +58,8 @@ for (const t of targets) {
   await $`tar -C ${dir} -czf dist/oah-${t.name}.tar.gz ${exe}`
   const sum = (await $`shasum -a 256 dist/oah-${t.name}.tar.gz`.text()).split(" ")[0]
   writeFileSync(`dist/oah-${t.name}.tar.gz.sha256`, `${sum}\n`)
+  files[t.name] = { path: `v${version}/oah-${t.name}.tar.gz`, sha256: sum!, size: statSync(`dist/oah-${t.name}.tar.gz`).size }
   console.log(`built dist/oah-${t.name}.tar.gz`)
 }
 writeFileSync("dist/latest.txt", `${version}\n`)
+writeFileSync("dist/latest.json", JSON.stringify({ version, published: new Date().toISOString(), files }, null, 2) + "\n")

@@ -24,6 +24,7 @@ import {
 } from "../config"
 import type { Mcp, McpServer } from "../mcp"
 import { importFromClaude } from "../setup"
+import { update } from "../update"
 import type { Memory } from "../memory"
 import { appendHistory, listSessions, loadHistory, loadSession, newId, newSession, relativeTime, saveSession, type Entry, type SessionData } from "../session"
 import type { Skills } from "../skills"
@@ -117,6 +118,9 @@ export class Store {
   /** Messages sent mid-turn ("send now") that the model hasn't seen yet. */
   steers: { id: string; text: string }[] = []
   private steering: Steering | null = null
+  /** A newer oah release, from the daily check (shown on the welcome screen). */
+  updateAvailable: string | null = null
+  private updating = false
   /** When ctrl+c was last pressed while idle (a second press soon after exits). */
   private exitArmed = 0
   private after: After = { kind: "none" }
@@ -976,6 +980,24 @@ export class Store {
     signInMcp: (name, signal) => this.runMcpSignIn(name, signal),
   }
 
+  /** /update: install the latest release over the running binary. */
+  private async selfUpdate() {
+    if (this.updating) return this.notify("Already updating…")
+    this.updating = true
+    try {
+      const r = await update({ onStatus: (s) => this.notify(`${s[0]!.toUpperCase()}${s.slice(1)}…`) })
+      if (r.status === "current") this.info(`oah ${r.version} is the latest version.`)
+      else {
+        this.updateAvailable = null
+        this.info(`**Updated oah ${r.from} → ${r.to}.** Restart oah to use it — this conversation is saved: \`oah -c\` continues it.`)
+      }
+    } catch (e: any) {
+      this.error(`Update failed: ${e?.message ?? e}`)
+    } finally {
+      this.updating = false
+    }
+  }
+
   /** The full ChatGPT sign-in link while a sign-in is waiting. */
   get loginUrl(): string | undefined {
     return this.login?.url
@@ -1080,6 +1102,8 @@ export class Store {
         )
       case "mcp":
         return this.mcpCommand(args)
+      case "update":
+        return void this.selfUpdate()
       case "import": {
         const valid = ["mcp", "skills", "sessions"] as const
         const words = args.toLowerCase().split(/[\s,]+/).filter(Boolean)

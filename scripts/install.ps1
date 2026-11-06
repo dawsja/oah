@@ -87,12 +87,17 @@ try {
 }
 
 # --- PATH --------------------------------------------------------------------------
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+# Edit the raw registry value so entries like %USERPROFILE%\... stay unexpanded.
 $onPath = ($env:Path -split ';') -contains $BinDir
 if (-not $onPath -and $env:OAH_NO_MODIFY_PATH -ne '1') {
-  if (-not (($userPath -split ';') -contains $BinDir)) {
-    $newPath = if ($userPath) { "$BinDir;$userPath" } else { $BinDir }
-    [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+  $envKey = Get-Item 'HKCU:\Environment'
+  $raw = $envKey.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+  if (-not (($raw -split ';') -contains $BinDir)) {
+    $newPath = if ($raw) { "$BinDir;$raw" } else { $BinDir }
+    Set-ItemProperty -Path 'HKCU:\Environment' -Name Path -Value $newPath -Type ExpandString
+    # Tell Windows the environment changed so new terminals pick it up.
+    [Environment]::SetEnvironmentVariable('OAH_INSTALL_REFRESH', '1', 'User')
+    [Environment]::SetEnvironmentVariable('OAH_INSTALL_REFRESH', $null, 'User')
     Write-Host "  PATH        added $BinDir to your user PATH" -ForegroundColor DarkGray
   }
   $env:Path = "$BinDir;$env:Path"
