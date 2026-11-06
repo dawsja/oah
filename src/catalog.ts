@@ -47,6 +47,13 @@ const FALLBACK: Catalog = {
 }
 
 let catalog: Catalog = { ...FALLBACK, ...readJson<Catalog>(paths.modelsCache, {}) }
+/** Models reported by local servers (Ollama, LM Studio); never cached to disk. */
+const localCatalog: Catalog = {}
+const providerModels = (id: string) => localCatalog[id]?.models ?? catalog[id]?.models
+
+export function registerLocal(id: string, name: string, models: CatalogModel[]) {
+  localCatalog[id] = { id, name, models: Object.fromEntries(models.map((m) => [m.id, m])) }
+}
 
 /** Re-read the cached catalog (after the config dir changes; used by tests). */
 export function reloadCatalog() {
@@ -63,14 +70,14 @@ function cacheAge(): number {
 
 /** Refresh from models.dev when the cache is stale. Never throws. */
 export async function refreshCatalog(force = false): Promise<boolean> {
-  const missing = PROVIDERS.some((p) => !catalog[info(p).catalog])
+  const missing = PROVIDERS.some((p) => !info(p).local && !catalog[info(p).catalog])
   if (!force && !missing && cacheAge() < TTL_MS) return false
   try {
     const r = await fetch(process.env.OAH_MODELS_URL ?? URL, { signal: AbortSignal.timeout(10_000) })
     if (!r.ok) return false
     const all = (await r.json()) as Catalog
     const slim: Catalog = {}
-    for (const id of new Set(PROVIDERS.map((p) => info(p).catalog))) if (all[id]) slim[id] = all[id]!
+    for (const id of new Set(PROVIDERS.filter((p) => !info(p).local).map((p) => info(p).catalog))) if (all[id]) slim[id] = all[id]!
     catalog = slim
     writeFileAtomic(paths.modelsCache, JSON.stringify(slim))
     return true
@@ -81,14 +88,14 @@ export async function refreshCatalog(force = false): Promise<boolean> {
 
 export function lookup(full: string): CatalogModel | undefined {
   const { provider, slug } = splitModel(full)
-  return catalog[info(provider).catalog]?.models[slug]
+  return providerModels(info(provider).catalog)?.[slug]
 }
 
 export function contextWindow(full: string, override?: number): number {
   if (override) return override
   const m = lookup(full)
   const p = splitModel(full).provider
-  return m?.limit?.input ?? m?.limit?.context ?? (p === "anthropic" ? 1_000_000 : info(p).sdk === "openai" ? 400_000 : 128_000)
+  return m?.limit?.input ?? m?.limit?.context ?? (p === "anthropic" ? 1_000_000 : info(p).sdk === "openai" ? 400_000 : info(p).local ? 8_192 : 128_000)
 }
 
 /** Effort levels the model accepts, mapped onto oah's scale. */
@@ -135,7 +142,7 @@ function usable(p: Provider, m: CatalogModel): boolean {
 export function modelsFor(providers: Provider[]): ModelChoice[] {
   const out: ModelChoice[] = []
   for (const p of providers) {
-    const models = Object.values(catalog[info(p).catalog]?.models ?? {})
+    const models = Object.values(providerModels(info(p).catalog) ?? {})
       .filter((m) => usable(p, m))
       .sort((a, b) => (b.release_date ?? "").localeCompare(a.release_date ?? ""))
     for (const m of models) out.push({ full: `${p}/${m.id}`, provider: p, slug: m.id, name: m.name, context: m.limit?.input ?? m.limit?.context ?? 0, release: m.release_date ?? "" })
@@ -146,8 +153,8 @@ export function modelsFor(providers: Provider[]): ModelChoice[] {
 /** The provider's preferred model, or its newest one if that's gone from the catalog. */
 export function defaultFor(p: Provider): string {
   const preferred = info(p).defaultModel
-  const models = catalog[info(p).catalog]?.models
-  if (!models || models[preferred]) return `${p}/${preferred}`
+  const models = providerModels(info(p).catalog)
+  if (!models || (preferred && models[preferred])) return `${p}/${preferred}`
   return modelsFor([p])[0]?.full ?? `${p}/${preferred}`
 }
 

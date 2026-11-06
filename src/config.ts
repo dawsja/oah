@@ -91,12 +91,14 @@ export const providerInfo = {
   "zai-coding": { label: "Z.ai Coding", catalog: "zai-coding-plan", billing: "your GLM Coding plan", sdk: "compat", env: ["ZHIPU_API_KEY", "ZAI_API_KEY"], baseURL: "https://api.z.ai/api/coding/paas/v4", defaultModel: "glm-5.3", blurb: "GLM Coding plan" },
   minimax: { label: "MiniMax", catalog: "minimax", billing: "a MiniMax API key", sdk: "anthropic", env: ["MINIMAX_API_KEY"], baseURL: "https://api.minimax.io/anthropic/v1", defaultModel: "MiniMax-M3", blurb: "MiniMax models via the MiniMax API" },
   "minimax-coding": { label: "MiniMax Coding", catalog: "minimax-coding-plan", billing: "your MiniMax Coding plan", sdk: "anthropic", env: ["MINIMAX_API_KEY"], baseURL: "https://api.minimax.io/anthropic/v1", defaultModel: "MiniMax-M3", blurb: "MiniMax Coding plan" },
+  ollama: { label: "Ollama", catalog: "local-ollama", billing: "Ollama running on this machine", sdk: "compat", env: [], baseURL: "http://localhost:11434/v1", defaultModel: "", blurb: "models running in Ollama on this machine", local: true },
+  lmstudio: { label: "LM Studio", catalog: "local-lmstudio", billing: "LM Studio running on this machine", sdk: "compat", env: [], baseURL: "http://localhost:1234/v1", defaultModel: "", blurb: "models loaded in LM Studio on this machine", local: true },
 } satisfies Record<string, ProviderDef>
 
 export type Provider = keyof typeof providerInfo
 export const PROVIDERS = Object.keys(providerInfo) as Provider[]
-/** Providers that use an API key (everything but the ChatGPT sign-in). */
-export const KEY_PROVIDERS = PROVIDERS.filter((p) => p !== "chatgpt") as Exclude<Provider, "chatgpt">[]
+/** Providers that use an API key (not the ChatGPT sign-in or local servers). */
+export const KEY_PROVIDERS = PROVIDERS.filter((p) => p !== "chatgpt" && !(providerInfo[p] as ProviderDef).local) as Exclude<Provider, "chatgpt">[]
 export const info = (p: Provider): ProviderDef => providerInfo[p]
 
 /** `provider/slug`; a bare slug is inferred (`claude*` → anthropic, else chatgpt). */

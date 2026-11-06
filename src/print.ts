@@ -50,7 +50,8 @@ export async function runPrint(o: PrintOptions): Promise<number> {
     },
   }
   mcp.start()
-  await mcp.settled()
+  await Promise.all([mcp.settled(), store.refreshLocal()])
+  if (o.model) store.settings.model = o.model
 
   // Stream new transcript entries: answer text to stdout, everything else to stderr.
   const start = store.session.transcript.length

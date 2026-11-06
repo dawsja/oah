@@ -14,6 +14,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import type { LanguageModel } from "ai"
 import * as auth from "./auth"
 import { clampEffort, lookup } from "./catalog"
+import { localBaseURL, type LocalProvider } from "./local"
 import { info, splitModel, VERSION, type Effort, type Settings } from "./config"
 
 const UA = `oah/${VERSION} (${process.platform}; ${process.arch})`
@@ -54,7 +55,7 @@ export async function languageModel(full: string, settings: Settings): Promise<L
   const def = info(provider)
   // OAH_<PROVIDER>_BASE_URL points any provider at a proxy or gateway.
   const override = process.env[`OAH_${provider.toUpperCase().replace(/-/g, "_")}_BASE_URL`]
-  const baseURL = override ?? def.baseURL
+  const baseURL = def.local ? localBaseURL(provider as LocalProvider) : (override ?? def.baseURL)
   switch (def.sdk) {
     case "openai":
       return createOpenAI({ apiKey, baseURL: override ?? settings.openaiBaseURL ?? process.env.OPENAI_BASE_URL, headers }).responses(slug)

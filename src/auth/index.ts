@@ -11,6 +11,7 @@
 //  * hourly access tokens refresh automatically; sign-out revokes the refresh token
 import { randomBytes, createHash, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
+import { isRunning, LOCAL_PROVIDERS } from "../local"
 import { info, KEY_PROVIDERS, PROVIDERS, paths, readJson, writeFileAtomic, type Provider } from "../config"
 
 export const ISSUER = "https://auth.openai.com"
@@ -76,6 +77,7 @@ export function status(): AuthStatus {
     const src = store.keys?.[p] ? "saved key" : envKey(p)
     if (src) keys[p] = src
   }
+  for (const p of LOCAL_PROVIDERS) if (isRunning(p)) keys[p] = "running"
   return { chatgpt: store.chatgpt ? { email: store.chatgpt.email, planUsage: store.chatgpt.scopes.includes(PLAN_SCOPE) } : undefined, keys }
 }
 
@@ -90,6 +92,7 @@ export function available(s = status()): Provider[] {
 
 export function label(s: AuthStatus, p: Provider): string {
   if (p === "chatgpt") return s.chatgpt?.planUsage ? "Using ChatGPT plan" : s.chatgpt ? "ChatGPT plan usage off · /auth" : "not signed in · /auth"
+  if (info(p).local) return has(s, p) ? `${info(p).label} (local)` : `${info(p).label} isn't running`
   if (has(s, p)) return info(p).label + (info(p).billing.includes("plan") ? " plan" : " API")
   return `no ${info(p).label} key · /auth`
 }
@@ -101,6 +104,10 @@ export function setKey(p: Provider, key: string | undefined) {
 
 /** API key or (refreshed) ChatGPT access token. */
 export async function credential(p: Provider): Promise<string> {
+  if (info(p).local) {
+    if (!isRunning(p)) throw new Error(`${info(p).label} isn't running on this machine — start it, then try again`)
+    return "local"
+  }
   if (p !== "chatgpt") {
     const k = store.keys?.[p] ?? process.env[envKey(p) ?? ""]
     if (!k) throw new Error(`No ${info(p).label} API key — run /auth`)

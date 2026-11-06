@@ -4,7 +4,7 @@ A full-screen AI coding agent for your terminal. Built with
 [OpenTUI](https://github.com/anomalyco/opentui) (Zig core, React bindings), the
 [AI SDK](https://ai-sdk.dev) and the [models.dev](https://models.dev) catalog — the same stack as opencode.
 
-Use your **ChatGPT plan** (Sign in with ChatGPT), or a key for **Anthropic, OpenAI, Gemini, xAI, DeepSeek,
+Use your **ChatGPT plan** (Sign in with ChatGPT), local models in **Ollama** or **LM Studio**, or a key for **Anthropic, OpenAI, Gemini, xAI, DeepSeek,
 OpenRouter, Synthetic, Kimi, Z.ai or MiniMax** (including the Kimi Code, GLM Coding and MiniMax Coding plans).
 
 ![oah](docs/screenshot.png)
@@ -77,6 +77,12 @@ on errors, 130 if interrupted. Checkpoints are still taken, so `/undo` in the ap
 | Z.ai GLM Coding plan | `zai-coding/glm-5.3` | `ZHIPU_API_KEY` |
 | MiniMax | `minimax/MiniMax-M3` | `MINIMAX_API_KEY` |
 | MiniMax Coding plan | `minimax-coding/MiniMax-M3` | `MINIMAX_API_KEY` |
+| Ollama (local) | `ollama/qwen3-coder:30b` | none — detected at `localhost:11434` (or `OLLAMA_HOST`) |
+| LM Studio (local) | `lmstudio/openai/gpt-oss-20b` | none — detected at `localhost:1234` |
+
+Local servers are picked up whenever they're running; their models come from the server, filtered to
+chat models with tool calling, with real context sizes. Start Ollama with `OLLAMA_CONTEXT_LENGTH=32768`
+(or more) — its default context is too small for agent work.
 
 `/auth gemini` (or any provider name) jumps straight to pasting that key. `OAH_<PROVIDER>_BASE_URL`
 (e.g. `OAH_ZAI_CODING_BASE_URL`) points a provider at a proxy or gateway.

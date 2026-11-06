@@ -29,6 +29,7 @@ import type { Skills } from "../skills"
 import { oneLine, TOOLS, type Outcome } from "../tools"
 import { fmtTokens } from "./theme"
 import { Snapshots, type Checkpoint } from "../checkpoints"
+import { detectLocal, isRunning, LOCAL_PROVIDERS, localBaseURL, type LocalProvider } from "../local"
 import { clipboardImage, imageFromFile, pastedPaths, referenced, userContent, type PastedImage } from "../images"
 import { killAllShells, setShellListener } from "../tools/shells"
 
@@ -128,6 +129,7 @@ export class Store {
       settings.mode = session.mode ?? settings.mode
     }
     refreshCatalog().then((changed) => changed && this.emit())
+    this.refreshLocal()
     setShellListener(() => this.emit())
   }
 
@@ -257,7 +259,25 @@ export class Store {
     this.settings.recentModels = [...new Set([this.settings.model, prev, ...before])].filter(Boolean).slice(0, 8)
     this.persistSettings()
     if (!auth.has(this.authStatus, provider)) this.notify(`${displayName(this.settings.model)} needs ${providerInfo[provider].billing} — run /auth`, true)
+    else if (provider === "ollama" && !process.env.OLLAMA_CONTEXT_LENGTH)
+      this.notify(`Model → ${displayName(this.settings.model)} · Ollama serves a small context by default — start it with OLLAMA_CONTEXT_LENGTH=32768 (or more) for agent work`, true)
     else this.notify(`Model → ${displayName(this.settings.model)} · ${providerInfo[provider].label}`)
+  }
+
+  /** Look for Ollama / LM Studio; refresh credentials and an open model picker. */
+  async refreshLocal() {
+    const before = auth.available(this.authStatus).join()
+    await detectLocal()
+    this.authStatus = auth.status()
+    // Nothing else connected but a local server is up: use it.
+    if (!auth.has(this.authStatus, this.provider) && auth.available(this.authStatus).length) this.settings.model = pickDefault(auth.available(this.authStatus), "")
+    if (auth.available(this.authStatus).join() === before && this.picker?.kind !== "model") return
+    if (this.picker?.kind === "model") {
+      const { filter, selected } = this.picker
+      this.openModelPicker(false)
+      if (this.picker) Object.assign(this.picker, { filter, selected })
+    }
+    this.emit()
   }
 
   /** `/model <query>`: exact id, or the single best match across connected providers. */
@@ -937,7 +957,8 @@ export class Store {
     }
   }
 
-  openModelPicker() {
+  openModelPicker(probe = true) {
+    if (probe) void this.refreshLocal()
     const avail = auth.available(this.authStatus)
     const providers = avail.length ? avail : (["chatgpt", "anthropic", "openai"] as const).slice()
     const all = modelsFor([...providers])
@@ -982,6 +1003,10 @@ export class Store {
         group: "API keys",
       })),
     ]
+    for (const p of LOCAL_PROVIDERS) {
+      const n = modelsFor([p]).length
+      items.push({ label: providerInfo[p].label, detail: s.keys[p] ? `running · ${n} model${n === 1 ? "" : "s"} · enter to pick one` : `not running — start it, then pick it here (${providerInfo[p].baseURL})`, value: `local:${p}`, current: !!s.keys[p], group: "On this machine" })
+    }
     if (s.chatgpt) items.push({ label: "Sign out of ChatGPT", detail: "revoke and remove the saved session", value: "logout-chatgpt", group: "Remove" })
     for (const p of KEY_PROVIDERS) if (s.keys[p] === "saved key") items.push({ label: `Remove ${providerInfo[p].label} key`, detail: "delete the saved key", value: `remove:${p}`, group: "Remove" })
     this.openPicker("auth", "Accounts", items)
@@ -994,6 +1019,18 @@ export class Store {
       this.inputMode = `key:${p}`
       this.setInput("")
       return this.notify(`Paste your ${providerInfo[p].label} key and press enter (esc cancels)`)
+    }
+    if (action.startsWith("local:")) {
+      const p = action.slice(6) as LocalProvider
+      this.notify(`Looking for ${providerInfo[p].label}…`)
+      void this.refreshLocal().then(() => {
+        if (!isRunning(p)) return this.notify(`${providerInfo[p].label} isn't running at ${localBaseURL(p)} — start it and try again`, true)
+        if (!modelsFor([p]).length) return this.notify(`${providerInfo[p].label} is running but has no chat models with tool calling`, true)
+        this.openModelPicker(false)
+        if (this.picker) Object.assign(this.picker, { filter: providerInfo[p].label.toLowerCase(), selected: 0 })
+        this.emit(true)
+      })
+      return
     }
     if (action.startsWith("remove:")) {
       auth.setKey(action.slice(7) as Provider, undefined)
