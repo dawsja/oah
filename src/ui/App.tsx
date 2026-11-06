@@ -4,6 +4,7 @@
 import { RGBA, SyntaxStyle, TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
 import { useKeyboard, usePaste, useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react"
+import { cacheHitPercent } from "../usage"
 import * as auth from "../auth"
 import { displayName } from "../catalog"
 import { permissionInfo, providerInfo, shortPath, VERSION } from "../config"
@@ -762,6 +763,7 @@ function StatusBar({ store, width }: { store: Store; width: number }) {
   const s = store.settings
   const window = store.contextWindow()
   const used = store.session.contextTokens
+  const cache = cacheHitPercent(store.session.usage)
   const pct = window ? Math.min(999, Math.round((used / window) * 100)) : 0
   const filled = Math.min(10, Math.ceil(pct / 10))
   const meter = pct >= 85 ? t.red : pct >= 60 ? t.yellow : t.green
@@ -788,6 +790,7 @@ function StatusBar({ store, width }: { store: Store; width: number }) {
             <span fg={t.faint}> · </span>
           </>
         ) : null}
+        {cache !== undefined && width >= 90 ? <span fg={t.dim}>{cache}% cache · </span> : null}
         <span fg={t.dim}>
           {fmtTokens(used)} / {fmtTokens(window)}{" "}
         </span>

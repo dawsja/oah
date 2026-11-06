@@ -124,3 +124,17 @@ test("cost uses models.dev prices, including cache reads/writes, and skips plans
   expect(costOf("zai-coding/glm-5.3", u)).toBeUndefined() // subscription plan
   expect(costOf("chatgpt/gpt-5.6", u)).toBeUndefined()
 })
+
+test("clients are memoized but credentials and endpoint overrides invalidate them", async () => {
+  const { languageModel, providerOptions, cachedSystem } = await import("../src/providers")
+  const { defaultSettings } = await import("../src/config")
+  const a = await languageModel("minimax/MiniMax-M3", defaultSettings)
+  expect(await languageModel("minimax/MiniMax-M3", defaultSettings)).toBe(a)
+  process.env.OAH_MINIMAX_BASE_URL = "https://example.test/v1"
+  try { expect(await languageModel("minimax/MiniMax-M3", defaultSettings)).not.toBe(a) }
+  finally { delete process.env.OAH_MINIMAX_BASE_URL }
+  expect(providerOptions("openai/gpt-5.6", "medium", "session").openai.promptCacheKey).toBe("oah:session")
+  expect(providerOptions("minimax/MiniMax-M3", "medium").anthropic.cacheControl).toBeUndefined()
+  expect(cachedSystem("anthropic/claude-opus-5-5", "stable").providerOptions).toBeDefined()
+  expect(cachedSystem("minimax/MiniMax-M3", "stable").providerOptions).toBeUndefined()
+})

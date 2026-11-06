@@ -25,11 +25,13 @@ $BinDir = Join-Path $Root 'bin'
 $GitHubLatest = 'https://github.com/dawsja/oah/releases/latest/download/latest.txt'
 
 # --- platform ----------------------------------------------------------------------
-$osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+# RuntimeInformation.OSArchitecture is not available on every PowerShell 5.1 runtime.
+# Under WOW64, PROCESSOR_ARCHITEW6432 identifies the native OS, not the shell.
+$osArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 switch ($osArch) {
-  'X64' { $arch = 'x64' }
-  'Arm64' { $arch = 'arm64' }
-  default { Fail "unsupported architecture: $osArch" }
+  'AMD64' { $arch = 'x64' }
+  'ARM64' { $arch = 'arm64' }
+  default { Fail "unsupported or undetectable architecture: $osArch" }
 }
 $target = "windows-$arch"
 if (-not (Get-Command tar.exe -ErrorAction SilentlyContinue)) { Fail 'tar.exe is required (included with Windows 10 1803 and later)' }
@@ -68,7 +70,13 @@ try {
     $got = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLower()
     if ($want -ne $got) { Fail "checksum mismatch for $file (expected $want, got $got)" }
     Write-Host '  checksum    ok' -ForegroundColor DarkGray
-  } catch [System.Net.WebException], [Microsoft.PowerShell.Commands.HttpResponseException] {
+  } catch {
+    # HttpResponseException only exists in PowerShell 7; naming it in a typed
+    # catch breaks error handling on 5.1. Preserve unexpected verification errors.
+    if ($_.Exception -isnot [System.Net.WebException] -and
+        $_.Exception.GetType().FullName -ne 'Microsoft.PowerShell.Commands.HttpResponseException') {
+      throw
+    }
     # No checksum published for this release.
   }
 

@@ -6,8 +6,9 @@
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp"
 import { StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio"
 import type { ToolSet } from "ai"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
 import { paths, readJson, shortPath, VERSION, writeFileAtomic } from "./config"
+import { canonicalPath } from "./tools/versions"
 import { forget, hasTokens, McpOAuth, signIn } from "./mcp-auth"
 
 interface ServerConfig {
@@ -19,6 +20,7 @@ interface ServerConfig {
   type?: "http" | "sse"
   headers?: Record<string, string>
   disabled?: boolean
+  untrustedProject?: boolean
 }
 
 export interface McpServer {
@@ -61,10 +63,16 @@ export class Mcp {
 
   private readConfigs() {
     const configs = new Map<string, [ServerConfig, string]>()
+    const trusted = readJson<{ trustedMcpProjects?: string[] }>(paths.settings, {}).trustedMcpProjects ?? []
+    const projectTrusted = trusted.some((p) => isAbsolute(p) && canonicalPath(p) === canonicalPath(this.cwd))
     for (const f of this.files()) {
       const raw = readJson<any>(f, null)
       const servers = raw?.mcpServers ?? raw?.servers ?? {}
-      for (const [name, cfg] of Object.entries<ServerConfig>(servers)) configs.set(name, [cfg, shortPath(f)])
+      for (const [name, cfg] of Object.entries<ServerConfig>(servers)) {
+        const untrustedProject = f !== paths.mcp && !projectTrusted
+        if (untrustedProject && configs.has(name)) continue // untrusted checkout cannot shadow a global server
+        configs.set(name, [{ ...cfg, untrustedProject }, shortPath(f)])
+      }
     }
     return configs
   }
@@ -147,20 +155,27 @@ export class Mcp {
     cfg = expandEnv(cfg)
     // Probe mode: a server that wants a sign-in is marked instead of opening a browser.
     const oauth = cfg.url ? new McpOAuth(server.name, cfg.url) : undefined
+    let client: MCPClient | undefined
     try {
+      if (cfg.untrustedProject) throw new Error(`Project MCP config not trusted. Add ${JSON.stringify(this.cwd)} to trustedMcpProjects in ${paths.settings} after reviewing the config.`)
       const transport = cfg.url
         ? { type: cfg.type ?? ("http" as const), url: cfg.url, headers: cfg.headers, authProvider: oauth }
         : new StdioMCPTransport({ command: cfg.command!, args: cfg.args ?? [], env: { ...(process.env as Record<string, string>), ...(cfg.env ?? {}) }, cwd: cfg.cwd ?? this.cwd, stderr: "ignore" })
       if (!cfg.url && !cfg.command) throw new Error('missing "command" or "url"')
-      const client = await createMCPClient({ transport, clientName: "oah", version: VERSION })
+      client = await createMCPClient({ transport, clientName: "oah", version: VERSION })
       const tools = (await client.tools()) as ToolSet
       const exposed: ToolSet = {}
-      for (const [name, t] of Object.entries(tools)) exposed[exposedName(server.name, name)] = t
+      for (const [name, t] of Object.entries(tools)) {
+        const key = exposedName(server.name, name)
+        if (exposed[key] || this.servers.some((s) => s !== server && s.toolset?.[key])) throw new Error(`MCP tool name collision: ${key}`)
+        exposed[key] = t
+      }
       server.client = client
       server.toolset = exposed
       server.tools = Object.keys(tools)
       server.state = "ready"
     } catch (e: any) {
+      await client?.close().catch(() => {})
       const msg = e?.message ?? String(e)
       if (oauth?.wantsAuth || e?.name === "UnauthorizedError" || /\b401\b|unauthorized/i.test(msg)) server.state = "needs-auth"
       else server.state = "failed"

@@ -1,6 +1,7 @@
 // The conversation. Answer-first: your prompt as a heading, oah's thinking and
 // tool calls folded into one steps line, edits keep their diffs, then the answer.
 import type { SyntaxStyle } from "@opentui/core"
+import { memo, useMemo } from "react"
 import type { Entry } from "../session"
 import { Shimmer, useTick } from "./Thinking"
 import { fmtMs, SPINNER, t } from "./theme"
@@ -197,13 +198,24 @@ export interface TranscriptProps {
   busy: boolean
 }
 
+const FinishedTurn = memo(({ turn, style }: { turn: Turn; style: SyntaxStyle; revision: string }) =>
+  <FocusTurn turn={turn} style={style} tick={0} live={false} liveText={null} />,
+  (a, b) => a.style === b.style && a.turn.user === b.turn.user && a.revision === b.revision)
+
+function LiveTurn({ turn, style, liveText }: { turn: Turn; style: SyntaxStyle; liveText: number | null }) {
+  const tick = useTick(90, true)
+  return <FocusTurn turn={turn} style={style} tick={tick} live liveText={liveText} />
+}
+
 export function Transcript({ entries, style, liveText, busy }: TranscriptProps) {
-  const tick = useTick(90, busy)
-  const groups = groupTurns(entries)
+  // Store mutates entries in place; grouping depends on structure, not text deltas.
+  const groups = useMemo(() => groupTurns(entries), [entries, entries.length])
   return (
     <box flexDirection="column">
       {groups.map((g, k) =>
-        g.kind === "note" ? <Note key={k} e={g.entry} style={style} /> : <FocusTurn key={k} turn={g} style={style} tick={tick} live={busy && k === groups.length - 1} liveText={liveText} />,
+        g.kind === "note" ? <Note key={k} e={g.entry} style={style} /> : busy && k === groups.length - 1 ?
+          <LiveTurn key={k} turn={g} style={style} liveText={liveText} /> :
+          <FinishedTurn key={k} turn={g} style={style} revision={g.steps.map(({ e }) => e.kind === "tool" ? `${e.status}:${e.summary}:${e.ms}:${e.detail.join("\n")}` : e.kind === "reasoning" ? `${e.text.length}:${e.ms}` : "text" in e ? e.text : "").join("\0")} />,
       )}
     </box>
   )

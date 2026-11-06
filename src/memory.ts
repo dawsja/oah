@@ -4,7 +4,7 @@
 //  * Notes: ~/.config/oah/memory/global.md and a per-project file, added with
 //    `#note`, `/memory add`, or the model's `memory` tool.
 import { createHash } from "node:crypto"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { paths, shortPath, writeFileAtomic } from "./config"
 
@@ -30,6 +30,18 @@ export class Memory {
     this.projectFile = join(paths.memory, "projects", `${basename(this.root) || "root"}-${id}.md`)
   }
 
+  private cached = new Map<string, { key: string; text: string }>()
+
+  private content(file: string): string {
+    const stat = statSync(file)
+    const key = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`
+    const hit = this.cached.get(file)
+    if (hit?.key === key) return hit.text
+    const text = readFileSync(file, "utf8")
+    this.cached.set(file, { key, text })
+    return text
+  }
+
   instructionFiles(): string[] {
     const out: string[] = []
     if (existsSync(paths.agents)) out.push(paths.agents)
@@ -51,7 +63,7 @@ export class Memory {
 
   private entries(file: string): string[] {
     try {
-      return readFileSync(file, "utf8")
+      return this.content(file)
         .split("\n")
         .filter((l) => l.startsWith("- "))
         .map((l) => l.slice(2).trim())
@@ -63,6 +75,7 @@ export class Memory {
 
   private write(file: string, title: string, entries: string[]) {
     writeFileAtomic(file, `# ${title}\n\n${entries.map((e) => `- ${e}`).join("\n")}\n`)
+    this.cached.delete(file)
   }
 
   add(text: string, global = false) {
@@ -104,14 +117,18 @@ export class Memory {
   }
 
   promptSection(): string {
-    let s = ""
-    for (const f of this.instructionFiles()) {
-      try {
-        s += `# Instructions from ${shortPath(f)}\n${readFileSync(f, "utf8").slice(0, 40_000).trim()}\n\n`
-      } catch {}
+    const sections: { heading: string; body: string }[] = []
+    const files = this.instructionFiles() // rediscover additions, deletions and precedence changes
+    for (const f of files) {
+      try { sections.push({ heading: `# Instructions from ${shortPath(f)}`, body: this.content(f).trim() }) } catch {}
     }
+    for (const file of this.cached.keys()) if (!files.includes(file) && file !== this.globalFile && file !== this.projectFile) this.cached.delete(file)
     const notes = this.render()
-    if (notes) s += `# Memory\nThings the user asked you to remember (use the \`memory\` tool to add or remove):\n${notes}\n`
-    return s
+    if (notes) sections.push({ heading: "# Memory (persistent user notes)", body: notes })
+    if (!sections.length) return ""
+    // Fair shares preserve visibility of every instruction source, including the most-local file.
+    const budget = 16_000
+    const per = Math.max(0, Math.floor(budget / sections.length) - 200)
+    return sections.map(({ heading, body }) => `${heading}\n${body.length > per ? body.slice(0, per) + "\n[Instructions truncated by total 16k-character budget; read the source file for complete rules.]" : body}\n`).join("\n").slice(0, budget)
   }
 }

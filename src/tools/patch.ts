@@ -14,8 +14,9 @@
 //
 // Every hunk is located and every file computed in memory first; nothing is
 // written unless the whole patch applies.
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { basename, dirname, join } from "node:path"
+import { canonicalPath } from "./versions"
 
 export type FileOp =
   | { kind: "add"; path: string; lines: string[] }
@@ -88,8 +89,9 @@ export function parsePatch(text: string): FileOp[] {
 /** Find `needle` (array of lines) in `hay` at or after `from`, tolerating whitespace differences. */
 function seek(hay: string[], needle: string[], from: number): number {
   if (!needle.length) return from
-  const norms = [(s: string) => s, (s: string) => s.trimEnd(), (s: string) => s.trim()]
+  const norms = [(s: string) => s, (s: string) => s.trimEnd()]
   for (const norm of norms) {
+    const matches: number[] = []
     for (let i = from; i + needle.length <= hay.length; i++) {
       let ok = true
       for (let j = 0; j < needle.length; j++) {
@@ -98,31 +100,35 @@ function seek(hay: string[], needle: string[], from: number): number {
           break
         }
       }
-      if (ok) return i
+      if (ok) matches.push(i)
     }
+    if (matches.length > 1) throw new Error("ambiguous patch hunk; provide more context or an anchor")
+    if (matches.length === 1) return matches[0]!
   }
   return -1
 }
 
 export function applyHunks(content: string, hunks: Hunk[], path: string): string {
   const eol = content.endsWith("\n")
-  const lines = content.split("\n")
+  const newline = content.includes("\r\n") ? "\r\n" : "\n"
+  const lines = content.replace(/\r\n/g, "\n").split("\n")
   if (eol) lines.pop()
   let cursor = 0
   for (const h of hunks) {
     if (h.anchor) {
       const a = seek(lines, [h.anchor], cursor)
-      if (a >= 0) cursor = a
+      if (a < 0) throw new Error(`${path}: anchor not found: ${h.anchor}`)
+      cursor = a
     }
     const oldLines = h.lines.filter((l) => !l.startsWith("+")).map((l) => l.slice(1))
     const newLines = h.lines.filter((l) => !l.startsWith("-")).map((l) => l.slice(1))
     let at = seek(lines, oldLines, cursor)
-    if (at < 0) at = seek(lines, oldLines, 0)
+    if (at < 0 && !h.anchor) at = seek(lines, oldLines, 0)
     if (at < 0) throw new Error(`${path}: couldn't find the lines to change:\n${oldLines.slice(0, 6).join("\n")}`)
     lines.splice(at, oldLines.length, ...newLines)
     cursor = at + newLines.length
   }
-  return lines.join("\n") + (eol || !lines.length ? "\n" : "")
+  return lines.join(newline) + (eol || !lines.length ? newline : "")
 }
 
 export interface PatchResult {
@@ -130,46 +136,83 @@ export interface PatchResult {
   diff: string[]
 }
 
-/** Apply all-or-nothing. `resolve` maps patch paths to absolute paths. */
-export function applyPatch(text: string, resolve: (p: string) => string, display: (abs: string) => string): PatchResult {
-  const ops = parsePatch(text)
-  const writes: { abs: string; content: string | null }[] = []
-  const result: PatchResult = { files: [], diff: [] }
-  for (const op of ops) {
-    const abs = resolve(op.path)
-    if (op.kind === "add") {
-      if (existsSync(abs)) throw new Error(`${op.path} already exists (use Update File)`)
-      writes.push({ abs, content: op.lines.join("\n") + "\n" })
-      result.files.push({ path: display(abs), status: "A", added: op.lines.length, removed: 0 })
-      result.diff.push(...op.lines.slice(0, 6).map((l) => `+${l}`))
-    } else if (op.kind === "delete") {
-      if (!existsSync(abs)) throw new Error(`${op.path} doesn't exist`)
-      const body = readFileSync(abs, "utf8")
-      const n = body ? body.replace(/\n$/, "").split("\n").length : 0
-      writes.push({ abs, content: null })
-      result.files.push({ path: display(abs), status: "D", added: 0, removed: n })
-    } else {
-      if (!existsSync(abs)) throw new Error(`${op.path} doesn't exist`)
-      const updated = applyHunks(readFileSync(abs, "utf8"), op.hunks, op.path)
-      const added = op.hunks.reduce((n, h) => n + h.lines.filter((l) => l.startsWith("+")).length, 0)
-      const removed = op.hunks.reduce((n, h) => n + h.lines.filter((l) => l.startsWith("-")).length, 0)
-      if (op.moveTo) {
-        const dest = resolve(op.moveTo)
-        writes.push({ abs: dest, content: updated }, { abs, content: null })
-        result.files.push({ path: `${display(abs)} → ${display(dest)}`, status: "R", added, removed })
-      } else {
-        writes.push({ abs, content: updated })
-        result.files.push({ path: display(abs), status: "M", added, removed })
-      }
-      for (const h of op.hunks) result.diff.push(...h.lines.filter((l) => !l.startsWith(" ")))
+/** Atomic per-file replacement. Multi-file rollback is best effort, not crash atomicity. */
+export function replaceFile(path: string, content: string | Buffer, mode?: number) {
+  if (existsSync(path) && lstatSync(path).isSymbolicLink()) path = realpathSync(path)
+  const temp = `${path}.oah-${crypto.randomUUID()}.tmp`
+  mkdirSync(dirname(path), { recursive: true })
+  try {
+    writeFileSync(temp, content, { mode: mode ?? (existsSync(path) ? statSync(path).mode : 0o666) })
+    renameSync(temp, path)
+  } finally { rmSync(temp, { force: true }) }
+}
+
+/** Preflight all operations against a staged filesystem, then commit with rollback. */
+export function applyPatch(text: string, resolve: (p: string) => string, display: (abs: string) => string, commit: (p: string, value: string | null) => void = (p, v) => v === null ? rmSync(p, { force: true }) : replaceFile(p, v)): PatchResult {
+  const resolveFile = (p: string) => { const abs = resolve(p); return join(canonicalPath(dirname(abs)), basename(abs)) }
+  const originals = new Map<string, { text: string | null; bytes: Buffer | null; mode?: number }>()
+  const staged = new Map<string, string | null>()
+  const load = (p: string): string | null => {
+    if (!originals.has(p)) {
+      const entry = lstatSync(p, { throwIfNoEntry: false })
+      if (entry && !entry.isFile()) throw new Error(`${p}: patch target must be a regular file, not a symlink or directory`)
+      const bytes = entry ? readFileSync(p) : null
+      originals.set(p, { text: bytes?.toString("utf8") ?? null, bytes, mode: entry?.mode })
     }
+    return staged.has(p) ? staged.get(p)! : originals.get(p)!.text
   }
-  for (const w of writes) {
-    if (w.content === null) rmSync(w.abs, { force: true })
-    else {
-      mkdirSync(dirname(w.abs), { recursive: true })
-      writeFileSync(w.abs, w.content)
+  const result: PatchResult = { files: [], diff: [] }
+  try {
+    for (const op of parsePatch(text)) {
+      const abs = resolveFile(op.path)
+      const body = load(abs)
+      if (op.kind === "add") {
+        if (body !== null) throw new Error(`${op.path} already exists (use Update File)`)
+        staged.set(abs, op.lines.join("\n") + "\n")
+        result.files.push({ path: display(abs), status: "A", added: op.lines.length, removed: 0 })
+        result.diff.push(...op.lines.slice(0, 6).map((l) => `+${l}`))
+      } else if (op.kind === "delete") {
+        if (body === null) throw new Error(`${op.path} doesn't exist`)
+        staged.set(abs, null)
+        result.files.push({ path: display(abs), status: "D", added: 0, removed: body ? body.replace(/\n$/, "").split("\n").length : 0 })
+      } else {
+        if (body === null) throw new Error(`${op.path} doesn't exist`)
+        const bytes = originals.get(abs)!.bytes
+        if (!staged.has(abs) && bytes && (bytes.includes(0) || !Buffer.from(body, "utf8").equals(bytes))) throw new Error(`${op.path}: binary files cannot be updated with a text patch`)
+        const updated = applyHunks(body, op.hunks, op.path)
+        const added = op.hunks.reduce((n, h) => n + h.lines.filter((l) => l.startsWith("+")).length, 0)
+        const removed = op.hunks.reduce((n, h) => n + h.lines.filter((l) => l.startsWith("-")).length, 0)
+        if (op.moveTo) {
+          const dest = resolveFile(op.moveTo)
+          if (dest === abs) throw new Error(`${op.path}: move destination equals source`)
+          if (load(dest) !== null) throw new Error(`${op.moveTo} already exists; refusing to overwrite`)
+          staged.set(dest, updated)
+          staged.set(abs, null)
+          result.files.push({ path: `${display(abs)} → ${display(dest)}`, status: "R", added, removed })
+        } else {
+          staged.set(abs, updated)
+          result.files.push({ path: display(abs), status: "M", added, removed })
+        }
+        for (const h of op.hunks) result.diff.push(...h.lines.filter((l) => !l.startsWith(" ")))
+      }
     }
+  } catch (e: any) { throw new Error(`no files changed: ${e.message}`) }
+  const touched: string[] = []
+  try {
+    for (const [path, value] of staged) {
+      touched.push(path)
+      commit(path, value)
+    }
+  } catch (e: any) {
+    const failures: string[] = []
+    for (const path of touched.reverse()) {
+      try {
+        const old = originals.get(path)!
+        if (old.text === null) rmSync(path, { force: true })
+        else replaceFile(path, old.bytes!, old.mode)
+      } catch { failures.push(path) }
+    }
+    throw new Error(failures.length ? `partial changes possible; rollback failed for ${failures.join(", ")}: ${e.message}` : `no files changed (rolled back): ${e.message}`)
   }
   return result
 }

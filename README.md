@@ -119,8 +119,8 @@ come from each model's `reasoning_options`.
 | `find` | find files/dirs by name or path glob, type, depth, size, modified age; .gitignore-aware | runs |
 | `grep` | search contents (ripgrep when installed, built-in fallback): regex or literal, case-insensitive, file glob, context lines, `content` / `files` / `count` output | runs |
 | `write_file` | create/overwrite a file *(build mode)* | runs in the workspace (undo with `/undo`); outside: safety monitor |
-| `edit_file` | exact string replace — one edit, or several in `edits`, all-or-nothing *(build mode)* | runs in the workspace; outside: safety monitor |
-| `apply_patch` | add/update/move/delete several files in one all-or-nothing patch *(build mode, GPT models)* | runs in the workspace; outside: safety monitor |
+| `edit_file` | exact replace with unique CRLF/trailing-whitespace recovery, diagnostics and stale-read guards *(build mode)* | runs in the workspace; outside: safety monitor |
+| `apply_patch` | staged add/update/move/delete with atomic per-file replacement and rollback on commit failure *(build mode, GPT models)* | runs in the workspace; outside: safety monitor |
 | `bash` | run a shell command (read-only in plan mode); `background: true` for servers and watchers | safe commands run; others: safety monitor |
 | `bash_output` / `bash_kill` | read new output from / stop a background shell (`⧗ N bg` in the status bar) | runs |
 | `task` | delegate research to a read-only sub-agent with a fresh context; live progress, runs in parallel | runs (its own tools follow your permissions) |
@@ -136,7 +136,7 @@ come from each model's `reasoning_options`.
 When oah asks a question: **↑↓** or **1–9** to pick (space ticks in multi-select), **enter** to answer, or type
 your own answer in the composer; **esc** dismisses. Background shells are stopped on `/clear` and on exit.
 
-At a prompt: **y** allow once · **a** always allow (this session: per command, per MCP tool, or all edits) ·
+At a prompt: **y** allow once · **a** always allow (this session: per exact shell command, per MCP tool, or ordinary local edits; protected/outside paths use separately scoped grants) ·
 **n**/Esc deny. `always ask` asks for everything; `always allow` never asks.
 
 ### Auto mode
@@ -153,6 +153,12 @@ config — is checked first by a quick model call that sees what you asked for:
   approve, the monitor lets it through.
 - **Your call:** catastrophic commands (wiping `/` or `~`, overwriting disks), a third block in one turn, or
   the monitor being unavailable stop with an approval card showing why.
+
+Instruction/skill files, `.git`, harness configuration and credential paths receive separate review; ordinary local-write grants do not cover them. Shell classification is conservative and incomplete, not a substitute for a sandbox.
+
+Risky calls generated in one step are reviewed as a batch before execution, with a separate verdict for every call. Malformed/repaired calls receive a fresh individual review. Oversized or incomplete reviews fail closed. Approvals are not generalized by command shape; identical commands can run changed scripts. Mutations and verification commands are serialized to avoid checking a half-applied change.
+
+**Limits:** command classification and the model monitor are not an OS sandbox or a guarantee against secret access. Checkpoints cannot reverse network effects, external files, ignored files, databases or `.git` changes. Multi-file rollback is best effort, not crash-atomic. Plan mode denies write tools, configuration/memory changes, background commands and MCP execution even with `--permission allow`; its shell inspection policy is conservative, not OS isolation.
 
 The monitor uses a small model from your current provider (Haiku, a mini or flash model) and falls back to
 your current model if there isn't one or it isn't on your plan; set `safetyModel` in `settings.json` to choose.
@@ -174,6 +180,29 @@ your current model if there isn't one or it isn't on your plan; set `safetyModel
       "fs":   { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] },
       "docs": { "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer …" } } } }
   ```
+
+Project MCP configurations require explicit trust before starting any process or contacting a server. After reviewing the config, add the absolute workspace path to `trustedMcpProjects` in global `settings.json`, then reload. Untrusted project configs cannot shadow globally configured servers. Global MCP configuration remains explicitly user-controlled.
+
+## Performance and verification
+
+- The context meter also shows a weighted cache-read percentage when the provider reports it. Session JSON and headless `--json` retain input/cache-read/cache-write counters. These token totals cover **main-agent requests**; cost includes auxiliary calls too. Cached tokens still occupy context. `$0` on a subscription plan is not a measured API-price saving.
+- Reads default to 800 lines with contiguous 30k-character pagination. MCP text is bounded at 30k and research reports at 8k. Instruction bodies are cached by filesystem metadata with a total 16k-character prompt budget; truncation is explicit.
+- `toolResultThreshold` (default `60000` characters, `0` disables) and `toolResultKeep` (default `4`) control content-only pruning. Tool-call/result pairing and metadata remain intact. Old reads retain bounded head/tail context and re-read instructions. Pruning can reduce prefix-cache hits: benchmark it, do not assume fewer tokens means faster or cheaper.
+- Compaction retains complete recent exchanges, summarizes older work with explicit constraints/checks/todos, and falls back to deterministic elision. Completed-turn images become placeholders; reattach them when needed again. Signed Anthropic history is exempt from automatic rewriting to preserve prefix bindings; between turns it is summarized as a whole rather than rebasing signed recent blocks.
+- Sessions record `verification.status`: `not-needed`, `unverified`, `failed`, or `checks-passed`. A recognized successful check must follow the latest mutation. This is command evidence, not proof of semantic correctness or complete coverage. `goal_complete` is refused while checks are missing/failing; headless runs exit `2` for unverified/failed checks (`1` for agent errors, `130` for interruption). User-facing answers must disclose unavailable checks.
+- `repairToolCalls: false` disables the bounded optional small-model tool-argument repair. It attempts at most one repair per turn and never bypasses permissions.
+- System/tool prefixes remain stable across mode, goal and memory updates; runtime context is persisted append-only. Model changes or adding/removing MCP tools still change schemas and may invalidate cache reuse.
+
+Run the opt-in smoke benchmark (uses your credentials, may incur charges):
+
+```sh
+bun scripts/bench.ts --self-test                 # no model requests; tests harness assertions only
+bun scripts/bench.ts --run --runs 3              # three sequential tasks, isolated scratch repos/state
+bun scripts/bench.ts --run --stress --elision-threshold 0
+bun scripts/bench.ts --run --stress --elision-threshold 60000
+```
+
+`--model provider/model` selects a model. Results include per-prompt token/cache/cost deltas, total wall time including independent checks, and pass/fail. Scratch source/results are retained; copied credentials are removed on normal/error completion (a forcibly killed process can leave its private scratch auth file). No project MCP/skills are imported. “New session” is not guaranteed provider-cache cold. The optional fourth task is a synthetic tool-output stress case, not evidence of general production gains. Compare repeated paired runs with pinned settings; keep failures in the totals. This small smoke suite cannot establish a universal harness ranking. Exploratory measurements (including failures and caveats) are recorded in [`benchmarks/harness-smoke.json`](benchmarks/harness-smoke.json).
 
 ## Files
 

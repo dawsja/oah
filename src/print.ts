@@ -109,10 +109,10 @@ export async function runPrint(o: PrintOptions): Promise<number> {
   if (o.json) {
     const errors = store.session.transcript.slice(start).filter((e) => e.kind === "error").map((e) => (e.kind === "error" ? e.text : ""))
     process.stdout.write(
-      JSON.stringify({ result: answer, session: store.session.id, model: store.settings.model, cost: Math.round(cost * 1e6) / 1e6, contextTokens: store.session.contextTokens, totalTokens: store.session.totalTokens, denied, errors }, null, 2) + "\n",
+      JSON.stringify({ result: answer, session: store.session.id, model: store.settings.model, cost: Math.round(cost * 1e6) / 1e6, contextTokens: store.session.contextTokens, totalTokens: store.session.totalTokens, usage: store.session.usage, lastUsage: store.session.lastUsage, usageScope: "main-agent", verification: store.session.verification, denied, errors }, null, 2) + "\n",
     )
   } else err(dim(`— ${displayName(store.settings.model)}${cost ? ` · ${fmtCost(cost)}` : ""} · session ${store.session.id} · continue with: oah -c -p "…"`))
-  return interrupted ? 130 : failed ? 1 : 0
+  return interrupted ? 130 : failed ? 1 : store.session.verification?.status === "failed" || store.session.verification?.status === "unverified" ? 2 : 0
 }
 
 /**

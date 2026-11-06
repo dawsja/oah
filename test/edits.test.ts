@@ -101,3 +101,49 @@ describe("background shells", () => {
     expect(allShells().length).toBeGreaterThan(0)
   })
 })
+
+describe("bounded reads and diagnostics", () => {
+  test("read windows cap characters and provide a contiguous next offset", async () => {
+    writeFileSync(join(dir, "large.txt"), Array.from({ length: 1000 }, (_, i) => `${i} ${"x".repeat(100)}`).join("\n"))
+    const o = await run("read_file", { path: "large.txt" })
+    expect(o.output.length).toBeLessThanOrEqual(30_000)
+    const next = Number(/use offset=(\d+)/.exec(o.output)![1])
+    expect(next).toBeGreaterThan(1)
+    expect(o.output).toContain(`${next - 1}\t`)
+    expect((await run("read_file", { path: "large.txt", offset: next, limit: 1 })).output).toStartWith(`${next}\t`)
+  })
+  test("failed edits suggest candidates without modifying content", async () => {
+    writeFileSync(join(dir, "candidate.ts"), "const answer = 42\n")
+    const o = await run("edit_file", { path: "candidate.ts", old_string: "const answer = 41", new_string: "no" })
+    expect(o.ok).toBe(false)
+    expect(o.output).toContain("Candidate regions")
+    expect(read("candidate.ts")).toBe("const answer = 42\n")
+  })
+})
+
+describe("safe edit recovery and stale reads", () => {
+  test("CRLF/trailing whitespace fallback is unique and preserves line endings", async () => {
+    writeFileSync(join(dir, "crlf.ts"), "const x = 1  \r\nconst y = 2\r\n")
+    const o = await run("edit_file", { path: "crlf.ts", old_string: "const x = 1\n", new_string: "const x = 3\n" })
+    expect(o.ok).toBe(true)
+    expect(read("crlf.ts")).toBe("const x = 3\r\nconst y = 2\r\n")
+    expect(o.output).toContain("1\tconst x = 3")
+  })
+  test("ambiguous normalized matches and arbitrary indentation are refused", async () => {
+    writeFileSync(join(dir, "ambiguous.ts"), "x  \nx \n")
+    expect((await run("edit_file", { path: "ambiguous.ts", old_string: "x\n", new_string: "y\n" })).ok).toBe(false)
+    writeFileSync(join(dir, "indent.py"), "if True:\n    value = 1\n")
+    expect((await run("edit_file", { path: "indent.py", old_string: "        value = 1", new_string: "        value = 2" })).ok).toBe(false)
+  })
+  test("external changes block edits/overwrites until re-read; own writes refresh versions", async () => {
+    writeFileSync(join(dir, "stale.ts"), "one\n")
+    await run("read_file", { path: "stale.ts" })
+    writeFileSync(join(dir, "stale.ts"), "two\n")
+    expect((await run("write_file", { path: "stale.ts", content: "lost" })).output).toContain("changed on disk")
+    expect((await run("edit_file", { path: "stale.ts", old_string: "two", new_string: "three" })).ok).toBe(false)
+    await run("read_file", { path: "stale.ts" })
+    expect((await run("edit_file", { path: "stale.ts", old_string: "two", new_string: "three" })).ok).toBe(true)
+    expect((await run("edit_file", { path: "stale.ts", old_string: "three", new_string: "four" })).ok).toBe(true)
+    expect(read("stale.ts")).toBe("four\n")
+  })
+})

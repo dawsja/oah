@@ -49,7 +49,7 @@ describe("permissions", () => {
     expect(nextPermission("allow")).toBe("auto")
   })
   test("grant keys and risk", () => {
-    expect(grantKey("bash", { command: "cargo test --all" })).toBe("bash:cargo")
+    expect(grantKey("bash", { command: "cargo test --all" })).toBe("bash:cargo test --all")
     expect(grantKey("edit_file", {})).toBe("write")
     expect(risk("read_file", { path: "/etc/passwd" }, "/home/x", [])).toBe("read-outside")
     expect(risk("read_file", { path: "src/a.ts" }, "/home/x", [])).toBe("read")

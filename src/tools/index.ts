@@ -1,16 +1,19 @@
 // Built-in tools. Each returns text for the model plus a short summary and
 // preview lines for the transcript. Permission gating happens in the agent.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
 import { killTree, spawnCommand } from "../platform"
 import { homedir } from "node:os"
 import type { Mode } from "../config"
 import type { Memory } from "../memory"
 import type { Skills } from "../skills"
-import { applyPatch } from "./patch"
+import { assertFresh, canonicalPath, rememberVersion } from "./versions"
+import { replaceMatch } from "./edit"
+import { readWindow, BoundedText, postEditContext } from "./text"
+import { applyPatch, parsePatch, replaceFile } from "./patch"
 import { getShell, killShell, readShell, runningShells, shellStatus, startShell } from "./shells"
 
-export type Risk = "internal" | "read" | "read-outside" | "write" | "write-outside" | "safe-exec" | "exec" | "external"
+export type Risk = "internal" | "read" | "read-outside" | "write" | "write-outside" | "safe-exec" | "exec" | "external" | "protected"
 
 export interface Outcome {
   output: string
@@ -29,6 +32,7 @@ export interface ToolCtx {
   onGoalComplete: (summary: string) => void
   /** oah's own configuration (MCP servers, skills); absent in sub-agents. */
   setup?: SetupApi
+  fileVersions?: Map<string, string | null>
 }
 
 export interface SetupApi {
@@ -69,7 +73,7 @@ export function resolvePath(cwd: string, p: string): string {
 }
 
 export const inside = (cwd: string, p: string) => {
-  const r = relative(cwd, p)
+  const r = relative(canonicalPath(cwd), canonicalPath(p))
   return r === "" || (!r.startsWith("..") && !isAbsolute(r))
 }
 
@@ -115,8 +119,9 @@ export function stripAnsi(s: string): string {
 /** Commands that only inspect state (auto permission, plan mode). */
 export function isSafeCommand(cmd: string, extra: string[] = []): boolean {
   const c = cmd.trim()
-  if (!c || /[>`]|\$\(/.test(c)) return false
-  const SAFE = new Set("ls pwd cat head tail wc echo grep rg fd find tree stat file which whoami date uname env printenv du df sort uniq cut tr diff less more basename dirname realpath readlink type true nl column jq sha256sum md5sum".split(" "))
+  if (/(?:^|[\s/'"])(?:\.env(?:[.\s/'"]|$)|id_rsa\b|id_ed25519\b)|\.git[\\/]hooks|\.mcp\.json/.test(c)) return false
+  if (!c || /[<>`$\r\n\\{}()]|\b(?:eval|source)\b/.test(c)) return false
+  const SAFE = new Set("ls pwd cat head tail wc echo grep rg fd find stat which whoami uname du df cut tr diff basename dirname realpath readlink true nl column jq sha256sum md5sum".split(" "))
   const GIT = new Set("status diff log show branch remote rev-parse ls-files blame describe tag".split(" "))
   // PowerShell read-only cmdlets and their aliases (matched case-insensitively).
   const PS = new Set("get-childitem gci dir get-content gc select-string sls get-location gl test-path get-item gi resolve-path rvpa measure-object measure select-object select sort-object where-object format-table ft format-list fl out-string get-command gcm get-filehash write-output".split(" "))
@@ -125,13 +130,28 @@ export function isSafeCommand(cmd: string, extra: string[] = []): boolean {
     .map((s) => s.trim())
     .filter(Boolean)
     .every((seg) => {
-      if (extra.some((e) => seg.startsWith(e))) return true
+      if (extra.some((e) => seg === e || seg.startsWith(e + " "))) return true
       const [first = "", second = ""] = seg.split(/\s+/)
-      if (first === "find" && /-exec|-delete|-ok/.test(seg)) return false
-      if (first === "git") return GIT.has(second) && !/branch\s+-[dD]/.test(seg)
-      if (first === "cargo") return ["check", "metadata", "tree", "--version"].includes(second)
+      if (["sort", "tree", "file", "date", "uniq"].includes(first)) return seg === first
+      if (first === "find" && /-(?:exec|delete|ok|fprint|fprintf|fls)/.test(seg)) return false
+      if (first === "fd" && /(?:^|\s)(?:-x|-X|--exec)/.test(seg)) return false
+      if (first === "rg" && /--pre(?:[=\s]|$)|--hostname-bin/.test(seg)) return false
+      if (["sort", "tree"].includes(first) && /(?:^|\s)(?:-o|--output)(?:[=\s]|$)/.test(seg)) return false
+      if (first === "date" && /(?:^|\s)(?:-s|--set|-f|--file)(?:[=\s]|$)/.test(seg)) return false
+      if (first === "git") {
+        if (!GIT.has(second) || /--output|--ext-diff|--textconv|--no-index/.test(seg)) return false
+        const rest = seg.split(/\s+/).slice(2)
+        if (second === "remote") return rest.length === 0 || rest.every((x) => ["-v", "--verbose"].includes(x))
+        if (second === "branch" || second === "tag") return rest.length === 0 || rest.every((x) => ["-l", "--list", "-a", "--all", "-r", "--remotes", "-v", "-vv"].includes(x))
+        return true
+      }
+      if (first === "cargo") return second === "--version"
       return SAFE.has(first) || PS.has(first.toLowerCase())
     })
+}
+
+export function protectedPath(path: string): boolean {
+  return [path, canonicalPath(path)].some((p) => /(?:^|[\\/])(?:\.git|\.oah|\.agents|\.claude)(?:[\\/]|$)|(?:^|[\\/])(?:\.mcp\.json|AGENTS\.md|OAH\.md|CLAUDE\.md|\.npmrc|\.env(?:\.[^\\/]+)?|id_rsa|id_ed25519)$/.test(p))
 }
 
 export function risk(name: string, args: any, cwd: string, extraSafe: string[]): Risk {
@@ -149,12 +169,15 @@ export function risk(name: string, args: any, cwd: string, extraSafe: string[]):
     case "ls":
     case "find":
     case "grep":
+      if (args?.path && protectedPath(resolvePath(cwd, args.path))) return "protected"
       return !args?.path || inside(cwd, resolvePath(cwd, args.path)) ? "read" : "read-outside"
     case "write_file":
     case "edit_file":
+      if (protectedPath(resolvePath(cwd, String(args?.path ?? "")))) return "protected"
       return inside(cwd, resolvePath(cwd, String(args?.path ?? ""))) ? "write" : "write-outside"
     case "apply_patch": {
       const files = [...String(args?.patch ?? "").matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)].map((m) => (m[1] ?? m[2])!.trim())
+      if (files.some((f) => protectedPath(resolvePath(cwd, f)))) return "protected"
       return files.every((f) => inside(cwd, resolvePath(cwd, f))) ? "write" : "write-outside"
     }
     case "bash":
@@ -445,25 +468,29 @@ export const TOOLS: ToolDef[] = [
   {
     name: "read_file",
     description: "Read a text file. Returns numbered lines. Use offset/limit (1-based line numbers) for large files.",
-    parameters: obj({ path: str("File path, absolute or relative to the workspace"), offset: { type: "integer", description: "First line (1-based)" }, limit: { type: "integer", description: "Maximum lines (default 2000)" } }, ["path"]),
+    parameters: obj({ path: str("File path, absolute or relative to the workspace"), offset: { type: "integer", description: "First line (1-based)" }, limit: { type: "integer", description: "Maximum lines (default 800, capped at 2000; output capped at 30k characters)" } }, ["path"]),
     run(a, ctx) {
       const p = resolvePath(ctx.cwd, a.path)
+      ctx.fileVersions ??= new Map()
       let buf: Buffer
       try {
+        if (!statSync(p).isFile()) {
+          rememberVersion(p, ctx.fileVersions)
+          return fail(`${rel(ctx.cwd, p)} is not a regular file`)
+        }
         buf = readFileSync(p)
       } catch (e: any) {
+        if (e.code === "ENOENT" || e.code === "ENOTDIR") rememberVersion(p, ctx.fileVersions)
         return fail(`${rel(ctx.cwd, p)}: ${e.code ?? e.message}`)
       }
+      rememberVersion(p, ctx.fileVersions, buf)
       if (isBinary(buf)) return fail(`${rel(ctx.cwd, p)} looks like a binary file (${buf.length} bytes)`)
       const lines = buf.toString("utf8").split("\n")
       if (lines.at(-1) === "") lines.pop()
-      const offset = Math.max(1, Number(a.offset) || 1)
-      const limit = Math.min(MAX_READ_LINES, Number(a.limit) || MAX_READ_LINES)
-      const slice = lines.slice(offset - 1, offset - 1 + limit)
-      let out = slice.map((l, i) => `${String(offset + i).padStart(6)}\t${l.length > 2000 ? l.slice(0, 2000) + "…" : l}`).join("\n")
-      const rest = lines.length - (offset - 1 + slice.length)
-      if (rest > 0) out += `\n… (${rest} more lines; use offset=${offset + slice.length})`
-      return ok(lines.length ? out : "(empty file)", `${slice.length} of ${lines.length} lines`)
+      const offset = Math.max(1, Math.floor(Number(a.offset) || 1))
+      const limit = Math.max(1, Math.min(MAX_READ_LINES, Math.floor(Number(a.limit) || 800)))
+      const window = readWindow(lines, offset, limit)
+      return ok(lines.length ? window.text || "(end of file)" : "(empty file)", `${window.count} of ${lines.length} lines`)
     },
   },
   {
@@ -615,11 +642,13 @@ export const TOOLS: ToolDef[] = [
     buildOnly: true,
     run(a, ctx) {
       const p = resolvePath(ctx.cwd, a.path)
+      try { assertFresh(p, ctx.fileVersions) } catch (e: any) { return fail(e.message) }
       const existed = existsSync(p)
       const old = existed ? readFileSync(p, "utf8") : ""
       try {
         mkdirSync(dirname(p), { recursive: true })
-        writeFileSync(p, String(a.content))
+        replaceFile(p, String(a.content))
+        rememberVersion(p, ctx.fileVersions)
       } catch (e: any) {
         return fail(`${rel(ctx.cwd, p)}: ${e.code ?? e.message}`)
       }
@@ -656,6 +685,7 @@ export const TOOLS: ToolDef[] = [
       } catch (e: any) {
         return fail(`${rel(ctx.cwd, p)}: ${e.code ?? e.message}`)
       }
+      try { assertFresh(p, ctx.fileVersions) } catch (e: any) { return fail(e.message) }
       const edits = editList(a)
       if (!edits.length) return fail("provide old_string/new_string or a non-empty edits list")
       let updated = text
@@ -666,17 +696,18 @@ export const TOOLS: ToolDef[] = [
       for (const [i, e] of edits.entries()) {
         const which = edits.length > 1 ? `edit ${i + 1}: ` : ""
         if (!e.old_string) return fail(`${which}old_string is empty; use write_file to create files`)
-        const count = updated.split(e.old_string).length - 1
-        if (count === 0) return fail(`${which}old_string not found in ${rel(ctx.cwd, p)}${i ? " (after the earlier edits)" : ""} — nothing was changed`)
-        if (count > 1 && !e.replace_all) return fail(`${which}old_string matches ${count} times; add context or set replace_all — nothing was changed`)
-        updated = e.replace_all ? updated.split(e.old_string).join(e.new_string) : updated.replace(e.old_string, () => e.new_string)
-        replacements += e.replace_all ? count : 1
+        try {
+          const match = replaceMatch(updated, e.old_string, e.new_string, e.replace_all)
+          updated = match.text
+          replacements += match.count
+        } catch (error: any) { return fail(`${which}${rel(ctx.cwd, p)}: ${error.message}`) }
         detail.push(...diffLines(e.old_string, e.new_string, 8))
         added += e.new_string.split("\n").length
         removed += e.old_string.split("\n").length
       }
-      writeFileSync(p, updated)
-      const o = ok(`Edited ${rel(ctx.cwd, p)} (${replacements} replacement${replacements === 1 ? "" : "s"}).`, `+${added} -${removed}${edits.length > 1 ? ` · ${edits.length} edits` : ""}`)
+      replaceFile(p, updated)
+      rememberVersion(p, ctx.fileVersions)
+      const o = ok(`Edited ${rel(ctx.cwd, p)} (${replacements} replacement${replacements === 1 ? "" : "s"}).\n${postEditContext(text, updated)}`,  `+${added} -${removed}${edits.length > 1 ? ` · ${edits.length} edits` : ""}`)
       o.detail = detail.length > 20 ? [...detail.slice(0, 20), `… +${detail.length - 20} lines`] : detail
       return o
     },
@@ -690,13 +721,16 @@ export const TOOLS: ToolDef[] = [
     openaiOnly: true,
     run(a, ctx) {
       try {
+        const targets = parsePatch(String(a.patch ?? "")).flatMap((op) => [op.path, ...(op.kind === "update" && op.moveTo ? [op.moveTo] : [])]).map((p) => resolvePath(ctx.cwd, p))
+        for (const p of targets) assertFresh(p, ctx.fileVersions)
         const r = applyPatch(String(a.patch ?? ""), (q) => resolvePath(ctx.cwd, q), (abs) => rel(ctx.cwd, abs))
+        for (const p of targets) rememberVersion(p, ctx.fileVersions)
         const lines = r.files.map((f) => `${f.status} ${f.path} (+${f.added} -${f.removed})`)
         const o = ok(`Applied patch:\n${lines.join("\n")}`, `${r.files.length} file${r.files.length === 1 ? "" : "s"} · +${r.files.reduce((n, f) => n + f.added, 0)} -${r.files.reduce((n, f) => n + f.removed, 0)}`)
         o.detail = [...lines.map((l) => `  ${l}`), ...r.diff.slice(0, 16), ...(r.diff.length > 16 ? [`… +${r.diff.length - 16} lines`] : [])]
         return o
       } catch (e: any) {
-        return fail(`patch not applied (no files changed): ${e.message}`)
+        return fail(`patch failed: ${e.message}`)
       }
     },
   },
@@ -744,7 +778,7 @@ export const TOOLS: ToolDef[] = [
         timedOut = true
         kill()
       }, timeout)
-      const chunks = { out: "", err: "" }
+      const chunks = { out: new BoundedText(), err: new BoundedText() }
       const pump = async (stream: ReadableStream<Uint8Array>, key: "out" | "err") => {
         const dec = new TextDecoder()
         const reader = stream.getReader()
@@ -753,8 +787,9 @@ export const TOOLS: ToolDef[] = [
           for (;;) {
             const { done, value } = await reader.read()
             if (done) break
-            chunks[key] += dec.decode(value, { stream: true })
+            chunks[key].append(dec.decode(value, { stream: true }))
           }
+          chunks[key].append(dec.decode())
         } catch {}
       }
       // Once the shell exits, stop reading after a moment: something it left running (`server &`) may hold the pipes.
@@ -765,7 +800,7 @@ export const TOOLS: ToolDef[] = [
       ctx.signal.removeEventListener("abort", onAbort)
       if (ctx.signal.aborted) return fail("interrupted")
       const code = proc.exitCode ?? (timedOut ? 124 : -1)
-      const { out, err } = chunks
+      const out = chunks.out.toString(), err = chunks.err.toString()
       let text = stripAnsi(out + (err.trim() ? (out && !out.endsWith("\n") ? "\n" : "") + err : "")).trimEnd()
       const lines = text ? text.split("\n").length : 0
       if (timedOut) {

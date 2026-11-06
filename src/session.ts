@@ -3,6 +3,8 @@
 import { appendFileSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import type { ModelMessage } from "ai"
+import type { VerificationState } from "./verification"
+import type { TokenUsage, UsageTotals } from "./usage"
 import type { Checkpoint } from "./checkpoints"
 import { ensureDir, paths, readJson, writeFileAtomic, type Effort, type Mode } from "./config"
 
@@ -50,6 +52,11 @@ export interface SessionData {
   /** Tokens the next request is expected to carry (context meter). */
   contextTokens: number
   totalTokens: number
+  /** Main-agent requests only; auxiliary requests are included in cost, not these totals. */
+  usage?: UsageTotals
+  lastUsage?: TokenUsage
+  verification?: VerificationState
+  runtimeContext?: string
   goal?: Goal
   todos: { text: string; status: string }[]
   compactions: number

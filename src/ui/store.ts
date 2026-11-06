@@ -1,6 +1,6 @@
 // Application state and behaviour. React components subscribe to `version`.
 import { experimental_createSteering, type ModelMessage, type Experimental_Steering as Steering } from "ai"
-import { compact, runTurn, systemPrompt, userMessage, type Question, type Reply } from "../agent"
+import { compact, runTurn, promptParts, userMessage, type Hooks, type Question, type Reply, type TurnOptions } from "../agent"
 import * as auth from "../auth"
 import { acceptsImages, clampEffort, contextWindow, defaultFor, displayName, effortsFor, modelsFor, pickDefault, refreshCatalog } from "../catalog"
 import { HELP, matchCommands, resolveCommand, type Command } from "../commands"
@@ -33,6 +33,8 @@ import { fmtTokens } from "./theme"
 import { Snapshots, type Checkpoint } from "../checkpoints"
 import { detectLocal, isRunning, LOCAL_PROVIDERS, localBaseURL, type LocalProvider } from "../local"
 import { clipboardImage, clipboardText, imageFromFile, pastedPaths, referenced, userContent, type PastedImage } from "../images"
+import { elideImages, estimateContext } from "../context"
+import { addUsage } from "../usage"
 import { killAllShells, setShellListener } from "../tools/shells"
 
 export type PickerKind = "model" | "effort" | "permission" | "session" | "auth" | "undo" | "skills" | "mcp"
@@ -580,19 +582,29 @@ export class Store {
     this.notify(`${texts.length} unsent message${texts.length === 1 ? "" : "s"} moved back to the input`)
   }
 
+  private compactedTokens = -1
+
   needsCompaction() {
-    return this.settings.autoCompact && this.session.contextTokens > this.contextWindow() * this.settings.autoCompactAt
+    return this.session.contextTokens !== this.compactedTokens && this.settings.autoCompact && this.session.contextTokens > this.contextWindow() * this.settings.autoCompactAt
   }
 
   instructions() {
     const goal = this.session.goal && !this.session.goal.done ? this.session.goal.text : undefined
-    return systemPrompt({ cwd: this.cwd, mode: this.settings.mode, goal, skills: this.skills.promptSection(), memory: this.memory.promptSection(), mcp: this.mcp.readyNames() })
+    return promptParts({ cwd: this.cwd, mode: this.settings.mode, goal, skills: this.skills.promptSection(), memory: this.memory.promptSection(), mcp: this.mcp.readyNames() }).system
   }
+
+  private fileVersions = new Map<string, string | null>()
 
   startTurn() {
     if (!auth.has(this.authStatus, this.provider)) {
       this.error(`No credentials for ${providerInfo[this.provider].label}. Run /auth, or pick another model with /model.`)
       return
+    }
+    const goal = this.session.goal && !this.session.goal.done ? this.session.goal.text : undefined
+    const { context } = promptParts({ cwd: this.cwd, mode: this.settings.mode, goal, skills: this.skills.promptSection(), memory: this.memory.promptSection(), mcp: this.mcp.readyNames() })
+    if (context !== this.session.runtimeContext) {
+      this.session.messages.push(userMessage(context))
+      this.session.runtimeContext = context
     }
     const abort = new AbortController()
     this.busy = { kind: "turn", started: Date.now(), abort }
@@ -603,7 +615,11 @@ export class Store {
     this.streamReasoning = null
     this.emit(true)
     const model = this.settings.model
-    runTurn({
+    const session = this.session
+    const current = () => this.session === session && this.busy?.abort === abort
+    const options: TurnOptions = {
+      sessionId: this.session.id,
+      verification: this.session.verification,
       model,
       effort: this.settings.effort,
       mode: this.settings.mode,
@@ -611,7 +627,7 @@ export class Store {
       instructions: this.instructions(),
       messages: [...this.session.messages],
       settings: this.settings,
-      ctx: { cwd: this.cwd, skills: this.skills, memory: this.memory, setup: this.setupApi },
+      ctx: { cwd: this.cwd, skills: this.skills, memory: this.memory, setup: this.setupApi, fileVersions: this.fileVersions },
       mcp: this.mcp,
       grants: this.grants,
       goalActive: !!this.session.goal && !this.session.goal.done,
@@ -621,7 +637,7 @@ export class Store {
         reviewing: (callId, on) => {
           if (this.permission || this.question) return
           const e = this.session.transcript.findLast((x) => x.kind === "tool" && x.callId === callId)
-          this.activity = on && e?.kind === "tool" ? `Safety check · ${oneLine(e.title, 60)}` : this.workingActivity()
+          this.activity = on ? `Safety check · ${e?.kind === "tool" ? oneLine(e.title, 60) : "reviewing proposed actions"}` : this.workingActivity()
           this.emit()
         },
         intent: () => this.intentContext(),
@@ -674,13 +690,19 @@ export class Store {
         question: (q) => (this.headless ? Promise.resolve(this.headless.question(q)) : this.requestAnswer(q)),
         beforeChange: () => this.takeCheckpoint(),
         spend: (usd) => this.spend(usd),
+        verification: (state) => { this.session.verification = structuredClone(state) },
         usage: (u) => {
+          this.session.lastUsage = u
+          this.session.usage = addUsage(this.session.usage, u)
           this.session.contextTokens = u.input + u.output
           this.session.totalTokens += u.input + u.output
           this.emit()
         },
       },
-    }).then((r) => this.turnDone(r.messages, r.error, r.aborted))
+    }
+    const hooks = options.hooks
+    options.hooks = Object.fromEntries(Object.entries(hooks).map(([name, fn]) => [name, (...args: any[]) => current() ? (fn as Function)(...args) : name === "ask" ? "deny" : name === "question" || name === "intent" ? "" : undefined])) as unknown as Hooks
+    runTurn(options).then((r) => { if (current()) this.turnDone(r.messages, r.error, r.aborted, r.history) })
   }
 
   private onText(d: string, model: string) {
@@ -755,13 +777,15 @@ export class Store {
 
   /** Snapshot the workspace once per turn, right before the first file-changing tool. */
   private takeCheckpoint(): Promise<void> {
+    const session = this.session
+    const snapshots = this.snapshots
     if (!this.turnCheckpoint) {
       const label = this.session.transcript.findLast((e) => e.kind === "user")?.text ?? "turn"
       this.turnCheckpoint = (this.cpChain = this.cpChain.then(async () => {
-        const tree = await this.snapshots.snapshot()
+        const tree = await snapshots.snapshot()
         if (!tree) return null
         const cp: Checkpoint = { id: newId(), tree, label: oneLine(label, 80), at: Date.now(), files: [] }
-        ;(this.session.checkpoints ??= []).push(cp)
+        ;(session.checkpoints ??= []).push(cp)
         return cp
       })) as Promise<Checkpoint | null>
     }
@@ -770,20 +794,22 @@ export class Store {
 
   /** After a turn: record which files it changed, drop no-op checkpoints, keep the newest N. */
   private finishCheckpoint() {
+    const session = this.session
+    const snapshots = this.snapshots
     const pending = this.turnCheckpoint
     this.turnCheckpoint = null
     if (!pending) return
     this.cpChain = this.cpChain.then(async () => {
       const cp = await pending
       if (!cp) return
-      const now = await this.snapshots.snapshot()
-      cp.files = now ? await this.snapshots.diff(cp.tree, now) : []
-      const list = (this.session.checkpoints ??= [])
+      const now = await snapshots.snapshot()
+      cp.files = now ? await snapshots.diff(cp.tree, now) : []
+      const list = (session.checkpoints ??= [])
       if (!cp.files.length) list.splice(list.indexOf(cp), 1)
       const max = Math.max(1, this.settings.maxCheckpoints || 20)
       if (list.length > max) list.splice(0, list.length - max)
-      saveSession(this.session)
-      this.emit()
+      saveSession(session)
+      if (this.session === session) this.emit()
     })
   }
 
@@ -807,6 +833,8 @@ export class Store {
     try {
       await this.cpChain
       const touched = await this.snapshots.restore(cp.tree)
+      this.fileVersions.clear()
+      this.session.verification = { revision: (this.session.verification?.revision ?? 0) + 1, status: "unverified", commands: [] }
       list.splice(i) // this checkpoint and everything after it are used up
       const shown = touched.slice(0, 8).map((f) => `\`${f}\``).join(", ") + (touched.length > 8 ? ` and ${touched.length - 8} more` : "")
       this.info(`↩ Restored files to before “${cp.label}”${touched.length ? ` — ${shown}` : " (nothing had changed)"}`)
@@ -818,7 +846,7 @@ export class Store {
     this.emit(true)
   }
 
-  private turnDone(messages: ModelMessage[], error: string | undefined, aborted: boolean) {
+  private turnDone(messages: ModelMessage[], error: string | undefined, aborted: boolean, history?: ModelMessage[]) {
     this.endReasoning()
     this.busy = null
     this.activity = ""
@@ -831,7 +859,9 @@ export class Store {
     else this.queue.unshift(...unsent)
     this.dropPrompts()
     for (const e of this.session.transcript) if (e.kind === "tool" && e.status === "running") e.status = aborted ? "denied" : "failed"
-    this.session.messages.push(...messages)
+    if (history) this.session.messages = history
+    else this.session.messages.push(...messages)
+    this.session.messages = elideImages(this.session.messages)
     this.finishCheckpoint()
     if (error) this.error(error)
     if (aborted) this.info("Interrupted.")
@@ -849,12 +879,12 @@ export class Store {
       }
       return this.continueGoal()
     }
-    const next = this.queue.shift()
-    if (next !== undefined) return this.sendUser(next)
     if (this.needsCompaction()) {
       this.after = { kind: "none" }
-      this.startCompact("", true)
+      return this.startCompact("", true)
     }
+    const next = this.queue.shift()
+    if (next !== undefined) return this.sendUser(next)
   }
 
   private continueGoal() {
@@ -875,17 +905,24 @@ export class Store {
 
   startCompact(focus: string, automatic: boolean) {
     if (!this.session.messages.length) return this.notify("Nothing to compact yet")
+    const session = this.session
     const abort = new AbortController()
+    const current = () => this.session === session && this.busy?.abort === abort
     this.busy = { kind: "compact", started: Date.now(), abort }
     this.activity = automatic ? "Auto-compacting conversation" : "Compacting conversation"
     this.emit(true)
-    compact({ model: this.settings.model, effort: this.settings.effort, settings: this.settings, instructions: this.instructions(), messages: this.session.messages, focus, signal: abort.signal, spend: (usd) => this.spend(usd) })
-      .then((summary) => {
+    this.cpChain.then(() => {
+      abort.signal.throwIfAborted()
+      if (!current()) throw new Error("Compaction superseded")
+      return compact({ model: this.settings.model, effort: this.settings.effort, settings: this.settings, instructions: this.instructions(), messages: this.session.messages, focus: `${focus}\nKnown state: ${JSON.stringify({ todos: this.session.todos, changedFiles: this.session.checkpoints?.flatMap((c) => c.files), failures: this.session.transcript.filter((e) => e.kind === "tool" && e.status === "failed").slice(-8) })}`, signal: abort.signal, spend: (usd) => this.spend(usd) })
+    })
+      .then((messages) => {
+        if (!current()) return
         this.busy = null
         this.activity = ""
-        const note = `This conversation was compacted to save context. Summary of everything so far:\n\n${summary.trim()}`
-        this.session.messages = [userMessage(note), { role: "assistant", content: "Understood — continuing from the summary." }]
-        this.session.contextTokens = Math.round(note.length / 4) + 2000
+        this.session.messages = messages
+        this.session.contextTokens = estimateContext(messages)
+        this.compactedTokens = this.session.contextTokens
         this.session.compactions++
         this.push({ kind: "info", text: `⇣ **Conversation compacted** (${this.session.compactions} so far)` })
         saveSession(this.session)
@@ -893,8 +930,14 @@ export class Store {
         this.after = { kind: "none" }
         if (after.kind === "submit") this.sendUser(after.text)
         else if (after.kind === "goal") this.continueGoal()
+        else {
+          const queued = this.queue.shift()
+          if (queued !== undefined) this.sendUser(queued)
+        }
+        this.emit(true)
       })
       .catch((e) => {
+        if (!current()) return
         this.busy = null
         this.activity = ""
         this.after = { kind: "none" }
@@ -1236,10 +1279,14 @@ export class Store {
   }
 
   newConversation() {
+    this.fileVersions = new Map()
+    this.turnCheckpoint = null
+    this.compactedTokens = -1
     this.images.clear()
     this.imageCount = 0
     killAllShells()
     this.busy?.abort.abort()
+    this.dropPrompts()
     this.busy = null
     saveSession(this.session)
     this.session = newSession(this.settings.model, this.settings.effort, this.settings.mode)
@@ -1253,9 +1300,13 @@ export class Store {
     const s = loadSession(id)
     if (!s) return this.notify(`No unique session matches '${id}'`, true)
     this.busy?.abort.abort()
+    this.dropPrompts()
     this.busy = null
     saveSession(this.session)
     this.session = s
+    this.fileVersions = new Map()
+    this.turnCheckpoint = null
+    this.compactedTokens = -1
     if (s.model) this.settings.model = s.model
     this.settings.effort = s.effort
     this.settings.mode = s.mode

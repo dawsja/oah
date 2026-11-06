@@ -11,13 +11,22 @@ import { createOpenAI } from "@ai-sdk/openai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createXai } from "@ai-sdk/xai"
 import { createOpenRouter } from "@openrouter/ai-sdk-provider"
-import { streamText, type LanguageModel, type LanguageModelUsage } from "ai"
+import { streamText, type LanguageModel, type LanguageModelUsage, type SystemModelMessage } from "ai"
 import * as auth from "./auth"
 import { clampEffort, lookup } from "./catalog"
 import { localBaseURL, type LocalProvider } from "./local"
 import { info, splitModel, VERSION, type Effort, type Settings } from "./config"
 
 const UA = `oah/${VERSION} (${process.platform}; ${process.arch})`
+
+/** Bound connection/header stalls without imposing a total deadline on a healthy stream. */
+const deadlineFetch: typeof fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(new Error("Provider connection timed out after 120s")), 120_000)
+  const inherited = init?.signal ?? (input instanceof Request ? input.signal : undefined)
+  try { return await fetch(input, { ...init, signal: inherited ? AbortSignal.any([inherited, abort.signal]) : abort.signal }) }
+  finally { clearTimeout(timer) }
+}, { preconnect: fetch.preconnect })
 
 /** fetch that injects a fresh ChatGPT access token and retries once after a 401. */
 const chatgptFetch: typeof fetch = Object.assign(
@@ -26,7 +35,7 @@ const chatgptFetch: typeof fetch = Object.assign(
       const headers = new Headers(init?.headers)
       headers.set("Authorization", `Bearer ${token}`)
       headers.set("User-Agent", UA)
-      return fetch(input, { ...init, headers })
+      return deadlineFetch(input, { ...init, headers })
     }
     let r = await send(await auth.credential("chatgpt"))
     if (r.status === 401) {
@@ -45,34 +54,48 @@ const chatgptFetch: typeof fetch = Object.assign(
 /** providerOptions key for an OpenAI-compatible provider (camelCase: zai-coding → zaiCoding). */
 const optionsKey = (p: string) => p.replace(/-(\w)/g, (_, c: string) => c.toUpperCase())
 
+const modelCache = new Map<string, LanguageModel>()
+
 export async function languageModel(full: string, settings: Settings): Promise<LanguageModel> {
+  const { provider } = splitModel(full)
+  // Resolve credentials before lookup: sign-in and endpoint changes must invalidate clients.
+  const apiKey = provider === "chatgpt" ? "chatgpt-plan" : await auth.credential(provider)
+  const key = JSON.stringify([full, apiKey, settings.openaiBaseURL, settings.anthropicBaseURL, process.env.OPENAI_BASE_URL, process.env.ANTHROPIC_BASE_URL, process.env[`OAH_${provider.toUpperCase().replace(/-/g, "_")}_BASE_URL`], provider === "ollama" || provider === "lmstudio" ? localBaseURL(provider) : null])
+  const hit = modelCache.get(key)
+  if (hit) return hit
+  const model = createModel(full, settings, apiKey)
+  modelCache.set(key, model)
+  if (modelCache.size > 32) modelCache.delete(modelCache.keys().next().value!)
+  return model
+}
+
+function createModel(full: string, settings: Settings, apiKey: string): LanguageModel {
   const { provider, slug } = splitModel(full)
   const headers = { "User-Agent": UA }
   if (provider === "chatgpt") {
     return createOpenAI({ apiKey: "chatgpt-plan", baseURL: settings.openaiBaseURL ?? process.env.OPENAI_BASE_URL, fetch: chatgptFetch }).responses(slug)
   }
-  const apiKey = await auth.credential(provider)
   const def = info(provider)
   // OAH_<PROVIDER>_BASE_URL points any provider at a proxy or gateway.
   const override = process.env[`OAH_${provider.toUpperCase().replace(/-/g, "_")}_BASE_URL`]
   const baseURL = def.local ? localBaseURL(provider as LocalProvider) : (override ?? def.baseURL)
   switch (def.sdk) {
     case "openai":
-      return createOpenAI({ apiKey, baseURL: override ?? settings.openaiBaseURL ?? process.env.OPENAI_BASE_URL, headers }).responses(slug)
+      return createOpenAI({ apiKey, baseURL: override ?? settings.openaiBaseURL ?? process.env.OPENAI_BASE_URL, headers, fetch: deadlineFetch }).responses(slug)
     case "anthropic": {
       const base = provider === "anthropic" ? (settings.anthropicBaseURL ?? process.env.ANTHROPIC_BASE_URL) : undefined
-      return createAnthropic({ apiKey, baseURL: base ? `${base.replace(/\/$/, "")}/v1` : baseURL, headers })(slug)
+      return createAnthropic({ apiKey, baseURL: base ? `${base.replace(/\/$/, "")}/v1` : baseURL, headers, fetch: deadlineFetch })(slug)
     }
     case "google":
-      return createGoogleGenerativeAI({ apiKey, baseURL, headers })(slug)
+      return createGoogleGenerativeAI({ apiKey, baseURL, headers, fetch: deadlineFetch })(slug)
     case "xai":
-      return createXai({ apiKey, baseURL, headers })(slug)
+      return createXai({ apiKey, baseURL, headers, fetch: deadlineFetch })(slug)
     case "deepseek":
-      return createDeepSeek({ apiKey, baseURL, headers })(slug)
+      return createDeepSeek({ apiKey, baseURL, headers, fetch: deadlineFetch })(slug)
     case "openrouter":
-      return createOpenRouter({ apiKey, baseURL, headers: { ...headers, "HTTP-Referer": "https://oah.dev", "X-Title": "oah" } })(slug)
+      return createOpenRouter({ apiKey, baseURL, headers: { ...headers, "HTTP-Referer": "https://oah.dev", "X-Title": "oah" }, fetch: deadlineFetch })(slug)
     case "compat":
-      return createOpenAICompatible({ name: optionsKey(provider), apiKey, baseURL: baseURL!, headers, includeUsage: true })(slug)
+      return createOpenAICompatible({ name: optionsKey(provider), apiKey, baseURL: baseURL!, headers, fetch: deadlineFetch, includeUsage: true })(slug)
   }
 }
 
@@ -89,7 +112,7 @@ function adaptiveThinking(slug: string): boolean {
   return maj >= 5 || (maj === 4 && min >= 6 && family !== "haiku")
 }
 
-export function providerOptions(full: string, effort: Effort): Record<string, any> {
+export function providerOptions(full: string, effort: Effort, sessionId?: string): Record<string, any> {
   const { provider, slug } = splitModel(full)
   const e = clampEffort(full, effort)
   const sdk = info(provider).sdk
@@ -109,6 +132,7 @@ export function providerOptions(full: string, effort: Effort): Record<string, an
   if (sdk === "openrouter") return e ? { openrouter: { reasoning: { effort: e === "max" ? "xhigh" : e } } } : {}
   if (sdk === "compat") return e ? { [optionsKey(provider)]: { reasoningEffort: e } } : {}
   const o: Record<string, any> = { store: false, parallelToolCalls: true }
+  if (sessionId) o.promptCacheKey = `oah:${sessionId}`
   const reasoning = lookup(full)?.reasoning ?? /^(gpt-5|gpt-6|o\d)/.test(slug)
   if (reasoning) {
     if (e) o.reasoningEffort = e
@@ -129,6 +153,11 @@ export function maxOutputTokens(full: string): number | undefined {
 }
 
 export { adaptiveThinking }
+
+/** One explicit stable-system endpoint plus Anthropic's existing automatic history caching. */
+export function cachedSystem(full: string, content: string): SystemModelMessage {
+  return { role: "system", content, ...(splitModel(full).provider === "anthropic" ? { providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } } } : {}) }
+}
 
 /**
  * A one-shot completion, streamed: some backends (the ChatGPT plan) reject

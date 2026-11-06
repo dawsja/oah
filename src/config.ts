@@ -166,6 +166,13 @@ export interface Settings {
   maxCheckpoints: number
   /** Auto mode's safety monitor model (`provider/slug`); empty = a small model of the current provider, else the current model. */
   safetyModel?: string
+  /** Content-only tool-result pruning; 0 threshold disables pruning. */
+  toolResultThreshold?: number
+  toolResultKeep?: number
+  /** Optional bounded tool-input repair. */
+  repairToolCalls?: boolean
+  /** Explicitly trusted absolute workspace paths allowed to start project MCP configurations. */
+  trustedMcpProjects?: string[]
   /** Overrides (mainly for testing / proxies). */
   openaiBaseURL?: string
   anthropicBaseURL?: string
