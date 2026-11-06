@@ -69,7 +69,7 @@ export const HELP = `## Keys
 - **esc** / **ctrl+c** interrupt the running turn · **ctrl+c** twice when idle quits (prints how to resume)
 - while working: **enter** queues a message · **ctrl+enter** (or enter on an empty input) sends it now, mid-turn
 - **pgup / pgdn**, mouse wheel — scroll · drag to select text (copied on release)
-- **ctrl+v** attach an image from the clipboard · drag in or paste an image file → **[Image #N]**
+- **ctrl+v** / **ctrl+shift+v** paste — images become **[Image #N]**, text is pasted · drag in or paste an image file to attach it
 - **#note** saves a note to project memory
 
 ## Commands

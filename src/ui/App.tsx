@@ -71,7 +71,7 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
     const text = new TextDecoder().decode(e.bytes)
     if (!text.trim()) {
       e.preventDefault()
-      store.pasteClipboardImage()
+      store.pasteFromClipboard()
     } else if (store.pasteText(text)) e.preventDefault()
   })
 
@@ -168,12 +168,11 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
       }
       return
     }
-    // ctrl+v: attach an image from the clipboard (text pastes arrive as bracketed paste;
-    // ctrl+shift+v too when the terminal passes it through, and alt+v where ctrl+v is the
-    // terminal's own paste (Windows Terminal).
-    if (key.name === "v" && (key.ctrl || key.meta || key.option) && !store.picker && !store.permission && store.inputMode === "prompt") {
+    // ctrl+v, ctrl+shift+v, alt+v — whichever the terminal passes through rather than
+    // pasting itself: read the clipboard and attach an image or paste the text.
+    if (key.name?.toLowerCase() === "v" && (key.ctrl || key.meta || key.option) && !store.picker && !store.permission && store.inputMode === "prompt") {
       stop()
-      store.pasteClipboardImage()
+      store.pasteFromClipboard()
       return
     }
     // ctrl+t: quick model switch (recent models on top, previous one preselected).

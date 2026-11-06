@@ -32,7 +32,7 @@ import { oneLine, TOOLS, type Outcome, type SetupApi } from "../tools"
 import { fmtTokens } from "./theme"
 import { Snapshots, type Checkpoint } from "../checkpoints"
 import { detectLocal, isRunning, LOCAL_PROVIDERS, localBaseURL, type LocalProvider } from "../local"
-import { clipboardImage, imageFromFile, pastedPaths, referenced, userContent, type PastedImage } from "../images"
+import { clipboardImage, clipboardText, imageFromFile, pastedPaths, referenced, userContent, type PastedImage } from "../images"
 import { killAllShells, setShellListener } from "../tools/shells"
 
 export type PickerKind = "model" | "effort" | "permission" | "session" | "auth" | "undo" | "skills" | "mcp"
@@ -263,11 +263,24 @@ export class Store {
     this.notify(`Attached ${img.name === "clipboard" ? "image from clipboard" : img.name} as [Image #${n}] · ${kb}${acceptsImages(this.settings.model) ? "" : ` — ${displayName(this.settings.model)} can't see images`}`, !acceptsImages(this.settings.model))
   }
 
-  /** ctrl+v: attach the clipboard's image, if it holds one. */
+  /**
+   * ctrl+v (or an empty paste from the terminal): read the clipboard and do the
+   * right thing — attach an image, or paste text (image file paths still attach).
+   */
+  async pasteFromClipboard() {
+    const img = await clipboardImage()
+    if (typeof img === "string") return this.notify(img, true)
+    if (img) return this.attachImage(img)
+    const text = (await clipboardText())?.replace(/\r\n?/g, "\n")
+    if (!text) return this.notify("The clipboard is empty", true)
+    if (!this.pasteText(text)) this.insertInput?.(text)
+  }
+
+  /** Attach the clipboard's image, if it holds one (the desktop app's "paste image"). */
   async pasteClipboardImage() {
     const r = await clipboardImage()
     if (typeof r === "string") return this.notify(r, true)
-    if (!r) return this.notify("No image on the clipboard — paste text with your terminal's paste, or drag in an image file", true)
+    if (!r) return this.notify("No image on the clipboard", true)
     this.attachImage(r)
   }
 

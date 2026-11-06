@@ -1,5 +1,5 @@
-// Images in prompts: ctrl+v reads an image from the clipboard, and pasting or
-// dragging an image file's path attaches that file. Each attachment shows up in
+// Images in prompts: ctrl+v reads the clipboard (an image is attached, text is
+// pasted), and pasting or dragging an image file's path attaches that file. Each attachment shows up in
 // the input as "[Image #N]" and is sent as an image part where the marker sits.
 import { createHostClipboard } from "@opentui/core"
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs"
@@ -81,6 +81,30 @@ export async function clipboardImage(): Promise<Omit<PastedImage, "n"> | string 
   const mediaType = sniff(bytes) ?? type
   if (!mediaType) return null
   return { data: Buffer.from(bytes).toString("base64"), mediaType, name: "clipboard", bytes: bytes.length }
+}
+
+/** Read text from the system clipboard, or null when it holds none. */
+export async function clipboardText(): Promise<string | null> {
+  try {
+    host ??= createHostClipboard({ timeoutMs: 3000, maxReadBytes: MAX_IMAGE_BYTES * 4 })
+    const r = await host.read({ preferredTypes: ["text/plain"] })
+    if (r.status === "read") {
+      const text = new TextDecoder().decode(r.representation.bytes)
+      if (text) return text
+    }
+  } catch {}
+  const cmds =
+    process.platform === "darwin"
+      ? [["pbpaste"]]
+      : [...(process.env.WAYLAND_DISPLAY ? [["wl-paste", "--no-newline"]] : []), ...(process.env.DISPLAY ? [["xclip", "-selection", "clipboard", "-o"]] : [])]
+  for (const cmd of cmds) {
+    try {
+      const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore", stdin: "ignore" })
+      const out = await new Response(p.stdout).text()
+      if ((await p.exited) === 0 && out) return out
+    } catch {}
+  }
+  return null
 }
 
 /** Fallback readers for when the native clipboard can't provide an image. */
