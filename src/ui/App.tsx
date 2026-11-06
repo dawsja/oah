@@ -3,7 +3,7 @@
 // above the composer, centered pickers.
 import { RGBA, SyntaxStyle, TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
 import { useKeyboard, usePaste, useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentui/react"
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react"
 import * as auth from "../auth"
 import { displayName } from "../catalog"
 import { permissionInfo, providerInfo, shortPath, VERSION } from "../config"
@@ -55,6 +55,7 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
   const style = useMemo(() => makeStyle(renderer), [renderer])
   const scroll = useRef<ScrollBoxRenderable>(null)
   const input = useRef<TextareaRenderable>(null)
+  const { away: awayFromBottom, jump: jumpToBottom } = useJumpToBottom(scroll)
   const s = store.settings
 
   // Copy selections when the mouse is released.
@@ -293,6 +294,7 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
         <box height={1} />
       </scrollbox>
       <Activity store={store} />
+      {awayFromBottom ? <JumpToBottom onJump={jumpToBottom} /> : null}
       {palette.length ? <Palette store={store} items={palette} /> : null}
       {store.question ? <QuestionBox store={store} /> : null}
       {store.permission ? (
@@ -450,6 +452,54 @@ function TodoPanel({ store }: { store: Store }) {
           {x.status === "completed" ? <span attributes={TextAttributes.STRIKETHROUGH}>{x.text}</span> : x.status === "in_progress" ? <b>{x.text}</b> : x.text}
         </text>
       ))}
+    </box>
+  )
+}
+
+/**
+ * `away` is true while the transcript is scrolled up from the bottom (tracks the
+ * scroll offset and both sizes, so streaming output below the view counts too).
+ * `jump` scrolls to the end and resumes following; ctrl+end does the same.
+ */
+export function useJumpToBottom(scroll: RefObject<ScrollBoxRenderable | null>): { away: boolean; jump: () => void } {
+  const [away, setAway] = useState(false)
+  useEffect(() => {
+    const sb = scroll.current
+    if (!sb) return
+    const check = () => {
+      if (sb.isDestroyed) return
+      setAway(sb.scrollHeight - sb.viewport.height - sb.scrollTop >= 1)
+    }
+    sb.verticalScrollBar.onChange = check
+    sb.content.on("resize", check)
+    sb.viewport.on("resize", check)
+    check()
+    return () => {
+      if (sb.isDestroyed) return
+      sb.verticalScrollBar.onChange = undefined
+      sb.content.off("resize", check)
+      sb.viewport.off("resize", check)
+    }
+  }, [scroll])
+  const jump = () => scroll.current?.scrollTo(scroll.current.scrollHeight)
+  useKeyboard((key) => {
+    if (key.ctrl && key.name === "end") {
+      key.preventDefault()
+      jump()
+    }
+  })
+  return { away, jump }
+}
+
+/** Shown above the composer while scrolled up; click to follow the conversation again. */
+export function JumpToBottom({ onJump }: { onJump: () => void }) {
+  return (
+    <box height={1} flexShrink={0} marginLeft={1} marginRight={1} flexDirection="row" justifyContent="center" backgroundColor={t.panelHi} onMouseDown={onJump}>
+      <text>
+        <span fg={t.accent}>↓</span>
+        <span fg={t.text}> Jump to bottom</span>
+        <span fg={t.faint}> · ctrl+end</span>
+      </text>
     </box>
   )
 }
