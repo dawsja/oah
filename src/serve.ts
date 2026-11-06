@@ -11,7 +11,7 @@ import * as auth from "./auth"
 import { acceptsImages, contextWindow, displayName, effortsFor } from "./catalog"
 import { COMMANDS } from "./commands"
 import { homeDir, KEY_PROVIDERS, providerInfo, saveSettings, shortPath, VERSION, type Effort, type Mode, type Permission, type Provider, type Settings } from "./config"
-import { imageFromFile } from "./images"
+import { imageFromFile, MAX_IMAGE_BYTES } from "./images"
 import { LOCAL_PROVIDERS } from "./local"
 import { Mcp } from "./mcp"
 import { Memory } from "./memory"
@@ -53,6 +53,9 @@ export type ClientOp =
   | { op: "resume"; id: string }
   | { op: "attach"; path: string }
   | { op: "pasteImage" }
+  /** Image bytes from the app (paste, drop, file picker): works when the engine
+   * runs on another machine and can't read this one's files or clipboard. */
+  | { op: "image"; name: string; mediaType: string; data: string }
   | { op: "sendQueued" }
   | { op: "mcpSignIn"; name: string }
   | { op: "shutdown" }
@@ -258,6 +261,12 @@ export class Bridge {
       }
       case "pasteImage":
         return void store.pasteClipboardImage()
+      case "image": {
+        if (!/^image\/(png|jpeg|gif|webp)$/.test(o.mediaType)) return store.notify(`Not a supported image: ${o.name}`, true)
+        const bytes = Math.floor((o.data.length * 3) / 4)
+        if (bytes > MAX_IMAGE_BYTES) return store.notify(`${o.name} is ${(bytes / 1048576).toFixed(1)} MB — images must be under 5 MB`, true)
+        return store.attachImage({ data: o.data, mediaType: o.mediaType, name: o.name || "image", bytes })
+      }
       case "sendQueued":
         return store.sendQueuedNow()
       case "mcpSignIn":

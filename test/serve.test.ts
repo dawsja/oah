@@ -102,3 +102,19 @@ test("serve: closing stdin saves and exits", async () => {
   s.p.stdin.end()
   expect(await s.p.exited).toBe(0)
 }, 30_000)
+
+test("serve: images sent as bytes are attached; other types are refused", async () => {
+  const s = await serve()
+  await s.next((e) => e.t === "state")
+  // A 1×1 PNG.
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+  s.send({ op: "image", name: "dot.png", mediaType: "image/png", data: png })
+  const ins = await s.next((e) => e.t === "insert")
+  expect(ins.text).toContain("[Image #1]")
+  s.clear()
+  s.send({ op: "image", name: "notes.txt", mediaType: "text/plain", data: "aGk=" })
+  const refused = await s.next((e) => e.t === "state" && e.s.toast?.text?.includes("Not a supported image"))
+  expect(refused.s.toast.error).toBe(true)
+  s.send({ op: "shutdown" })
+  expect(await s.p.exited).toBe(0)
+}, 30_000)
