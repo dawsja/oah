@@ -59,7 +59,43 @@ UI only, in a browser (no Rust needed): `bun run web:bridge` in one terminal and
 `bun run web` in another, then open http://localhost:1420. The bridge runs the
 engine from source; set `OAH_HOME` to try it on a scratch config.
 
-## Build installers
+## Install
+
+```sh
+curl -fsSL https://dl.oah.dev/install-desktop.sh | sh       # macOS, Linux
+irm https://dl.oah.dev/install-desktop.ps1 | iex            # Windows (PowerShell)
+```
+
+Every download is listed in https://dl.oah.dev/desktop/latest.json (`files`).
+
+## Updates
+
+The app updates itself in the background (Settings → Updates & engine, on by
+default). It polls `https://dl.oah.dev/desktop/latest.json`; each install finds
+its own signed update there under `{os}-{arch}-{installer}` (e.g.
+`linux-x86_64-deb`, `windows-x86_64-nsis`, `darwin-aarch64-app`), falling back
+to `{os}-{arch}`. macOS and AppImage installs update in place silently; Windows
+and deb/rpm installs download silently and install on "Restart to update".
+
+Updates are signed with the key whose public half is in `tauri.conf.json`
+(`plugins.updater.pubkey`); the private key is the `TAURI_SIGNING_PRIVATE_KEY`
+repo secret. Keep a backup of it — without it, installed apps can't be updated.
+
+## Release
+
+Bump `version` in `desktop/package.json` (the app reads it from there), commit,
+then push a tag:
+
+```sh
+git tag desktop-v0.1.2 && git push origin desktop-v0.1.2
+```
+
+`.github/workflows/desktop.yml` builds every platform, signs the updates, uploads
+to R2 (`scripts/publish-desktop-r2.sh`: `desktop/v<version>/…`, then
+`desktop/latest.json` last) and makes a GitHub release. A version is published
+once; installed apps pick it up within a few hours.
+
+## Build installers locally
 
 ```sh
 bun run build          # compiles the engine for this machine, then tauri build
