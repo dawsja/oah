@@ -41,6 +41,7 @@ export function fmtTokens(n: number): string {
 
 export function fmtMs(ms: number): string {
   const s = Math.round(ms / 1000)
+  if (s >= 3600) return `${Math.floor(s / 3600)}h${String(Math.floor(s / 60) % 60).padStart(2, "0")}m`
   return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${s}s`
 }
 

@@ -102,7 +102,9 @@ export class Store {
   images = new Map<number, PastedImage>()
   private imageCount = 0
 
-  busy: Busy | null = null
+  private _busy: Busy | null = null
+  /** When the current stretch of goal work began; in memory only, folded into goal.ms when it ends. */
+  private goalRun: number | null = null
   activity = ""
   toast: { text: string; error: boolean; at: number } | null = null
   picker: Picker | null = null
@@ -153,6 +155,40 @@ export class Store {
     refreshCatalog().then((changed) => changed && this.emit())
     this.refreshLocal()
     setShellListener(() => this.emit())
+  }
+
+  /** What's running. Setting it also starts and stops the active goal's clock. */
+  get busy(): Busy | null {
+    return this._busy
+  }
+  set busy(b: Busy | null) {
+    this.stopGoalClock()
+    this._busy = b
+    this.startGoalClock()
+  }
+
+  private startGoalClock() {
+    const g = this.session.goal
+    if (this._busy && this._busy.kind !== "login" && g && !g.done) this.goalRun = Date.now()
+  }
+
+  private stopGoalClock() {
+    if (this.goalRun === null) return
+    const g = this.session.goal
+    if (g) g.ms = (g.ms ?? 0) + Date.now() - this.goalRun
+    this.goalRun = null
+  }
+
+  /** Time spent on the goal so far, including work in progress. */
+  goalElapsed(): number {
+    const g = this.session.goal
+    if (!g) return 0
+    return (g.ms ?? 0) + (this.goalRun !== null ? Date.now() - this.goalRun : 0)
+  }
+
+  /** Whether the goal's clock is ticking right now. */
+  get goalRunning(): boolean {
+    return this.goalRun !== null
   }
 
   // ---- reactivity -----------------------------------------------------------
@@ -1148,10 +1184,13 @@ export class Store {
       return this.info(g ? (g.done ? `Last goal completed:\n${g.text}` : `**Active goal** (turn ${g.turns}):\n${g.text}`) : "No goal set. Usage: `/goal <objective>` — oah keeps working until it's complete.")
     }
     if (["clear", "stop", "off", "cancel"].includes(args)) {
+      this.stopGoalClock()
       this.session.goal = undefined
       return this.notify("Goal cleared")
     }
-    this.session.goal = { text: args, turns: 0, done: false }
+    this.stopGoalClock()
+    this.session.goal = { text: args, turns: 0, done: false, ms: 0 }
+    this.startGoalClock()
     this.push({ kind: "info", text: `◎ **Goal set** — working until complete (esc pauses, /goal clear stops)\n${args}` })
     this.sendUser(`Goal: ${args}`)
   }
@@ -1396,6 +1435,7 @@ export class Store {
     this.busy?.abort.abort()
     this.dropPrompts()
     this.persistSettings()
+    this.stopGoalClock()
     saveSession(this.session)
   }
 }

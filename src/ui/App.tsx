@@ -9,7 +9,7 @@ import { displayName } from "../catalog"
 import { permissionInfo, providerInfo, shortPath, VERSION } from "../config"
 import { Shimmer, Thinking, useTick } from "./Thinking"
 import { markCells } from "./logo"
-import { fmtCost, fmtTokens, t } from "./theme"
+import { fmtCost, fmtMs, fmtTokens, t } from "./theme"
 import { Transcript } from "./Transcript"
 import { runningShells } from "../tools/shells"
 import type { Store } from "./store"
@@ -363,7 +363,8 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
 
 function Header({ store, width }: { store: Store; width: number }) {
   const g = store.session.goal
-  const right = `${g && !g.done ? `◎ goal · turn ${g.turns} · ` : ""}session ${store.session.id.slice(0, 8)}`
+  useTick(1000, store.goalRunning) // keep the goal timer moving between store updates
+  const right = `${g && !g.done ? `◎ goal · ${fmtMs(store.goalElapsed())} · ` : ""}session ${store.session.id.slice(0, 8)}`
   const room = Math.max(8, width - 9 - (width > 60 ? right.length + 2 : 0))
   const path = shortPath(store.cwd)
   const shown = path.length > room ? "…" + path.slice(path.length - room + 1) : path

@@ -31,6 +31,8 @@ export interface Goal {
   text: string
   turns: number
   done: boolean
+  /** Time spent working on the goal (turns and compactions, not pauses), in ms. */
+  ms?: number
 }
 
 export interface SessionData {
