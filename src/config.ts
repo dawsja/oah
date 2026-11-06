@@ -151,6 +151,8 @@ export interface Settings {
   autoCompactAt: number
   /** Extra command prefixes treated as safe in auto mode. */
   allowedCommands: string[]
+  /** Recently used models (`provider/slug`), newest first — pinned at the top of /model. */
+  recentModels: string[]
   /** Overrides (mainly for testing / proxies). */
   openaiBaseURL?: string
   anthropicBaseURL?: string
@@ -165,6 +167,7 @@ export const defaultSettings: Settings = {
   autoCompact: true,
   autoCompactAt: 0.85,
   allowedCommands: [],
+  recentModels: [],
 }
 
 export function loadSettings(): Settings {

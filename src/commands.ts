@@ -5,7 +5,7 @@ export interface Command {
 }
 
 export const COMMANDS: Command[] = [
-  { name: "model", args: "[provider/model]", desc: "Choose the model from any provider you've connected" },
+  { name: "model", args: "[name]", desc: "Switch model across connected providers (also ctrl+t)" },
   { name: "effort", args: "[minimal…max]", desc: "Set reasoning effort" },
   { name: "permissions", args: "[auto|ask|allow]", desc: "Permission level (also shift+tab)" },
   { name: "plan", args: "", desc: "Plan mode: read-only research, produce a plan (also tab)" },
@@ -58,13 +58,13 @@ export function matchCommands(prefix: string, skills: { name: string; descriptio
 export const HELP = `## Keys
 - **enter** send · **shift+enter** / **alt+enter** / **ctrl+j** newline
 - **↑ / ↓** previous / next prompt (from the first / last line)
-- **tab** plan ↔ build · **shift+tab** cycle permissions (auto → always ask → always allow)
+- **ctrl+t** switch model (recent on top; ctrl+t → enter flips back) · **tab** plan ↔ build · **shift+tab** cycle permissions (auto → always ask → always allow)
 - **esc** interrupt the running turn · **ctrl+c** quit (prints how to resume)
 - **pgup / pgdn**, mouse wheel — scroll · drag to select text (copied on release)
 - **#note** saves a note to project memory
 
 ## Commands
-- **/model**, **/effort**, **/permissions**, **/plan**, **/build**
+- **/model** [name] — e.g. /model glm, /model opus; **/effort**, **/permissions**, **/plan**, **/build**
 - **/auth** [provider] — continue with ChatGPT (uses your plan), or add a key: Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter, Synthetic, Kimi, Z.ai, MiniMax
 - **/goal** <objective> — keep going until done (**/goal clear** stops)
 - **/compact** [focus] — summarize history; auto-compaction runs near the context limit

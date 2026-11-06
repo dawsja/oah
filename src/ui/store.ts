@@ -13,6 +13,8 @@ import {
   providerInfo,
   saveSettings,
   shortPath,
+  inferProvider,
+  joinModel,
   splitModel,
   type Effort,
   type Mode,
@@ -25,6 +27,7 @@ import type { Memory } from "../memory"
 import { appendHistory, listSessions, loadHistory, loadSession, newSession, relativeTime, saveSession, type Entry, type SessionData } from "../session"
 import type { Skills } from "../skills"
 import { oneLine, TOOLS, type Outcome } from "../tools"
+import { fmtTokens } from "./theme"
 import { killAllShells, setShellListener } from "../tools/shells"
 
 export type PickerKind = "model" | "effort" | "permission" | "session" | "auth"
@@ -205,12 +208,31 @@ export class Store {
   // ---- settings ---------------------------------------------------------------
 
   setModel(full: string) {
-    const { provider } = splitModel(full)
-    this.settings.model = full.includes("/") ? full : `${provider}/${full}`
+    const prev = this.settings.model
+    const { provider, slug } = splitModel(full)
+    this.settings.model = joinModel(provider, slug)
     this.settings.effort = clampEffort(this.settings.model, this.settings.effort) ?? this.settings.effort
+    const before = this.settings.recentModels ?? []
+    this.settings.recentModels = [...new Set([this.settings.model, prev, ...before])].filter(Boolean).slice(0, 8)
     this.persistSettings()
     if (!auth.has(this.authStatus, provider)) this.notify(`${displayName(this.settings.model)} needs ${providerInfo[provider].billing} — run /auth`, true)
     else this.notify(`Model → ${displayName(this.settings.model)} · ${providerInfo[provider].label}`)
+  }
+
+  /** `/model <query>`: exact id, or the single best match across connected providers. */
+  switchModel(query: string) {
+    const q = query.trim()
+    const all = modelsFor(auth.available(this.authStatus))
+    const exact = all.find((m) => m.full === q || m.slug === q)
+    if (exact || splitModel(q).provider !== inferProvider(q)) return this.setModel(exact?.full ?? q)
+    const words = q.toLowerCase().split(/\s+/)
+    const hits = all.filter((m) => words.every((w) => `${m.name} ${m.full}`.toLowerCase().includes(w)))
+    if (hits.length === 1) return this.setModel(hits[0]!.full)
+    this.openModelPicker()
+    if (this.picker) {
+      this.picker.filter = q
+      this.picker.selected = 0
+    }
   }
 
   setEffort(e: Effort) {
@@ -590,7 +612,7 @@ export class Store {
         this.quit = true
         return this.emit(true)
       case "model":
-        return args ? this.setModel(args) : this.openModelPicker()
+        return args ? this.switchModel(args) : this.openModelPicker()
       case "effort": {
         if (args) return EFFORTS_SET.has(args) ? this.setEffort(args as Effort) : this.notify(`Unknown effort '${args}'`, true)
         const allowed = effortsFor(this.settings.model)
@@ -736,8 +758,11 @@ export class Store {
   pickerVisible(): PickItem[] {
     const p = this.picker
     if (!p) return []
-    const f = p.filter.toLowerCase()
-    return p.items.filter((i) => !f || i.label.toLowerCase().includes(f) || i.detail.toLowerCase().includes(f) || (i.group ?? "").toLowerCase().includes(f))
+    const words = p.filter.toLowerCase().split(/\s+/).filter(Boolean)
+    return p.items.filter((i) => {
+      const hay = `${i.label} ${i.detail} ${i.group ?? ""}`.toLowerCase()
+      return words.every((w) => hay.includes(w))
+    })
   }
 
   pick() {
@@ -762,15 +787,25 @@ export class Store {
   openModelPicker() {
     const avail = auth.available(this.authStatus)
     const providers = avail.length ? avail : (["chatgpt", "anthropic", "openai"] as const).slice()
-    const items: PickItem[] = modelsFor([...providers]).map((m) => ({
+    const all = modelsFor([...providers])
+    const item = (m: (typeof all)[number], group: string): PickItem => ({
       label: m.name,
-      detail: `${m.context ? `${Math.round(m.context / 1000)}k ctx · ` : ""}${m.slug}`,
+      detail: `${m.context ? `${fmtTokens(m.context)} ctx · ` : ""}${m.full}`,
       value: m.full,
       current: m.full === this.settings.model,
-      group: auth.label(this.authStatus, m.provider),
-    }))
-    if (!items.some((i) => i.current)) items.unshift({ label: displayName(this.settings.model), detail: this.settings.model, value: this.settings.model, current: true, group: "current" })
-    this.openPicker("model", avail.length ? "Model" : "Model · no credentials yet (/auth)", items)
+      group,
+    })
+    const byId = new Map(all.map((m) => [m.full, m]))
+    const recent = [...new Set([this.settings.model, ...(this.settings.recentModels ?? [])])].filter((id) => byId.has(id)).slice(0, 5)
+    const items: PickItem[] = [
+      ...recent.map((id) => item(byId.get(id)!, "Recent")),
+      ...all.filter((m) => !recent.includes(m.full)).map((m) => item(m, auth.label(this.authStatus, m.provider))),
+    ]
+    if (!items.some((i) => i.current)) items.unshift({ label: displayName(this.settings.model), detail: this.settings.model, value: this.settings.model, current: true, group: "Current" })
+    this.openPicker("model", avail.length ? "Model · ctrl+t" : "Model · no credentials yet (/auth)", items)
+    // Preselect the previous model so ctrl+t → enter flips between the last two.
+    const prev = recent.find((id) => id !== this.settings.model)
+    if (this.picker && prev) this.picker.selected = this.picker.items.findIndex((i) => i.value === prev)
   }
 
   openSessionPicker() {

@@ -139,6 +139,11 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
       }
       return
     }
+    // ctrl+t: quick model switch (recent models on top, previous one preselected).
+    if (key.ctrl && key.name === "t" && !store.picker && !store.question && store.inputMode === "prompt") {
+      stop()
+      return store.openModelPicker()
+    }
     // Picker.
     const p = store.picker
     if (p) {
@@ -146,7 +151,7 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
       const n = store.pickerVisible().length
       if (key.name === "escape") store.picker = null
       else if (key.name === "up") p.selected = n ? (p.selected + n - 1) % n : 0
-      else if (key.name === "down" || key.name === "tab") p.selected = n ? (p.selected + 1) % n : 0
+      else if (key.name === "down" || key.name === "tab" || (key.ctrl && key.name === "t")) p.selected = n ? (p.selected + 1) % n : 0
       else if (key.name === "pageup") p.selected = Math.max(0, p.selected - 10)
       else if (key.name === "pagedown") p.selected = Math.min(n - 1, p.selected + 10)
       else if (key.name === "return") return store.pick()

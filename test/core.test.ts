@@ -79,3 +79,8 @@ describe("helpers", () => {
     expect(body.startsWith("# Body")).toBe(true)
   })
 })
+
+test("token counts switch to M at a million", async () => {
+  const { fmtTokens } = await import("../src/ui/theme")
+  expect([999_000, 1_000_000, 1_048_576, 1_500_000, 10_485_760].map(fmtTokens)).toEqual(["999k", "1M", "1M", "1.5M", "10M"])
+})

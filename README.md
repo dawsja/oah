@@ -27,6 +27,7 @@ the **permission** level on the left and the **context meter** on the right.
 | --- | --- |
 | Enter | send · Shift+Enter / Alt+Enter / Ctrl+J newline |
 | ↑ / ↓ | previous / next prompt |
+| **Ctrl+T** | switch model — recent models on top, previous one preselected (Ctrl+T → Enter flips back) |
 | **Tab** | toggle **plan ↔ build** |
 | **Shift+Tab** | cycle permissions: **auto → always ask → always allow** |
 | Esc | interrupt the running turn |
