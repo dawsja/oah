@@ -1,6 +1,6 @@
 // Application state and behaviour. React components subscribe to `version`.
 import type { ModelMessage } from "ai"
-import { compact, runTurn, systemPrompt, userMessage, type Reply } from "../agent"
+import { compact, runTurn, systemPrompt, userMessage, type Question, type Reply } from "../agent"
 import * as auth from "../auth"
 import { clampEffort, contextWindow, displayName, effortsFor, modelsFor, pickDefault, refreshCatalog } from "../catalog"
 import { HELP, matchCommands, resolveCommand, type Command } from "../commands"
@@ -26,6 +26,7 @@ import type { Memory } from "../memory"
 import { appendHistory, listSessions, loadHistory, loadSession, newSession, relativeTime, saveSession, type Entry, type SessionData } from "../session"
 import type { Skills } from "../skills"
 import { oneLine, TOOLS, type Outcome } from "../tools"
+import { killAllShells, setShellListener } from "../tools/shells"
 
 export type PickerKind = "model" | "effort" | "permission" | "session" | "auth" | "design"
 
@@ -50,6 +51,12 @@ export interface PendingPermission {
   kind: string
   preview: string[]
   resolve: (r: Reply) => void
+}
+
+export interface PendingQuestion extends Question {
+  selected: number
+  checked: Set<number>
+  resolve: (answer: string) => void
 }
 
 export type BusyKind = "turn" | "compact" | "login"
@@ -82,6 +89,7 @@ export class Store {
   picker: Picker | null = null
   paletteIdx = 0
   permission: PendingPermission | null = null
+  question: PendingQuestion | null = null
   queue: string[] = []
   private after: After = { kind: "none" }
   private streamText: number | null = null
@@ -108,6 +116,7 @@ export class Store {
       settings.mode = session.mode ?? settings.mode
     }
     refreshCatalog().then((changed) => changed && this.emit())
+    setShellListener(() => this.emit())
   }
 
   // ---- reactivity -----------------------------------------------------------
@@ -263,6 +272,11 @@ export class Store {
   // ---- submit -----------------------------------------------------------------
 
   submit(text: string) {
+    if (this.question) {
+      const typed = text.trim()
+      this.setInput("")
+      return this.answerQuestion(typed || this.questionChoice())
+    }
     if (this.inputMode !== "prompt") {
       const which = this.inputMode === "openai-key" ? "openai" : "anthropic"
       this.inputMode = "prompt"
@@ -381,6 +395,20 @@ export class Store {
           if (this.session.goal) this.session.goal.done = true
           this.push({ kind: "info", text: `◎ **Goal complete** — ${summary}` })
         },
+        toolProgress: (callId, summary, detail) => {
+          const e = this.session.transcript.findLast((x) => x.kind === "tool" && x.callId === callId)
+          if (e && e.kind === "tool") {
+            e.summary = summary
+            e.detail = detail
+            this.emit()
+          }
+        },
+        question: (q) =>
+          new Promise<string>((resolve) => {
+            this.activity = "Waiting for your answer"
+            this.question = { ...q, selected: 0, checked: new Set(), resolve }
+            this.emit(true)
+          }),
         usage: (u) => {
           this.session.contextTokens = u.input + u.output
           this.session.totalTokens += u.input + u.output
@@ -436,6 +464,10 @@ export class Store {
     if (this.permission) {
       this.permission.resolve("deny")
       this.permission = null
+    }
+    if (this.question) {
+      this.question.resolve("")
+      this.question = null
     }
     for (const e of this.session.transcript) if (e.kind === "tool" && e.status === "running") e.status = aborted ? "denied" : "failed"
     this.session.messages.push(...messages)
@@ -523,6 +555,24 @@ export class Store {
     return true
   }
 
+  /** Answer the pending ask_user question ("" dismisses it). */
+  answerQuestion(answer: string) {
+    const q = this.question
+    if (!q) return
+    this.question = null
+    this.activity = "Thinking"
+    q.resolve(answer)
+    this.emit(true)
+  }
+
+  /** The answer for the current selection (checked options, else the highlighted one). */
+  questionChoice(): string {
+    const q = this.question
+    if (!q || !q.options.length) return ""
+    const picked = q.multiSelect && q.checked.size ? [...q.checked].sort((a, b) => a - b) : [q.selected]
+    return picked.map((i) => q.options[i]?.label ?? "").filter(Boolean).join(", ")
+  }
+
   answerPermission(r: Reply) {
     const p = this.permission
     if (!p) return
@@ -595,7 +645,7 @@ export class Store {
               .join("\n"),
         )
       case "tools":
-        return this.info("**Built-in tools**\n" + TOOLS.map((t) => `- **${t.name}**${t.buildOnly ? " _(build mode)_" : ""} — ${t.description}`).join("\n") + (this.mcp.readyNames().length ? `\n\nPlus MCP tools from: ${this.mcp.readyNames().join(", ")}` : ""))
+        return this.info("**Built-in tools**\n" + [...TOOLS.map((t) => `- **${t.name}**${t.buildOnly ? " _(build mode)_" : ""}${t.openaiOnly ? " _(GPT models)_" : ""} — ${t.description.split("\n")[0]}`), "- **task** — delegate research to a read-only sub-agent", "- **ask_user** — ask you a question with options instead of assuming"].join("\n") + (this.mcp.readyNames().length ? `\n\nPlus MCP tools from: ${this.mcp.readyNames().join(", ")}` : ""))
       case "init":
         return this.sendUser(
           "Analyze this repository and create (or update) an AGENTS.md at the project root that helps AI coding agents work here. Include a short overview, the layout of important directories, build/test/lint commands, code style conventions, and gotchas you discover. Keep it concise and accurate — verify commands by reading config files.",
@@ -658,6 +708,7 @@ export class Store {
   }
 
   newConversation() {
+    killAllShells()
     this.busy?.abort.abort()
     this.busy = null
     saveSession(this.session)
@@ -808,6 +859,8 @@ export class Store {
   // ---- lifecycle ------------------------------------------------------------------
 
   shutdown() {
+    killAllShells()
+    this.question?.resolve("")
     this.busy?.abort.abort()
     this.permission?.resolve("deny")
     this.persistSettings()

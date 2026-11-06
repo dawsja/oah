@@ -75,18 +75,24 @@ come from each model's `reasoning_options`.
 | --- | --- | --- |
 | `read_file` | numbered lines, offset/limit | runs (asks outside the workspace) |
 | `ls` | list a directory; `all` for dotfiles, `long` for sizes/dates, `depth` 1–3 | runs |
-| `find` | find files/dirs by name glob, path glob, type, depth, size, modified age; .gitignore-aware | runs |
-| `glob` | find files by a glob pattern like `src/**/*.ts` | runs |
+| `find` | find files/dirs by name or path glob, type, depth, size, modified age; .gitignore-aware | runs |
 | `grep` | search contents (ripgrep when installed, built-in fallback): regex or literal, case-insensitive, file glob, context lines, `content` / `files` / `count` output | runs |
 | `write_file` | create/overwrite a file *(build mode)* | asks, with a preview |
-| `edit_file` | exact string replace *(build mode)* | asks, with a diff |
-| `bash` | run a shell command (read-only in plan mode) | safe commands run; others ask |
+| `edit_file` | exact string replace — one edit, or several in `edits`, all-or-nothing *(build mode)* | asks, with a diff |
+| `apply_patch` | add/update/move/delete several files in one all-or-nothing patch *(build mode, GPT models)* | asks, with the patch |
+| `bash` | run a shell command (read-only in plan mode); `background: true` for servers and watchers | safe commands run; others ask |
+| `bash_output` / `bash_kill` | read new output from / stop a background shell (`⧗ N bg` in the status bar) | runs |
+| `task` | delegate research to a read-only sub-agent with a fresh context; live progress, runs in parallel | runs (its own tools follow your permissions) |
+| `ask_user` | ask you a question with options, or take your own typed answer — nur asks instead of assuming | runs |
 | `web_fetch` | fetch a URL as text | asks |
 | `todo_write` | the live task list | runs |
 | `memory` | add/remove/list persistent notes | runs |
 | `load_skill` | load a skill's instructions | runs |
 | `goal_complete` | finish an active `/goal` | runs |
 | MCP tools | `mcp__<server>__<tool>` from your MCP servers | asks |
+
+When nur asks a question: **↑↓** or **1–9** to pick (space ticks in multi-select), **enter** to answer, or type
+your own answer in the composer; **esc** dismisses. Background shells are stopped on `/clear` and on exit.
 
 At a prompt: **y** allow once · **a** always allow (this session: per command, per MCP tool, or all edits) ·
 **n**/Esc deny. `always ask` asks for everything; `always allow` never asks.

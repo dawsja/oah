@@ -10,6 +10,7 @@ import { permissionInfo, providerInfo, shortPath, VERSION } from "../config"
 import { Shimmer, Thinking, useTick } from "./Thinking"
 import { fmtTokens, t } from "./theme"
 import { Transcript } from "./Transcript"
+import { runningShells } from "../tools/shells"
 import type { Store } from "./store"
 
 function makeStyle(renderer: any): SyntaxStyle {
@@ -98,6 +99,44 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
       if (key.name === "y" || key.name === "return") store.answerPermission("once")
       else if (key.name === "a") store.answerPermission("always")
       else if (key.name === "n" || key.name === "escape") store.answerPermission("deny")
+      return
+    }
+    // A question from the model: pick an option, or type an answer and press enter.
+    const q = store.question
+    if (q) {
+      const typing = (input.current?.plainText ?? store.input).length > 0
+      const n = q.options.length
+      if (key.name === "escape") {
+        stop()
+        store.setInput("")
+        return store.answerQuestion("")
+      }
+      if (!typing && n) {
+        if (key.name === "up" || key.name === "down") {
+          stop()
+          q.selected = (q.selected + (key.name === "up" ? n - 1 : 1)) % n
+          return store.emit(true)
+        }
+        if (key.name === "space" && q.multiSelect) {
+          stop()
+          q.checked.has(q.selected) ? q.checked.delete(q.selected) : q.checked.add(q.selected)
+          return store.emit(true)
+        }
+        const digit = Number(key.sequence)
+        if (key.sequence && /^[1-9]$/.test(key.sequence) && digit <= n) {
+          stop()
+          q.selected = digit - 1
+          if (q.multiSelect) {
+            q.checked.has(q.selected) ? q.checked.delete(q.selected) : q.checked.add(q.selected)
+            return store.emit(true)
+          }
+          return store.answerQuestion(store.questionChoice())
+        }
+      }
+      if ((key.name === "return" || key.name === "kpenter") && !key.shift && !key.meta) {
+        stop()
+        return store.submit(input.current?.plainText ?? store.input)
+      }
       return
     }
     // Picker.
@@ -191,6 +230,7 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
       </scrollbox>
       <Activity store={store} />
       {palette.length ? <Palette store={store} items={palette} /> : null}
+      {store.question ? <QuestionBox store={store} /> : null}
       {store.permission ? (
         <PermissionBox store={store} />
       ) : (
@@ -209,7 +249,9 @@ export function App({ store, onExit }: { store: Store; onExit: () => void }) {
             placeholder={
               masked
                 ? "paste the key and press enter · esc to cancel"
-                : busy
+                : store.question
+                  ? "or type your own answer and press enter"
+                  : busy
                   ? "type to queue a message · esc to interrupt"
                   : s.mode === "plan"
                     ? "describe what to plan… (tab for build mode)"
@@ -369,6 +411,46 @@ function PermissionBox({ store }: { store: Store }) {
   )
 }
 
+function QuestionBox({ store }: { store: Store }) {
+  const q = store.question!
+  const typing = store.input.length > 0
+  return (
+    <box flexShrink={0} border borderStyle="rounded" borderColor={t.cyan} title=" nur has a question " flexDirection="column" paddingLeft={1} paddingRight={1} marginLeft={1} marginRight={1} backgroundColor={t.panel}>
+      <text fg={t.text}>
+        <b>{q.question}</b>
+      </text>
+      {q.options.length ? (
+        <box flexDirection="column" marginTop={1}>
+          {q.options.map((o, i) => {
+            const on = i === q.selected && !typing
+            const mark = q.multiSelect ? (q.checked.has(i) ? "☒" : "☐") : on ? "›" : " "
+            return (
+              <box key={i} flexDirection="row" backgroundColor={on ? t.panelHi : t.panel}>
+                <text fg={on ? t.cyan : t.faint} wrapMode="none">
+                  {` ${mark} ${i + 1}. `}
+                </text>
+                <text fg={on ? t.text : t.dim} wrapMode="none">
+                  {on ? <b>{o.label}</b> : o.label}
+                </text>
+                {o.description ? (
+                  <text fg={t.faint} flexGrow={1} wrapMode="none">
+                    {"  "}
+                    {o.description}
+                  </text>
+                ) : null}
+              </box>
+            )
+          })}
+        </box>
+      ) : null}
+      <text fg={t.faint} marginTop={1}>
+        {q.options.length ? (q.multiSelect ? "↑↓ move · space or 1-9 tick · enter submit · " : "↑↓ choose · 1-9 pick · enter submit · ") : ""}
+        type below to answer in your own words · esc dismiss
+      </text>
+    </box>
+  )
+}
+
 function Palette({ store, items }: { store: Store; items: { name: string; args: string; desc: string }[] }) {
   const n = Math.min(items.length, 10)
   const sel = store.paletteIdx
@@ -460,6 +542,7 @@ function StatusBar({ store, width }: { store: Store; width: number }) {
         <span fg={s.mode === "plan" ? t.plan : t.build}>
           <b>{s.mode === "plan" ? "◇ plan" : "◆ build"}</b>
         </span>
+        {runningShells().length ? <span fg={t.yellow}>{`  ⧗ ${runningShells().length} bg`}</span> : null}
         {wide ? <span fg={t.faint}>{"  tab mode · shift+tab perms"}</span> : null}
       </text>
       <text wrapMode="none">

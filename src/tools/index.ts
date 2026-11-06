@@ -6,6 +6,8 @@ import { homedir } from "node:os"
 import type { Mode } from "../config"
 import type { Memory } from "../memory"
 import type { Skills } from "../skills"
+import { applyPatch } from "./patch"
+import { getShell, killShell, readShell, runningShells, shellStatus, startShell } from "./shells"
 
 export type Risk = "internal" | "read" | "read-outside" | "write" | "safe-exec" | "exec" | "external"
 
@@ -37,6 +39,8 @@ export interface ToolDef {
   parameters: Record<string, any>
   /** Only offered in build mode. */
   buildOnly?: boolean
+  /** Only offered to OpenAI models (ChatGPT plan / API), which are trained on the format. */
+  openaiOnly?: boolean
   run: (args: any, ctx: ToolCtx) => Promise<Outcome> | Outcome
 }
 
@@ -124,15 +128,19 @@ export function risk(name: string, args: any, cwd: string, extraSafe: string[]):
     case "memory":
     case "load_skill":
     case "goal_complete":
+    case "bash_output":
+    case "bash_kill":
+    case "ask_user":
+    case "task":
       return "internal"
     case "read_file":
     case "ls":
     case "find":
-    case "glob":
     case "grep":
       return !args?.path || inside(cwd, resolvePath(cwd, args.path)) ? "read" : "read-outside"
     case "write_file":
     case "edit_file":
+    case "apply_patch":
       return "write"
     case "bash":
       return isSafeCommand(String(args?.command ?? ""), extraSafe) ? "safe-exec" : "exec"
@@ -153,8 +161,6 @@ export function title(name: string, args: any, cwd: string): string {
       return `List ${path()}`
     case "find":
       return `Find ${[args?.name, args?.path_pattern, args?.type && args.type !== "any" ? args.type : "", args?.modified_within ? `modified < ${args.modified_within}` : ""].filter(Boolean).join(" ") || "*"}${args?.path ? ` in ${path()}` : ""}`
-    case "glob":
-      return `Glob ${args?.pattern ?? ""}`
     case "grep":
       return `Grep "${args?.pattern ?? ""}"${args?.path ? ` in ${path()}` : ""}`
     case "write_file":
@@ -162,7 +168,19 @@ export function title(name: string, args: any, cwd: string): string {
     case "edit_file":
       return `Edit ${path()}`
     case "bash":
-      return `Bash ${oneLine(String(args?.command ?? ""), 120)}`
+      return `${args?.background ? "Background" : "Bash"} ${oneLine(String(args?.command ?? ""), 120)}`
+    case "bash_output":
+      return `Output ${args?.id ?? ""}${args?.filter ? ` /${args.filter}/` : ""}`
+    case "bash_kill":
+      return `Stop ${args?.id ?? ""}`
+    case "apply_patch": {
+      const files = [...String(args?.patch ?? "").matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => m[1]!.trim())
+      return `Patch ${files.length > 2 ? `${files.slice(0, 2).join(", ")} +${files.length - 2} more` : files.join(", ")}`
+    }
+    case "task":
+      return `Task ${oneLine(String(args?.description ?? ""), 80)}`
+    case "ask_user":
+      return `Ask ${oneLine(String(args?.question ?? ""), 100)}`
     case "web_fetch":
       return `Fetch ${args?.url ?? ""}`
     case "todo_write":
@@ -183,8 +201,25 @@ export function title(name: string, args: any, cwd: string): string {
 }
 
 /** What a permission prompt previews before a call runs. */
+/** The edits of an edit_file call, single or batched. */
+export function editList(a: any): { old_string: string; new_string: string; replace_all?: boolean }[] {
+  if (Array.isArray(a?.edits) && a.edits.length) return a.edits.map((e: any) => ({ old_string: String(e?.old_string ?? ""), new_string: String(e?.new_string ?? ""), replace_all: !!e?.replace_all }))
+  if (a?.old_string !== undefined) return [{ old_string: String(a.old_string), new_string: String(a.new_string ?? ""), replace_all: !!a.replace_all }]
+  return []
+}
+
 export function permissionPreview(name: string, args: any): string[] {
-  if (name === "edit_file") return diffLines(String(args?.old_string ?? ""), String(args?.new_string ?? ""), 10)
+  if (name === "edit_file") {
+    const out = editList(args).flatMap((e) => diffLines(e.old_string, e.new_string, 8))
+    return out.length > 14 ? [...out.slice(0, 14), `… +${out.length - 14} lines`] : out
+  }
+  if (name === "apply_patch") {
+    const out = String(args?.patch ?? "")
+      .split("\n")
+      .filter((l) => /^(\*\*\* (Add|Update|Delete) File|\*\*\* Move to|[+-])/.test(l))
+      .map((l) => l.replace(/^\*\*\* /, "▸ "))
+    return out.length > 14 ? [...out.slice(0, 14), `… +${out.length - 14} lines`] : out
+  }
   if (name === "write_file") {
     const lines = String(args?.content ?? "").split("\n")
     return [...lines.slice(0, 8).map((l) => `+${l}`), ...(lines.length > 8 ? [`… +${lines.length - 8} lines`] : [])]
@@ -521,24 +556,6 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: "glob",
-    description: "Find files by glob pattern (e.g. 'src/**/*.ts'), respecting .gitignore. Returns up to 500 paths.",
-    parameters: obj({ pattern: str(), path: str("Directory to search (default: workspace root)") }, ["pattern"]),
-    run(a, ctx) {
-      const root = a.path ? resolvePath(ctx.cwd, a.path) : ctx.cwd
-      const re = globToRegex(String(a.pattern))
-      const nameOnly = !String(a.pattern).includes("/")
-      const out: string[] = []
-      walk(root, ctx.signal, (p) => {
-        const r = relative(root, p)
-        if (re.test(r) || (nameOnly && re.test(p.split("/").pop()!))) out.push(rel(ctx.cwd, p))
-        return out.length < 500
-      })
-      out.sort()
-      return out.length ? ok(out.join("\n"), `${out.length} files`) : ok("No files matched.", "no matches")
-    },
-  },
-  {
     name: "grep",
     description:
       "Search file contents like `grep -rn` (uses ripgrep when installed), respecting .gitignore. Regex syntax (or fixed_strings=true for literal text). output: 'content' (path:line: text, default), 'files' (matching paths) or 'count' (matches per file). context adds lines around each match.",
@@ -595,8 +612,22 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "edit_file",
-    description: "Replace an exact string in a file. old_string must match exactly once unless replace_all is true. Read the file first.",
-    parameters: obj({ path: str(), old_string: str(), new_string: str(), replace_all: { type: "boolean" } }, ["path", "old_string", "new_string"]),
+    description:
+      "Replace exact strings in a file. Either one edit (old_string/new_string) or several in `edits`, applied in order, all-or-nothing. old_string must match exactly once unless replace_all is true. Read the file first.",
+    parameters: obj(
+      {
+        path: str(),
+        old_string: str(),
+        new_string: str(),
+        replace_all: { type: "boolean" },
+        edits: {
+          type: "array",
+          description: "Several edits to the same file, applied in order",
+          items: obj({ old_string: str(), new_string: str(), replace_all: { type: "boolean" } }, ["old_string", "new_string"]),
+        },
+      },
+      ["path"],
+    ),
     buildOnly: true,
     run(a, ctx) {
       const p = resolvePath(ctx.cwd, a.path)
@@ -606,26 +637,78 @@ export const TOOLS: ToolDef[] = [
       } catch (e: any) {
         return fail(`${rel(ctx.cwd, p)}: ${e.code ?? e.message}`)
       }
-      const oldS = String(a.old_string)
-      const newS = String(a.new_string)
-      if (!oldS) return fail("old_string is empty; use write_file to create files")
-      const count = text.split(oldS).length - 1
-      if (count === 0) return fail(`old_string not found in ${rel(ctx.cwd, p)}`)
-      if (count > 1 && !a.replace_all) return fail(`old_string matches ${count} times; add context or set replace_all`)
-      writeFileSync(p, a.replace_all ? text.split(oldS).join(newS) : text.replace(oldS, () => newS))
-      const o = ok(`Edited ${rel(ctx.cwd, p)} (${count} replacement${count === 1 ? "" : "s"}).`, `+${newS.split("\n").length} -${oldS.split("\n").length}`)
-      o.detail = diffLines(oldS, newS, 16)
+      const edits = editList(a)
+      if (!edits.length) return fail("provide old_string/new_string or a non-empty edits list")
+      let updated = text
+      let replacements = 0
+      const detail: string[] = []
+      let added = 0
+      let removed = 0
+      for (const [i, e] of edits.entries()) {
+        const which = edits.length > 1 ? `edit ${i + 1}: ` : ""
+        if (!e.old_string) return fail(`${which}old_string is empty; use write_file to create files`)
+        const count = updated.split(e.old_string).length - 1
+        if (count === 0) return fail(`${which}old_string not found in ${rel(ctx.cwd, p)}${i ? " (after the earlier edits)" : ""} — nothing was changed`)
+        if (count > 1 && !e.replace_all) return fail(`${which}old_string matches ${count} times; add context or set replace_all — nothing was changed`)
+        updated = e.replace_all ? updated.split(e.old_string).join(e.new_string) : updated.replace(e.old_string, () => e.new_string)
+        replacements += e.replace_all ? count : 1
+        detail.push(...diffLines(e.old_string, e.new_string, 8))
+        added += e.new_string.split("\n").length
+        removed += e.old_string.split("\n").length
+      }
+      writeFileSync(p, updated)
+      const o = ok(`Edited ${rel(ctx.cwd, p)} (${replacements} replacement${replacements === 1 ? "" : "s"}).`, `+${added} -${removed}${edits.length > 1 ? ` · ${edits.length} edits` : ""}`)
+      o.detail = detail.length > 20 ? [...detail.slice(0, 20), `… +${detail.length - 20} lines`] : detail
       return o
     },
   },
   {
+    name: "apply_patch",
+    description:
+      "Apply a patch that can add, update, move and delete several files at once, all-or-nothing. Format:\n*** Begin Patch\n*** Update File: path\n@@ optional anchor line\n context\n-old line\n+new line\n*** Add File: path\n+content\n*** Delete File: path\n*** End Patch",
+    parameters: obj({ patch: str("The full patch text, from *** Begin Patch to *** End Patch") }, ["patch"]),
+    buildOnly: true,
+    openaiOnly: true,
+    run(a, ctx) {
+      try {
+        const r = applyPatch(String(a.patch ?? ""), (q) => resolvePath(ctx.cwd, q), (abs) => rel(ctx.cwd, abs))
+        const lines = r.files.map((f) => `${f.status} ${f.path} (+${f.added} -${f.removed})`)
+        const o = ok(`Applied patch:\n${lines.join("\n")}`, `${r.files.length} file${r.files.length === 1 ? "" : "s"} · +${r.files.reduce((n, f) => n + f.added, 0)} -${r.files.reduce((n, f) => n + f.removed, 0)}`)
+        o.detail = [...lines.map((l) => `  ${l}`), ...r.diff.slice(0, 16), ...(r.diff.length > 16 ? [`… +${r.diff.length - 16} lines`] : [])]
+        return o
+      } catch (e: any) {
+        return fail(`patch not applied (no files changed): ${e.message}`)
+      }
+    },
+  },
+  {
     name: "bash",
-    description: "Run a shell command in the workspace with bash. Returns combined stdout/stderr and the exit code. Avoid interactive commands.",
-    parameters: obj({ command: str(), timeout_ms: { type: "integer", description: "Default 120000, max 600000" } }, ["command"]),
+    description:
+      "Run a shell command in the workspace with bash. Returns combined stdout/stderr and the exit code. Avoid interactive commands. For servers, watchers or anything long-running set background=true: it returns a shell id right away; read its output with bash_output and stop it with bash_kill.",
+    parameters: obj(
+      {
+        command: str(),
+        timeout_ms: { type: "integer", description: "Default 120000, max 600000 (ignored with background)" },
+        background: { type: "boolean", description: "Run in the background and return immediately" },
+      },
+      ["command"],
+    ),
     async run(a, ctx) {
       const command = String(a.command ?? "")
       if (!command.trim()) return fail("empty command")
       if (ctx.mode === "plan" && !isSafeCommand(command)) return fail("plan mode only allows read-only commands")
+      if (a.background) {
+        const sh = startShell(command, ctx.cwd)
+        await Bun.sleep(300)
+        const early = readShell(sh)
+        const status = shellStatus(sh)
+        return {
+          output: `Started background shell ${sh.id} (${status}). Read output with bash_output {"id":"${sh.id}"}; stop it with bash_kill.${early ? `\n\nFirst output:\n${truncate(early)}` : ""}`,
+          summary: `background ${sh.id} · ${status}`,
+          detail: preview(early, 4),
+          ok: sh.exitCode === null || sh.exitCode === 0,
+        }
+      }
       const timeout = Math.min(600_000, Math.max(1000, Number(a.timeout_ms) || 120_000))
       const proc = Bun.spawn(["bash", "-c", command], {
         cwd: ctx.cwd,
@@ -644,6 +727,36 @@ export const TOOLS: ToolDef[] = [
       let text = stripAnsi(out + (err.trim() ? (out && !out.endsWith("\n") ? "\n" : "") + err : "")).trimEnd()
       const lines = text ? text.split("\n").length : 0
       return { output: `${text ? truncate(text) : "(no output)"}\nexit code: ${code}`, summary: `exit ${code} · ${lines} lines`, detail: preview(text, 6), ok: code === 0 }
+    },
+  },
+  {
+    name: "bash_output",
+    description: "Read new output from a background shell (since the last read) and whether it is still running. Use filter (regex) to keep only matching lines.",
+    parameters: obj({ id: str("Shell id from bash background=true"), filter: str("Optional regex; only matching lines are returned") }, ["id"]),
+    run(a) {
+      const sh = getShell(String(a.id))
+      if (!sh) return fail(`no background shell ${a.id} (running: ${runningShells().map((s) => s.id).join(", ") || "none"})`)
+      let re: RegExp | undefined
+      try {
+        re = a.filter ? new RegExp(String(a.filter)) : undefined
+      } catch (e: any) {
+        return fail(`bad filter: ${e.message}`)
+      }
+      const text = readShell(sh, re).trimEnd()
+      const status = shellStatus(sh)
+      return { output: `${sh.id} · ${status}\n${text ? truncate(text) : "(no new output)"}`, summary: `${sh.id} · ${status}`, detail: preview(text, 4), ok: true }
+    },
+  },
+  {
+    name: "bash_kill",
+    description: "Stop a background shell.",
+    parameters: obj({ id: str() }, ["id"]),
+    run(a) {
+      const sh = getShell(String(a.id))
+      if (!sh) return fail(`no background shell ${a.id}`)
+      if (sh.exitCode !== null) return ok(`${sh.id} already ${shellStatus(sh)}.`, `${sh.id} already exited`)
+      killShell(sh)
+      return ok(`Stopped ${sh.id}.`, `stopped ${sh.id}`)
     },
   },
   {
