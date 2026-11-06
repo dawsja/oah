@@ -1,7 +1,7 @@
 {
   "name": "oah-desktop",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "oah desktop app (Tauri 2 + React): the oah engine with a desktop UI",
   "type": "module",
   "scripts": {
