@@ -4,9 +4,10 @@ import { AgentGlyph, Mark } from "@/components/icons"
 import { Tip } from "@/components/Tip"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { emptyTranscript, formatTokens, type ChatMeta, type PlanItem, type Transcript as T } from "@/lib/chat"
-import { pickFolder } from "@/lib/ipc"
-import { AGENT_LABEL, locationLabel, type AgentKind, type Project } from "@/lib/types"
+import { agentChoices, agentKey, agentName, providerFor, type AgentRef } from "@/lib/agents"
+import { emptyTranscript, formatTokens, type ChatMeta, type ModelOption, type PlanItem, type Transcript as T } from "@/lib/chat"
+import { ipc, pickFolder } from "@/lib/ipc"
+import { locationLabel, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
 import { useChats } from "@/store/chats"
@@ -39,20 +40,39 @@ export function ChatView() {
   return <NewChat project={project} />
 }
 
-function useAgentDefaults(project: Project, agent: AgentKind) {
+function useAgentDefaults(project: Project, agent: AgentRef) {
   const settings = useApp((s) => s.settings)!
-  const provider = settings.providers[agent]
-  return { model: project.defaultModel || provider.defaultModel, permission: provider.permissionMode }
+  const provider = providerFor(settings, agent)
+  return { model: project.defaultModel || provider?.defaultModel || "", permission: provider?.permissionMode ?? "ask" }
+}
+
+/** Each agent's models, asked once per project (and kept for the session). */
+const modelCache = new Map<string, Promise<ModelOption[]>>()
+function useModels(agent: AgentRef, projectId: string, live: ModelOption[] = []) {
+  const [models, setModels] = useState<ModelOption[] | undefined>(live.length ? live : undefined)
+  const key = `${agentKey(agent)}|${projectId}`
+  useEffect(() => setModels(live.length ? live : undefined), [key, live.length])
+  const load = () => {
+    if (live.length || agent.kind === "acp") return setModels(live)
+    if (!modelCache.has(key)) modelCache.set(key, ipc.providerModels(agent.kind, projectId).catch(() => []))
+    modelCache.get(key)!.then(setModels)
+  }
+  return { models, load }
 }
 
 function NewChat({ project }: { project: Project }) {
   const settings = useApp((s) => s.settings)!
-  const [agent, setAgent] = useState<AgentKind>(project.defaultAgent ?? settings.providers.defaultAgent)
+  const choices = agentChoices(settings)
+  const preferred = project.defaultAgent ?? settings.providers.defaultAgent
+  const [agent, setAgent] = useState<AgentRef>(choices.find((c) => c.kind === preferred) ?? choices[0] ?? { kind: "claude", acpId: null })
   const d = useAgentDefaults(project, agent)
   const [permission, setPermission] = useState(d.permission)
+  const [model, setModel] = useState<string | null>(null)
+  const { models, load } = useModels(agent, project.id)
   const draftCwd = useApp((s) => s.draftCwd)
   const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
-  const send = (text: string, images: { mime: string; data: string }[] = []) => useChats.getState().send(null, text, { agent, permission, cwd: draftCwd ?? undefined, images })
+  const send = (text: string, images: { mime: string; data: string }[] = []) =>
+    useChats.getState().send(null, text, { agent: agent.kind, acpId: agent.acpId, model: model ?? undefined, permission, cwd: draftCwd ?? undefined, images })
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
@@ -63,7 +83,7 @@ function NewChat({ project }: { project: Project }) {
             <div>
               <h1 className="text-[22px] leading-tight font-semibold tracking-tight">What should we work on?</h1>
               <p className="mt-1 text-[12.5px] text-muted-foreground">
-                {AGENT_LABEL[agent]} in <span className="font-medium text-foreground">{project.name}</span>
+                {agentName(settings, agent)} in <span className="font-medium text-foreground">{project.name}</span>
                 {worktree ? (
                   <span className="rounded-sm ml-1 border border-gold/40 px-1 font-mono text-[11px] text-gold">⎇ {worktree.branch}</span>
                 ) : null}
@@ -71,7 +91,22 @@ function NewChat({ project }: { project: Project }) {
               </p>
             </div>
           </div>
-          <Composer agent={agent} onAgent={setAgent} model={d.model} permission={permission} onPermission={setPermission} onSend={send} autoFocus />
+          <Composer
+            agent={agent}
+            agents={choices}
+            onAgent={(a) => {
+              setAgent(a)
+              setModel(null)
+            }}
+            model={model ?? d.model}
+            models={models}
+            onModel={setModel}
+            onModelsOpen={load}
+            permission={permission}
+            onPermission={setPermission}
+            onSend={send}
+            autoFocus
+          />
           <div className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
             {["Explain how this project is laid out", "Find and fix a failing test", "Review my uncommitted changes"].map((t) => (
               <button key={t} className="rounded-lg border bg-card px-3 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => send(t)}>
@@ -86,7 +121,9 @@ function NewChat({ project }: { project: Project }) {
 }
 
 function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatMeta; transcript: T }) {
-  const d = useAgentDefaults(project, meta.agent)
+  const agent: AgentRef = { kind: meta.agent, acpId: meta.acpAgent }
+  const d = useAgentDefaults(project, agent)
+  const { models, load } = useModels(agent, project.id, transcript.models)
   const permission = useChats((s) => s.permission[meta.id]) ?? d.permission
   const chats = useChats.getState()
 
@@ -103,12 +140,15 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
           <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
         ) : null}
         <Composer
-          agent={meta.agent}
-          model={transcript.model || meta.model || d.model}
+          agent={agent}
+          model={meta.model || transcript.model || d.model}
+          models={models}
+          onModel={(id) => chats.setModel(meta.id, id)}
+          onModelsOpen={load}
           permission={permission}
           onPermission={(m) => chats.setPermission(meta.id, m)}
           running={transcript.running}
-          onSend={(text, images) => chats.send(meta.id, text, { agent: meta.agent, permission, images })}
+          onSend={(text, images) => chats.send(meta.id, text, { agent: meta.agent, acpId: meta.acpAgent, permission, images })}
           onStop={() => chats.interrupt(meta.id)}
           placeholder={transcript.running ? "Queue a follow-up…" : "Reply, @ to add files"}
           lockAgent
@@ -157,7 +197,7 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
             Rename
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => navigator.clipboard?.writeText(meta.agentSessionId ?? "")} disabled={!meta.agentSessionId}>
-            Copy {AGENT_LABEL[meta.agent]} session id
+            Copy the agent's session id
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={() => useChats.getState().remove(meta.id)}>

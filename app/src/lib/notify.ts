@@ -31,10 +31,19 @@ export function notification(event: ChatEvent, meta: ChatMeta | undefined): { ti
   }
 }
 
+/** One notification per chat per few seconds (a burst of approvals is one ping). */
+const last = new Map<string, number>()
+const COOLDOWN = 5_000
+
 export async function notify(event: ChatEvent, meta: ChatMeta | undefined) {
   if (document.hasFocus()) return
   const n = notification(event, meta)
-  if (!n || !(await permitted())) return
+  if (!n) return
+  const key = meta?.id ?? ""
+  const now = Date.now()
+  if (now - (last.get(key) ?? 0) < COOLDOWN) return
+  last.set(key, now)
+  if (!(await permitted())) return
   const { sendNotification } = await import("@tauri-apps/plugin-notification")
   sendNotification(n)
 }

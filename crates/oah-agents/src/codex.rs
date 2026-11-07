@@ -8,9 +8,8 @@
 //! `item/fileChange/requestApproval`), which we answer with `{decision}`.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{Child, ChildStdin};
-use std::sync::mpsc::{channel, Sender};
+use std::io::{BufRead, BufReader, Read};
+use std::process::Child;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -21,8 +20,7 @@ use serde_json::{json, Value};
 
 use crate::driver::{Driver, DriverResult, Prompt, Sink, StartOptions};
 use crate::event::*;
-
-type Replies = Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>;
+use crate::jsonrpc::Rpc;
 
 pub struct CodexDriver {
     rpc: Rpc,
@@ -45,51 +43,6 @@ struct State {
     changes: HashMap<String, Vec<FileDiff>>,
     usage: Option<Usage>,
     alive: bool,
-}
-
-/// The JSON-RPC side: numbered requests whose replies come back through the reader thread.
-#[derive(Clone)]
-struct Rpc {
-    stdin: Arc<Mutex<Option<ChildStdin>>>,
-    next: Arc<Mutex<u64>>,
-    replies: Replies,
-}
-
-impl Rpc {
-    fn write(&self, v: &Value) -> DriverResult<()> {
-        let mut g = self.stdin.lock().unwrap();
-        let stdin = g.as_mut().ok_or("Codex isn't running")?;
-        let mut line = serde_json::to_vec(v).map_err(|e| e.to_string())?;
-        line.push(b'\n');
-        stdin.write_all(&line).and_then(|_| stdin.flush()).map_err(|_| "Codex isn't running".to_string())
-    }
-
-    /// Sends a request and waits for its reply.
-    fn call(&self, method: &str, params: Value, timeout: Duration) -> DriverResult<Value> {
-        let id = {
-            let mut n = self.next.lock().unwrap();
-            *n += 1;
-            *n
-        };
-        let (tx, rx) = channel();
-        self.replies.lock().unwrap().insert(id, tx);
-        self.write(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
-        match rx.recv_timeout(timeout) {
-            Ok(r) => r,
-            Err(_) => {
-                self.replies.lock().unwrap().remove(&id);
-                Err(format!("Codex didn't answer {method}"))
-            }
-        }
-    }
-
-    fn notify(&self, method: &str) -> DriverResult<()> {
-        self.write(&json!({"jsonrpc": "2.0", "method": method}))
-    }
-
-    fn reply(&self, id: &Value, result: Value) -> DriverResult<()> {
-        self.write(&json!({"jsonrpc": "2.0", "id": id, "result": result}))
-    }
 }
 
 /// Codex's approval policy and sandbox for each permission mode.
@@ -115,11 +68,7 @@ impl CodexDriver {
         let mut child = cmd.spawn().map_err(|e| format!("couldn't start Codex: {e}"))?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let stderr = child.stderr.take().ok_or("no stderr")?;
-        let rpc = Rpc {
-            stdin: Arc::new(Mutex::new(child.stdin.take())),
-            next: Arc::new(Mutex::new(0)),
-            replies: Arc::new(Mutex::new(HashMap::new())),
-        };
+        let rpc = Rpc::new(child.stdin.take(), "Codex");
         let child = Arc::new(Mutex::new(Some(child)));
         let state = Arc::new(Mutex::new(State { alive: true, ..Default::default() }));
 
@@ -143,9 +92,7 @@ impl CodexDriver {
                     }
                 }
                 state.lock().unwrap().alive = false;
-                for (_, tx) in rpc.replies.lock().unwrap().drain() {
-                    let _ = tx.send(Err("Codex exited".into()));
-                }
+                rpc.fail_all();
                 let code = child.lock().unwrap().as_mut().and_then(|c| c.wait().ok()).and_then(|s| s.code());
                 thread::sleep(Duration::from_millis(50));
                 if let Some(turn_id) = state.lock().unwrap().turn_id.take() {
@@ -167,7 +114,7 @@ impl CodexDriver {
             json!({"clientInfo": {"name": "oah", "title": "oah", "version": env!("CARGO_PKG_VERSION")}, "capabilities": null}),
             Duration::from_secs(30),
         )?;
-        d.rpc.notify("initialized")?;
+        d.rpc.notify("initialized", None)?;
         let (approval, sandbox) = policy(opts.permission);
         let mut params = json!({"cwd": opts.cwd, "approvalPolicy": approval, "sandbox": sandbox});
         if let Some(m) = &opts.model {
@@ -190,7 +137,7 @@ impl CodexDriver {
         // The model picker: Codex's own list.
         let (rpc, sink) = (d.rpc.clone(), d.sink.clone());
         thread::spawn(move || {
-            if let Ok(list) = rpc.call("model/list", json!({}), Duration::from_secs(30)) {
+            if let Ok(list) = rpc.call("model/list", json!({"limit": 100, "includeHidden": false}), Duration::from_secs(30)) {
                 sink(ChatEvent::Models { models: parse_models(&list), current });
             }
         });
@@ -223,10 +170,18 @@ impl Driver for CodexDriver {
         if let Some(m) = &self.model {
             params["model"] = json!(m);
         }
-        // A turn already running takes the message as steering input; the reply is the turn.
+        // A turn already running takes the message as steering input (turn/steer); if that's
+        // refused, it starts a new turn.
+        let running = self.state.lock().unwrap().turn_id.clone();
         let rpc = self.rpc.clone();
         let sink = self.sink.clone();
         thread::spawn(move || {
+            if let Some(turn_id) = running {
+                let steer = json!({"threadId": params["threadId"], "expectedTurnId": turn_id, "input": params["input"]});
+                if rpc.call("turn/steer", steer, Duration::from_secs(60)).is_ok() {
+                    return;
+                }
+            }
             if let Err(e) = rpc.call("turn/start", params, Duration::from_secs(120)) {
                 sink(ChatEvent::Error { message: e });
             }
@@ -306,16 +261,7 @@ impl Translator {
 
     fn handle(&mut self, v: &Value) {
         // A reply to one of our requests.
-        if v.get("method").is_none() {
-            if let Some(id) = v["id"].as_u64() {
-                if let Some(tx) = self.rpc.replies.lock().unwrap().remove(&id) {
-                    let r = match v.get("error") {
-                        Some(e) => Err(e["message"].as_str().unwrap_or("Codex error").to_string()),
-                        None => Ok(v["result"].clone()),
-                    };
-                    let _ = tx.send(r);
-                }
-            }
+        if self.rpc.take_reply(v) || v.get("method").is_none() {
             return;
         }
         let method = v["method"].as_str().unwrap_or("");
@@ -634,7 +580,7 @@ mod tests {
         let o = out.clone();
         let sink: Sink = Arc::new(move |e| o.lock().unwrap().push(e));
         let state = Arc::new(Mutex::new(State { alive: true, ..Default::default() }));
-        let rpc = Rpc { stdin: Arc::new(Mutex::new(None)), next: Arc::new(Mutex::new(0)), replies: Arc::new(Mutex::new(HashMap::new())) };
+        let rpc = Rpc::new(None, "Codex");
         let mut tr = Translator { sink, state: state.clone(), rpc };
         for l in lines {
             tr.handle(l);

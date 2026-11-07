@@ -1,8 +1,11 @@
 // Mirrors crates/oah-core/src/settings.rs (serde camelCase).
 
-export type AgentKind = "claude" | "codex"
-export const AGENTS: AgentKind[] = ["claude", "codex"]
-export const AGENT_LABEL: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex" }
+export type AgentKind = "claude" | "codex" | "opencode" | "acp"
+/** The built-in agents (an added ACP agent is `acp` plus its id). */
+export const AGENTS: Exclude<AgentKind, "acp">[] = ["claude", "codex", "opencode"]
+export const AGENT_LABEL: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode", acp: "ACP agent" }
+/** Agents whose plan limits oah can read. */
+export const LIMIT_AGENTS: AgentKind[] = ["claude", "codex"]
 
 export type PermissionMode = "ask" | "acceptEdits" | "plan" | "fullAccess"
 export const PERMISSION_LABEL: Record<PermissionMode, string> = {
@@ -23,7 +26,10 @@ export type Provider = {
   env: EnvVar[]
 }
 
-export type Providers = { claude: Provider; codex: Provider; defaultAgent: AgentKind }
+/** An agent the user added that speaks ACP: `binary` is its command, `args` follow it. */
+export type AcpAgent = Provider & { id: string; name: string; args: string[] }
+
+export type Providers = { claude: Provider; codex: Provider; opencode: Provider; acp: AcpAgent[]; defaultAgent: AgentKind }
 
 export type Voice = { enabled: boolean; microphone: string; holdKey: string; silenceStopSecs: number }
 

@@ -25,16 +25,23 @@ pub struct Settings {
 pub enum AgentKind {
     Claude,
     Codex,
+    /// OpenCode, over ACP (`opencode acp`).
+    Opencode,
+    /// An agent the user added, over the Agent Client Protocol (see `Providers::acp`).
+    Acp,
 }
 
 impl AgentKind {
-    pub const ALL: [AgentKind; 2] = [AgentKind::Claude, AgentKind::Codex];
+    /// The built-in agents (each has its own Provider settings).
+    pub const ALL: [AgentKind; 3] = [AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode];
 
     /// The command when no path is set.
     pub fn default_binary(self) -> &'static str {
         match self {
             AgentKind::Claude => "claude",
             AgentKind::Codex => "codex",
+            AgentKind::Opencode => "opencode",
+            AgentKind::Acp => "",
         }
     }
 }
@@ -44,28 +51,69 @@ impl AgentKind {
 pub struct Providers {
     pub claude: Provider,
     pub codex: Provider,
+    pub opencode: Provider,
+    /// Other agents that speak ACP, added by the user.
+    pub acp: Vec<AcpAgent>,
     /// The agent a new chat starts with when its project names none.
     pub default_agent: AgentKind,
 }
 
 impl Default for Providers {
     fn default() -> Self {
-        Providers { claude: Provider::default(), codex: Provider::default(), default_agent: AgentKind::Claude }
+        Providers {
+            claude: Provider::default(),
+            codex: Provider::default(),
+            opencode: Provider::default(),
+            acp: Vec::new(),
+            default_agent: AgentKind::Claude,
+        }
     }
 }
 
+/// An ACP agent the user added: a command that speaks the Agent Client Protocol on stdio.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AcpAgent {
+    pub id: String,
+    pub name: String,
+    /// Arguments after the command (`provider.binary`), e.g. `["--experimental-acp"]`.
+    pub args: Vec<String>,
+    /// The command, model, permissions and environment, as for the built-in agents.
+    #[serde(flatten)]
+    pub provider: Provider,
+}
+
+static NO_PROVIDER: std::sync::LazyLock<Provider> = std::sync::LazyLock::new(Provider::default);
+
 impl Providers {
+    /// A built-in agent's settings (`Acp` agents are looked up with [`Providers::acp_agent`]).
     pub fn get(&self, kind: AgentKind) -> &Provider {
         match kind {
             AgentKind::Claude => &self.claude,
             AgentKind::Codex => &self.codex,
+            AgentKind::Opencode => &self.opencode,
+            AgentKind::Acp => &NO_PROVIDER,
         }
     }
 
-    pub fn get_mut(&mut self, kind: AgentKind) -> &mut Provider {
+    pub fn acp_agent(&self, id: &str) -> Option<&AcpAgent> {
+        self.acp.iter().find(|a| a.id == id)
+    }
+
+    /// The settings a chat's agent runs with.
+    pub fn for_chat(&self, kind: AgentKind, acp_id: Option<&str>) -> Option<&Provider> {
         match kind {
-            AgentKind::Claude => &mut self.claude,
-            AgentKind::Codex => &mut self.codex,
+            AgentKind::Acp => acp_id.and_then(|id| self.acp_agent(id)).map(|a| &a.provider),
+            k => Some(self.get(k)),
+        }
+    }
+
+    pub fn get_mut(&mut self, kind: AgentKind) -> Option<&mut Provider> {
+        match kind {
+            AgentKind::Claude => Some(&mut self.claude),
+            AgentKind::Codex => Some(&mut self.codex),
+            AgentKind::Opencode => Some(&mut self.opencode),
+            AgentKind::Acp => None,
         }
     }
 }

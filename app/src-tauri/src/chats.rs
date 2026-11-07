@@ -31,8 +31,20 @@ impl Chats {
         Chats { store, live: Mutex::new(HashMap::new()), metas: Arc::new(Mutex::new(HashMap::new())) }
     }
 
-    pub fn create(&self, project_id: &str, agent: AgentKind, model: &str, cwd: &str) -> Result<ChatMeta, String> {
-        self.store.create(project_id, agent, model, cwd).map_err(|e| e.to_string())
+    pub fn create(
+        &self,
+        project_id: &str,
+        agent: AgentKind,
+        acp_agent: Option<String>,
+        model: &str,
+        cwd: &str,
+    ) -> Result<ChatMeta, String> {
+        let mut meta = self.store.create(project_id, agent, model, cwd).map_err(|e| e.to_string())?;
+        if agent == AgentKind::Acp {
+            meta.acp_agent = acp_agent;
+            self.store.save(&meta).map_err(|e| e.to_string())?;
+        }
+        Ok(meta)
     }
 
     /// Sends `prompt`, starting the chat's agent first if it isn't running.
@@ -81,10 +93,14 @@ impl Chats {
     ) -> Result<Box<dyn Driver>, String> {
         let meta = self.store.get(chat_id).map_err(|e| e.to_string())?;
         let project = settings.projects.iter().find(|p| p.id == meta.project_id).ok_or("this chat's project was removed")?;
-        let provider = settings.providers.get(meta.agent);
+        let provider = settings
+            .providers
+            .for_chat(meta.agent, meta.acp_agent.as_deref())
+            .ok_or("this chat's agent was removed in Settings → Providers")?;
         if !provider.enabled {
-            return Err(format!("{:?} is turned off in Settings → Providers", meta.agent));
+            return Err("this agent is turned off in Settings → Providers".into());
         }
+        let args = meta.acp_agent.as_deref().and_then(|id| settings.providers.acp_agent(id)).map(|a| a.args.clone()).unwrap_or_default();
         let model = Some(meta.model.clone())
             .filter(|m| !m.is_empty())
             .or_else(|| Some(project.default_model.clone()).filter(|m| !m.is_empty()))
@@ -97,7 +113,8 @@ impl Chats {
             model,
             permission: permission.unwrap_or(provider.permission_mode),
             resume: meta.agent_session_id.clone(),
-            env: crate::secrets::resolve(meta.agent, &provider.env),
+            env: crate::secrets::resolve(&crate::secrets::scope(meta.agent, meta.acp_agent.as_deref()), &provider.env),
+            args,
         };
         self.metas.lock().unwrap().insert(chat_id.to_string(), meta);
 

@@ -152,9 +152,38 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind) -> CmdResu
     tauri::async_runtime::spawn_blocking(move || match kind {
         AgentKind::Claude => account::claude_limits(),
         AgentKind::Codex => account::codex_limits(&binary),
+        AgentKind::Opencode | AgentKind::Acp => account::Limits::default(),
     })
     .await
     .map_err(err)
+}
+
+/// The models an agent offers, for a chat that hasn't started (run where `project_id` is).
+#[tauri::command]
+async fn provider_models(
+    state: State<'_, AppState>,
+    kind: AgentKind,
+    project_id: Option<String>,
+) -> CmdResult<Vec<oah_agents::event::ModelOption>> {
+    let (binary, location, cwd) = {
+        let s = state.settings.lock().unwrap();
+        let p = project_id.and_then(|id| s.projects.iter().find(|p| p.id == id).cloned());
+        let location = p.as_ref().map(|p| p.location.clone()).unwrap_or(Location::Local);
+        let cwd = p.map(|p| p.path).unwrap_or_else(|| paths::home_dir().to_string_lossy().into_owned());
+        (s.providers.get(kind).binary.clone(), location, cwd)
+    };
+    tauri::async_runtime::spawn_blocking(move || match kind {
+        AgentKind::Claude => oah_agents::claude::list_models(&binary, &location, &cwd),
+        AgentKind::Codex => {
+            let prog = if binary.trim().is_empty() { "codex".to_string() } else { binary };
+            account::codex_once(&prog, &location, "model/list", serde_json::json!({"limit": 100, "includeHidden": false}))
+                .map(|v| oah_agents::codex::parse_models(&v))
+        }
+        AgentKind::Opencode => oah_agents::acp::opencode_models(&binary, &location, &cwd),
+        AgentKind::Acp => Ok(vec![]),
+    })
+    .await
+    .map_err(err)?
 }
 
 /// Opens a terminal running the CLI's sign-in.
@@ -182,6 +211,7 @@ fn chat_create(
     state: State<AppState>,
     project_id: String,
     agent: Option<AgentKind>,
+    acp_agent: Option<String>,
     model: Option<String>,
     cwd: Option<String>,
 ) -> CmdResult<ChatMeta> {
@@ -189,7 +219,10 @@ fn chat_create(
     let project = s.projects.iter().find(|p| p.id == project_id).ok_or("no such project")?;
     let agent = agent.or(project.default_agent).unwrap_or(s.providers.default_agent);
     let cwd = cwd.unwrap_or_else(|| project.path.clone());
-    state.chats.create(&project_id, agent, model.as_deref().unwrap_or(""), &cwd)
+    if agent == AgentKind::Acp && acp_agent.as_deref().and_then(|id| s.providers.acp_agent(id)).is_none() {
+        return Err("no such ACP agent".into());
+    }
+    state.chats.create(&project_id, agent, acp_agent, model.as_deref().unwrap_or(""), &cwd)
 }
 
 /// The chat's events so far, to replay into the transcript.
@@ -304,6 +337,7 @@ pub fn run() {
             provider_account,
             provider_limits,
             provider_login,
+            provider_models,
             chat_list,
             chat_running,
             chat_create,

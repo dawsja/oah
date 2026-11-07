@@ -39,6 +39,8 @@ struct State {
     /// Messages sent while a turn ran: Claude runs each as its own turn after the current one.
     queued: u32,
     seq: u32,
+    /// The model from `system/init`.
+    model: Option<String>,
     /// AskUserQuestion requests waiting: request id → the tool input.
     questions: HashMap<String, Value>,
     /// `total_cost_usd` is per process; turns report the difference.
@@ -133,6 +135,7 @@ impl ClaudeDriver {
 
         let d = ClaudeDriver { stdin, child, state, sink, turn: 0 };
         d.write(&json!({"type": "control_request", "request_id": "oah-init", "request": {"subtype": "initialize", "hooks": null}}))?;
+        d.write(&json!({"type": "control_request", "request_id": "oah-models", "request": {"subtype": "list_models"}}))?;
         Ok(d)
     }
 
@@ -196,16 +199,8 @@ impl Driver for ClaudeDriver {
 
     fn answer_question(&mut self, request_id: &str, answers: std::collections::BTreeMap<String, Vec<String>>) -> DriverResult<()> {
         let input = self.state.lock().unwrap().questions.remove(request_id).ok_or("that question was already answered")?;
-        // AskUserQuestion takes answers keyed by the question's text; several picks are joined.
-        let mut by_text = serde_json::Map::new();
-        for (i, q) in input["questions"].as_array().into_iter().flatten().enumerate() {
-            let text = q["question"].as_str().unwrap_or("").to_string();
-            if let Some(a) = answers.get(&format!("q{i}")).filter(|a| !a.is_empty()) {
-                by_text.insert(text, json!(a.join(", ")));
-            }
-        }
+        let response = question_response(&input, &answers);
         (self.sink)(ChatEvent::QuestionResolved { request_id: request_id.into(), answers });
-        let response = json!({"behavior": "allow", "updatedInput": {"questions": input["questions"], "answers": by_text}});
         self.write(&json!({"type": "control_response", "response": {"subtype": "success", "request_id": request_id, "response": response}}))
     }
 
@@ -259,12 +254,19 @@ impl Translator {
                     model: v["model"].as_str().map(String::from),
                     cwd: v["cwd"].as_str().map(String::from),
                 });
-                self.emit(ChatEvent::Models { models: models(), current: v["model"].as_str().map(String::from) });
+                self.state.lock().unwrap().model = v["model"].as_str().map(String::from);
             }
             "stream_event" => self.stream_event(&v["event"]),
             "assistant" => self.assistant(v),
             "user" => self.tool_results(v),
             "control_request" => self.control_request(v),
+            "control_response" if v["response"]["request_id"] == "oah-models" => {
+                let models = parse_models(&v["response"]["response"]);
+                if !models.is_empty() {
+                    let current = self.state.lock().unwrap().model.clone();
+                    self.emit(ChatEvent::Models { models, current });
+                }
+            }
             "result" => self.result(v),
             "rate_limit_event" => {
                 let info = &v["rate_limit_info"];
@@ -513,12 +515,70 @@ impl Translator {
     }
 }
 
-/// The models Claude Code takes by alias (any full model id works too).
-pub fn models() -> Vec<ModelOption> {
-    [("opus", "Opus", "Most capable"), ("sonnet", "Sonnet", "Fast and capable"), ("haiku", "Haiku", "Fastest, cheapest")]
+/// `list_models`' answer: `{models: [{value, displayName, description, disabled}]}`.
+pub fn parse_models(r: &Value) -> Vec<ModelOption> {
+    r["models"]
+        .as_array()
         .into_iter()
-        .map(|(id, name, description)| ModelOption { id: id.into(), name: name.into(), description: description.into() })
+        .flatten()
+        .filter(|m| !m["disabled"].as_bool().unwrap_or(false))
+        .filter_map(|m| {
+            let id = m["value"].as_str()?.to_string();
+            Some(ModelOption {
+                name: m["displayName"].as_str().unwrap_or(&id).to_string(),
+                description: m["description"].as_str().unwrap_or("").to_string(),
+                id,
+            })
+        })
         .collect()
+}
+
+/// Claude Code's models, from a short-lived `claude -p` (for a chat that hasn't started).
+pub fn list_models(binary: &str, location: &oah_core::settings::Location, cwd: &str) -> DriverResult<Vec<ModelOption>> {
+    let program = if binary.trim().is_empty() { AgentKind::Claude.default_binary().to_string() } else { binary.to_string() };
+    let args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"].map(String::from).to_vec();
+    let mut child =
+        oah_transport::command(&Spec { location, cwd, program: &program, args, env: &[] })?.spawn().map_err(|e| e.to_string())?;
+    let mut stdin = child.stdin.take().ok_or("no stdin")?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                if v["type"] == "control_response" && v["response"]["request_id"] == "m" {
+                    let _ = tx.send(parse_models(&v["response"]["response"]));
+                    return;
+                }
+            }
+        }
+    });
+    for req in [json!({"subtype": "initialize", "hooks": null}), json!({"subtype": "list_models"})] {
+        let id = if req["subtype"] == "list_models" { "m" } else { "i" };
+        writeln!(stdin, "{}", json!({"type": "control_request", "request_id": id, "request": req})).map_err(|e| e.to_string())?;
+    }
+    let got = rx.recv_timeout(std::time::Duration::from_secs(30)).map_err(|_| "Claude Code didn't list its models".to_string());
+    let _ = child.kill();
+    let _ = child.wait();
+    got
+}
+
+/// AskUserQuestion's answer, as Claude Code takes it: the input plus `answers` keyed by each
+/// question's text (one pick a string, several a list). No answers at all declines.
+pub fn question_response(input: &Value, answers: &std::collections::BTreeMap<String, Vec<String>>) -> Value {
+    let mut by_text = serde_json::Map::new();
+    for (i, q) in input["questions"].as_array().into_iter().flatten().enumerate() {
+        let key = q["question"].as_str().or(q["header"].as_str()).unwrap_or("").to_string();
+        if let Some(a) = answers.get(&format!("q{i}")).filter(|a| !a.is_empty()) {
+            let multi = q["multiSelect"].as_bool().unwrap_or(false);
+            by_text.insert(key, if multi { json!(a) } else { json!(a[0]) });
+        }
+    }
+    if by_text.is_empty() {
+        return json!({"behavior": "deny", "message": "The user dismissed these questions without answering. End your turn and wait for them."});
+    }
+    let mut updated = input.clone();
+    updated["answers"] = Value::Object(by_text);
+    json!({"behavior": "allow", "updatedInput": updated})
 }
 
 /// Claude's tool names to oah's kinds, with a one-line title.
@@ -640,8 +700,6 @@ mod tests {
             json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"ok"}]},"tool_use_result":{"filePath":"a.txt","structuredPatch":[{"oldStart":1,"oldLines":1,"newStart":1,"newLines":1,"lines":["-hello","+hello world"]}]}}),
             json!({"type":"result","subtype":"success","is_error":false,"duration_ms":6499,"total_cost_usd":0.0123,"usage":{"input_tokens":6,"output_tokens":506,"cache_read_input_tokens":100487,"cache_creation_input_tokens":54628,"iterations":[{"input_tokens":2,"cache_read_input_tokens":54008,"cache_creation_input_tokens":620}]},"modelUsage":{"claude-haiku-5-5":{"contextWindow":1000000}}}),
         ]);
-        assert!(matches!(&ev[1], ChatEvent::Models { models, current: Some(c) } if models.len() == 3 && c == "claude-haiku-5-5"));
-        let ev: Vec<ChatEvent> = ev.into_iter().filter(|e| !matches!(e, ChatEvent::Models { .. })).collect();
         assert!(matches!(&ev[0], ChatEvent::Started { session_id: Some(s), .. } if s == "s1"));
         assert!(matches!(&ev[1], ChatEvent::TextDelta { item_id, text } if item_id == "m1:0" && text == "Hi"));
         assert!(!ev.iter().any(|e| matches!(e, ChatEvent::Text { .. })), "streamed text isn't sent twice");
@@ -680,6 +738,20 @@ mod tests {
             }
             e => panic!("{e:?}"),
         }
+        let input =
+            json!({"questions":[{"question":"Which database?","multiSelect":false},{"question":"Which extras?","multiSelect":true}]});
+        let mut a = std::collections::BTreeMap::new();
+        a.insert("q0".to_string(), vec!["SQLite".to_string()]);
+        a.insert("q1".to_string(), vec!["auth".to_string(), "jobs".to_string()]);
+        let r = question_response(&input, &a);
+        assert_eq!(r["behavior"], "allow");
+        assert_eq!(r["updatedInput"]["answers"]["Which database?"], "SQLite");
+        assert_eq!(r["updatedInput"]["answers"]["Which extras?"], json!(["auth", "jobs"]));
+        assert_eq!(question_response(&input, &Default::default())["behavior"], "deny");
+        let m =
+            parse_models(&json!({"models":[{"value":"opus","displayName":"Opus 5.5","description":"x"},{"value":"old","disabled":true}]}));
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].name, "Opus 5.5");
     }
 
     #[test]

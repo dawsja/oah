@@ -55,6 +55,8 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
     let args: Vec<String> = match kind {
         AgentKind::Claude => vec!["auth".into(), "status".into(), "--json".into()],
         AgentKind::Codex => vec!["login".into(), "status".into()],
+        AgentKind::Opencode => vec!["auth".into(), "list".into()],
+        AgentKind::Acp => return Account { error: Some("sign in with the agent's own command".into()), ..Default::default() },
     };
     let cwd = if matches!(location, Location::Local) { oah_core::paths::home_dir().to_string_lossy().into_owned() } else { "~".into() };
     let out = match oah_transport::run(&Spec { location, cwd: &cwd, program: &prog, args, env: &[] }, None, Duration::from_secs(20)) {
@@ -67,6 +69,7 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
             ..Default::default()
         }),
         AgentKind::Codex => parse_codex_status(&format!("{}\n{}", out.stdout, out.stderr)),
+        AgentKind::Opencode | AgentKind::Acp => parse_opencode_auth(&format!("{}\n{}", out.stdout, out.stderr)),
     }
 }
 
@@ -97,6 +100,29 @@ pub fn parse_codex_status(text: &str) -> Account {
             plan: None,
             error: (!line.is_empty() && !lower.contains("not logged in")).then(|| line.to_string()),
         }
+    }
+}
+
+/// `opencode auth list`: one line per signed-in provider (and API keys from the environment).
+pub fn parse_opencode_auth(text: &str) -> Account {
+    // The list draws boxes and bullets around provider names; keep words that look like names.
+    let providers: Vec<String> = text
+        .lines()
+        .map(|l| l.trim_matches(|c: char| !c.is_alphanumeric() && c != ' ' && c != '-' && c != '.').trim().to_string())
+        .filter(|l| {
+            !l.is_empty()
+                && !l.to_lowercase().contains("credential")
+                && !l.to_lowercase().contains("environment")
+                && !l.contains('/')
+                && !l.contains('\\')
+        })
+        .map(|l| l.split_whitespace().next().unwrap_or("").to_string())
+        .filter(|w| !w.is_empty() && w.chars().next().is_some_and(|c| c.is_alphabetic()))
+        .collect();
+    if providers.is_empty() {
+        Account { signed_in: false, label: None, plan: None, error: Some("No providers signed in".into()) }
+    } else {
+        Account { signed_in: true, label: Some(providers.join(", ")), plan: None, error: None }
     }
 }
 
@@ -200,16 +226,16 @@ fn iso_ms(s: &str) -> Option<u64> {
 // ---- Codex -----------------------------------------------------------------------------------
 
 pub fn codex_limits(binary: &str) -> Limits {
-    match codex_rate_limits(&program(AgentKind::Codex, binary)) {
+    match codex_once(&program(AgentKind::Codex, binary), &Location::Local, "account/rateLimits/read", Value::Null) {
         Ok(v) => Limits { windows: parse_codex_limits(&v), error: None },
         Err(e) => Limits { windows: vec![], error: Some(e) },
     }
 }
 
-fn codex_rate_limits(prog: &str) -> Result<Value, String> {
-    let loc = Location::Local;
-    let home = oah_core::paths::home_dir().to_string_lossy().into_owned();
-    let mut child = oah_transport::command(&Spec { location: &loc, cwd: &home, program: prog, args: vec!["app-server".into()], env: &[] })?
+/// One request to a short-lived `codex app-server` (where `location` says).
+pub fn codex_once(prog: &str, location: &Location, method: &str, params: Value) -> Result<Value, String> {
+    let home = if matches!(location, Location::Local) { oah_core::paths::home_dir().to_string_lossy().into_owned() } else { "~".into() };
+    let mut child = oah_transport::command(&Spec { location, cwd: &home, program: prog, args: vec!["app-server".into()], env: &[] })?
         .spawn()
         .map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
@@ -231,12 +257,12 @@ fn codex_rate_limits(prog: &str) -> Result<Value, String> {
     let result = (|| {
         rx.recv_timeout(Duration::from_secs(20)).map_err(|_| "Codex didn't start".to_string())?;
         send(json!({"jsonrpc": "2.0", "method": "initialized"}))?;
-        send(json!({"jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read", "params": null}))?;
+        send(json!({"jsonrpc": "2.0", "id": 2, "method": method, "params": params}))?;
         loop {
-            let v = rx.recv_timeout(Duration::from_secs(20)).map_err(|_| "Codex didn't report its limits".to_string())?;
+            let v = rx.recv_timeout(Duration::from_secs(20)).map_err(|_| format!("Codex didn't answer {method}"))?;
             if v["id"] == 2 {
                 return match v.get("error") {
-                    Some(e) => Err(e["message"].as_str().unwrap_or("Codex couldn't read its limits").to_string()),
+                    Some(e) => Err(e["message"].as_str().unwrap_or("Codex couldn't answer").to_string()),
                     None => Ok(v["result"].clone()),
                 };
             }
@@ -273,6 +299,8 @@ pub fn open_login(kind: AgentKind, binary: &str) -> Result<(), String> {
     let line = match kind {
         AgentKind::Claude => format!("{prog} auth login"),
         AgentKind::Codex => format!("{prog} login"),
+        AgentKind::Opencode => format!("{prog} auth login"),
+        AgentKind::Acp => return Err("sign in with the agent's own command".into()),
     };
     #[cfg(windows)]
     {

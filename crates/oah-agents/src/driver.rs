@@ -24,6 +24,8 @@ pub struct StartOptions {
     /// The CLI's session id to continue, from an earlier `Started`.
     pub resume: Option<String>,
     pub env: Vec<EnvVar>,
+    /// Extra arguments (an added ACP agent's).
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -77,5 +79,6 @@ pub fn start(opts: StartOptions, sink: Sink) -> DriverResult<Box<dyn Driver>> {
     match opts.kind {
         AgentKind::Claude => crate::claude::ClaudeDriver::start(opts, sink).map(|d| Box::new(d) as Box<dyn Driver>),
         AgentKind::Codex => crate::codex::CodexDriver::start(opts, sink).map(|d| Box::new(d) as Box<dyn Driver>),
+        AgentKind::Opencode | AgentKind::Acp => crate::acp::AcpDriver::start(opts, sink).map(|d| Box::new(d) as Box<dyn Driver>),
     }
 }

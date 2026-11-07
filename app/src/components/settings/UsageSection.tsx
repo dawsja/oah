@@ -4,7 +4,7 @@ import { AgentGlyph } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { formatTokens } from "@/lib/chat"
 import { ipc } from "@/lib/ipc"
-import { AGENTS, AGENT_LABEL, type AgentKind, type Limits } from "@/lib/types"
+import { AGENT_LABEL, LIMIT_AGENTS, type AgentKind, type Limits } from "@/lib/types"
 import { useChats } from "@/store/chats"
 import { useApp } from "@/store/app"
 import { Group, Section } from "./layout"
@@ -46,7 +46,7 @@ export function UsageSection() {
     setLoading(true)
     setLimits({})
     await Promise.all(
-      AGENTS.map((a) =>
+      LIMIT_AGENTS.map((a) =>
         ipc.providerLimits(a).then(
           (l) => setLimits((s) => ({ ...s, [a]: l })),
           (e) => setLimits((s) => ({ ...s, [a]: { windows: [], error: String(e) } })),
@@ -69,7 +69,7 @@ export function UsageSection() {
         </Button>
       }
     >
-      {AGENTS.map((a) => {
+      {LIMIT_AGENTS.map((a) => {
         const l = limits[a]
         return (
           <Group

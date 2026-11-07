@@ -19,8 +19,24 @@ export const WinClose = () => (
   <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" strokeWidth="1" /></svg>
 )
 
-/** Claude Code and Codex marks, simplified to flat glyphs. */
-export function AgentGlyph({ agent, className }: { agent: "claude" | "codex"; className?: string }) {
+/** Agent marks, simplified to flat glyphs. */
+export function AgentGlyph({ agent, className }: { agent: "claude" | "codex" | "opencode" | "acp"; className?: string }) {
+  if (agent === "opencode")
+    return (
+      <svg viewBox="0 0 16 16" className={className} aria-hidden="true">
+        <rect x="2" y="1.5" width="12" height="13" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <rect x="5" y="5" width="6" height="6" fill="currentColor" opacity="0.55" />
+      </svg>
+    )
+  if (agent === "acp")
+    return (
+      <svg viewBox="0 0 16 16" className={className} aria-hidden="true">
+        <circle cx="4" cy="8" r="2.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="12" cy="4" r="2.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="12" cy="12" r="2.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M6 7l4-2M6 9l4 2" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+    )
   if (agent === "claude")
     return (
       <svg viewBox="0 0 16 16" className={className} aria-hidden="true">

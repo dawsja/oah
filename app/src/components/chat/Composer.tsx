@@ -1,17 +1,31 @@
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { ArrowUp, ChevronDown, Paperclip, Square, X } from "lucide-react"
+import { ArrowUp, Check, ChevronDown, File, Paperclip, Square, X } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { AgentGlyph } from "@/components/icons"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { AGENTS, AGENT_LABEL, PERMISSION_LABEL, type AgentKind, type PermissionMode } from "@/lib/types"
+import { promptText } from "@/components/Prompt"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { agentKey, agentName, parseAgentKey, type AgentRef } from "@/lib/agents"
+import type { ModelOption } from "@/lib/chat"
+import { fuzzyPaths, mention, mentionAt } from "@/lib/fuzzy"
+import { git } from "@/lib/git"
+import { PERMISSION_LABEL, type PermissionMode } from "@/lib/types"
+import { useApp } from "@/store/app"
+import { useScope } from "@/store/git"
 import { cn } from "@/lib/utils"
 import { Dictation } from "./Dictation"
 
 export type ComposerProps = {
-  agent: AgentKind
-  onAgent?: (a: AgentKind) => void
+  agent: AgentRef
+  /** Agents to pick from (a new chat). */
+  agents?: AgentRef[]
+  onAgent?: (a: AgentRef) => void
   model: string
+  /** The agent's models; empty while unknown. */
+  models?: ModelOption[]
+  onModel?: (id: string) => void
+  /** Called when the model menu opens, to load the list. */
+  onModelsOpen?: () => void
   permission: PermissionMode
   onPermission?: (p: PermissionMode) => void
   running?: boolean
@@ -43,8 +57,38 @@ function readImage(file: File): Promise<Attachment | null> {
   })
 }
 
+/** Files for the @ menu, per folder, kept briefly. */
+const fileCache = new Map<string, { at: number; files: Promise<string[]> }>()
+
 /** The prompt box: text, then a toolbar with the agent, model and permission chips. */
 export function Composer(p: ComposerProps) {
+  const settings = useApp((s) => s.settings)
+  const scope = useScope()
+  const [menu, setMenu] = useState<{ start: number; query: string; items: string[]; index: number } | null>(null)
+  const updateMenu = async (value: string, caret: number) => {
+    const m = mentionAt(value, caret)
+    if (!m || !scope) return setMenu(null)
+    const key = `${scope.projectId}|${scope.cwd}`
+    let entry = fileCache.get(key)
+    if (!entry || Date.now() - entry.at > 30_000) {
+      entry = { at: Date.now(), files: git.files(scope).catch(() => [] as string[]) }
+      fileCache.set(key, entry)
+    }
+    const items = fuzzyPaths(await entry.files, m.query, 20)
+    setMenu(items.length ? { start: m.start, query: m.query, items, index: 0 } : null)
+  }
+  const pick = (path: string) => {
+    if (!menu) return
+    const el = ref.current
+    const end = menu.start + 1 + menu.query.length
+    const insert = mention(path) + " "
+    setText((t) => t.slice(0, menu.start) + insert + t.slice(end))
+    setMenu(null)
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(menu.start + insert.length, menu.start + insert.length)
+    })
+  }
   const [text, setText] = useState("")
   const [images, setImages] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
@@ -112,6 +156,22 @@ export function Composer(p: ComposerProps) {
           ))}
         </div>
       ) : null}
+      {menu ? (
+        <div className="relative">
+          <div className="absolute bottom-0 left-2 z-20 mb-1 max-h-72 w-[min(32rem,calc(100%-1rem))] overflow-y-auto rounded-lg border bg-popover p-1 shadow-xl" onMouseDown={(e) => e.preventDefault()}>
+            {menu.items.map((f, i) => {
+              const slash = f.lastIndexOf("/")
+              return (
+                <button key={f} className={cn("flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px]", i === menu.index ? "bg-accent text-foreground" : "text-muted-foreground")} onMouseEnter={() => setMenu({ ...menu, index: i })} onClick={() => pick(f)}>
+                  <File className="size-3.5 shrink-0 text-faint" />
+                  <span className="truncate text-foreground">{f.slice(slash + 1)}</span>
+                  <span className="min-w-0 truncate text-[11px] text-faint">{slash > 0 ? f.slice(0, slash) : ""}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
       <input ref={picker} type="file" accept="image/*" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
       <textarea
         ref={ref}
@@ -120,7 +180,11 @@ export function Composer(p: ComposerProps) {
         rows={3}
         placeholder={p.placeholder ?? "Ask anything, @ to add files"}
         className="block max-h-72 min-h-[76px] w-full resize-none bg-transparent px-3.5 pt-3 text-[length:var(--oah-chat-size,14px)] leading-relaxed outline-none placeholder:text-faint"
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value)
+          updateMenu(e.target.value, e.target.selectionStart ?? e.target.value.length)
+        }}
+        onBlur={() => setTimeout(() => setMenu(null), 150)}
         onPaste={(e) => {
           const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"))
           if (files.length) {
@@ -129,6 +193,25 @@ export function Composer(p: ComposerProps) {
           }
         }}
         onKeyDown={(e) => {
+          if (menu && !e.nativeEvent.isComposing) {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault()
+              const d = e.key === "ArrowDown" ? 1 : -1
+              setMenu({ ...menu, index: (menu.index + d + menu.items.length) % menu.items.length })
+              return
+            }
+            if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+              e.preventDefault()
+              pick(menu.items[menu.index])
+              return
+            }
+            if (e.key === "Escape") {
+              e.preventDefault()
+              e.stopPropagation()
+              setMenu(null)
+              return
+            }
+          }
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
             send()
@@ -142,23 +225,56 @@ export function Composer(p: ComposerProps) {
         <DropdownMenu>
           <DropdownMenuTrigger asChild disabled={p.lockAgent}>
             <button className="rounded-md flex h-7 items-center gap-1.5 px-2 text-[12px] font-medium hover:bg-accent disabled:hover:bg-transparent">
-              <AgentGlyph agent={p.agent} className="size-3.5" />
-              {AGENT_LABEL[p.agent]}
+              <AgentGlyph agent={p.agent.kind} className="size-3.5" />
+              {settings ? agentName(settings, p.agent) : ""}
               {p.lockAgent ? null : <ChevronDown className="size-3 text-muted-foreground" />}
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
+          <DropdownMenuContent align="start" className="w-56">
             <DropdownMenuLabel>Agent</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={p.agent} onValueChange={(v) => p.onAgent?.(v as AgentKind)}>
-              {AGENTS.map((a) => (
-                <DropdownMenuRadioItem key={a} value={a}>
-                  <AgentGlyph agent={a} className="size-3.5" /> {AGENT_LABEL[a]}
+            <DropdownMenuRadioGroup value={agentKey(p.agent)} onValueChange={(v) => p.onAgent?.(parseAgentKey(v))}>
+              {(p.agents ?? [p.agent]).map((a) => (
+                <DropdownMenuRadioItem key={agentKey(a)} value={agentKey(a)}>
+                  <AgentGlyph agent={a.kind} className="size-3.5" /> {settings ? agentName(settings, a) : ""}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <span className="flex h-7 items-center px-2 font-mono text-[11.5px] text-muted-foreground">{p.model || "default model"}</span>
+        <DropdownMenu onOpenChange={(o) => o && p.onModelsOpen?.()}>
+          <DropdownMenuTrigger asChild disabled={!p.onModel}>
+            <button className="rounded-md flex h-7 max-w-56 items-center gap-1 px-2 font-mono text-[11.5px] text-muted-foreground hover:bg-accent disabled:hover:bg-transparent">
+              <span className="truncate">{p.models?.find((m) => m.id === p.model)?.name ?? (p.model || "default model")}</span>
+              {p.onModel ? <ChevronDown className="size-3 shrink-0" /> : null}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto">
+            <DropdownMenuLabel>Model</DropdownMenuLabel>
+            <DropdownMenuItem onSelect={() => p.onModel?.("")}>
+              <span className="w-3.5">{!p.model ? <Check className="size-3.5" /> : null}</span>
+              The agent's default
+            </DropdownMenuItem>
+            {p.models === undefined || p.models.length === 0 ? <div className="px-2 py-1.5 text-[11.5px] text-faint">{p.models === undefined ? "Loading models…" : "The agent didn't list its models."}</div> : null}
+            {p.models?.map((m) => (
+              <DropdownMenuItem key={m.id} onSelect={() => p.onModel?.(m.id)}>
+                <span className="w-3.5">{m.id === p.model ? <Check className="size-3.5" /> : null}</span>
+                <span className="min-w-0">
+                  <span className="block truncate">{m.name}</span>
+                  {m.description ? <span className="block truncate text-[11px] text-faint">{m.description}</span> : null}
+                </span>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={async () => {
+                const id = await promptText({ title: "Use a model", description: "Any model id the agent accepts.", value: p.model, placeholder: "model id", confirm: "Use" })
+                if (id) p.onModel?.(id)
+              }}
+            >
+              <span className="w-3.5" /> Other model…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className={cn("rounded-md flex h-7 items-center gap-1 px-2 text-[12px] hover:bg-accent", p.permission === "fullAccess" ? "text-red" : p.permission === "plan" ? "text-cyan" : "text-muted-foreground")}>

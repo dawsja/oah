@@ -2,7 +2,7 @@
 // browser) a small in-memory stand-in answers instead, so the UI can be developed and looked at
 // without the shell.
 
-import type { ChatEvent, ChatMeta, Decision } from "./chat"
+import type { ChatEvent, ChatMeta, Decision, ModelOption } from "./chat"
 import type { Account, AgentKind, AppInfo, HostCheck, Limits, Location, PermissionMode, Probe, Project, Settings } from "./types"
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
@@ -31,8 +31,9 @@ export const ipc = {
 
   chatList: () => call<ChatMeta[]>("chat_list"),
   chatRunning: () => call<string[]>("chat_running"),
-  chatCreate: (projectId: string, agent: AgentKind | null, model: string | null, cwd: string | null) =>
-    call<ChatMeta>("chat_create", { projectId, agent, model, cwd }),
+  chatCreate: (projectId: string, agent: AgentKind | null, acpAgent: string | null, model: string | null, cwd: string | null) =>
+    call<ChatMeta>("chat_create", { projectId, agent, acpAgent, model, cwd }),
+  providerModels: (kind: AgentKind, projectId: string | null) => call<ModelOption[]>("provider_models", { kind, projectId }),
   chatEvents: (chatId: string) => call<ChatEvent[]>("chat_events", { chatId }),
   chatSend: (chatId: string, prompt: { id: string; text: string; images: { mime: string; data: string }[] }, permission: PermissionMode | null) =>
     call<void>("chat_send", { chatId, prompt, permission }),
@@ -66,7 +67,7 @@ export async function pickFolder(title: string): Promise<string | null> {
 export function defaultSettings(): Settings {
   const provider = () => ({ enabled: true, binary: "", defaultModel: "", permissionMode: "ask" as const, env: [] })
   return {
-    providers: { claude: provider(), codex: provider(), defaultAgent: "claude" },
+    providers: { claude: provider(), codex: provider(), opencode: provider(), acp: [], defaultAgent: "claude" },
     voice: { enabled: false, microphone: "", holdKey: "Ctrl+Space", silenceStopSecs: 0 },
     appearance: {
       theme: "system",

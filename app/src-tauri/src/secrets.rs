@@ -5,39 +5,58 @@ use oah_core::settings::{AgentKind, EnvVar, Settings};
 
 const SERVICE: &str = "dev.oah.app";
 
-fn entry(agent: AgentKind, key: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, &format!("{agent:?}/{key}").to_lowercase()).map_err(|e| e.to_string())
+/// Whose variables: a built-in agent (`claude`, `codex`, `opencode`) or an added ACP agent
+/// (`acp:<id>`).
+pub fn scope(kind: AgentKind, acp_id: Option<&str>) -> String {
+    match kind {
+        AgentKind::Acp => format!("acp:{}", acp_id.unwrap_or("")),
+        k => format!("{k:?}").to_lowercase(),
+    }
 }
 
-/// Moves every typed value into the keychain and blanks it in `settings` (values already in
-/// the keychain stay). Variables removed from the list are removed from the keychain.
-pub fn stash(settings: &mut Settings, before: &Settings) -> Result<(), String> {
-    for kind in AgentKind::ALL {
-        let old: Vec<String> = before.providers.get(kind).env.iter().filter(|v| v.in_keychain).map(|v| v.key.clone()).collect();
-        let vars = &mut settings.providers.get_mut(kind).env;
-        for v in vars.iter_mut().filter(|v| !v.key.trim().is_empty()) {
-            if !v.value.is_empty() {
-                entry(kind, &v.key)?.set_password(&v.value).map_err(|e| format!("couldn't save {} in the keychain: {e}", v.key))?;
-                v.value.clear();
-                v.in_keychain = true;
-            }
+fn entry(scope: &str, key: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(SERVICE, &format!("{scope}/{key}")).map_err(|e| e.to_string())
+}
+
+fn stash_vars(scope: &str, vars: &mut [EnvVar], old: &[EnvVar]) -> Result<(), String> {
+    for v in vars.iter_mut().filter(|v| !v.key.trim().is_empty()) {
+        if !v.value.is_empty() {
+            entry(scope, &v.key)?.set_password(&v.value).map_err(|e| format!("couldn't save {} in the keychain: {e}", v.key))?;
+            v.value.clear();
+            v.in_keychain = true;
         }
-        for k in old.iter().filter(|k| !vars.iter().any(|v| &v.key == *k)) {
-            if let Ok(e) = entry(kind, k) {
-                let _ = e.delete_credential();
-            }
+    }
+    for k in old.iter().filter(|o| o.in_keychain && !vars.iter().any(|v| v.key == o.key)) {
+        if let Ok(e) = entry(scope, &k.key) {
+            let _ = e.delete_credential();
         }
     }
     Ok(())
 }
 
-/// The environment to start `kind` with: names from settings, values from the keychain.
-pub fn resolve(kind: AgentKind, vars: &[EnvVar]) -> Vec<EnvVar> {
+/// Moves every typed value into the keychain and blanks it in `settings` (values already in
+/// the keychain stay). Variables removed from a list are removed from the keychain.
+pub fn stash(settings: &mut Settings, before: &Settings) -> Result<(), String> {
+    for kind in AgentKind::ALL {
+        let old = before.providers.get(kind).env.clone();
+        if let Some(p) = settings.providers.get_mut(kind) {
+            stash_vars(&scope(kind, None), &mut p.env, &old)?;
+        }
+    }
+    for a in settings.providers.acp.iter_mut() {
+        let old = before.providers.acp_agent(&a.id).map(|b| b.provider.env.clone()).unwrap_or_default();
+        stash_vars(&scope(AgentKind::Acp, Some(&a.id)), &mut a.provider.env, &old)?;
+    }
+    Ok(())
+}
+
+/// The environment to start an agent with: names from settings, values from the keychain.
+pub fn resolve(scope: &str, vars: &[EnvVar]) -> Vec<EnvVar> {
     vars.iter()
         .filter(|v| !v.key.trim().is_empty())
         .map(|v| {
             let value = if v.in_keychain {
-                entry(kind, &v.key).and_then(|e| e.get_password().map_err(|e| e.to_string())).unwrap_or_default()
+                entry(scope, &v.key).and_then(|e| e.get_password().map_err(|e| e.to_string())).unwrap_or_default()
             } else {
                 v.value.clone()
             };

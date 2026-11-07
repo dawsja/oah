@@ -19,7 +19,11 @@ type ChatsStore = {
   refresh(): Promise<void>
   open(chatId: string): Promise<void>
   /** Sends a prompt; with no chat yet, creates one in the current project first. */
-  send(chatId: string | null, text: string, opts: { agent: AgentKind; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] }): Promise<void>
+  send(
+    chatId: string | null,
+    text: string,
+    opts: { agent: AgentKind; acpId?: string | null; model?: string; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] },
+  ): Promise<void>
   interrupt(chatId: string): Promise<void>
   answer(chatId: string, requestId: string, decision: Decision): Promise<void>
   answerQuestion(chatId: string, requestId: string, answers: Record<string, string[]>): Promise<void>
@@ -64,7 +68,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
     try {
       if (!id) {
         if (!app.projectId) return
-        const meta = await ipc.chatCreate(app.projectId, opts.agent, null, opts.cwd ?? null)
+        const meta = await ipc.chatCreate(app.projectId, opts.agent, opts.acpId ?? null, opts.model ?? null, opts.cwd ?? null)
         id = meta.id
         set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: emptyTranscript() } }))
         useApp.setState({ chatId: meta.id })

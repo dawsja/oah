@@ -49,6 +49,8 @@ export type ChatMeta = {
   id: string
   projectId: string
   agent: AgentKind
+  /** Which added ACP agent, when `agent` is "acp". */
+  acpAgent: string | null
   model: string
   title: string
   cwd: string
