@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ArrowLeft, AtSign, Minus, Plus } from "lucide-react"
 import { git, isImagePath, type Scope } from "@/lib/git"
+import { inTerminal } from "@/lib/terminal"
 import { ImageStage } from "@/components/ImageView"
 import { useGit, type Viewer as V } from "@/store/git"
 import { addToChat } from "@/components/right/Files"
@@ -30,7 +31,7 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
   }, [viewer, scope.projectId, scope.cwd, viewer.kind === "diff" ? status : null])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !(e.target instanceof HTMLTextAreaElement) && open(null)
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !(e.target instanceof HTMLTextAreaElement) && !inTerminal(e.target) && open(null)
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [open])

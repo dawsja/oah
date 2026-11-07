@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use oah_core::settings::{EnvVar, Location};
+pub mod pty;
 pub mod remote;
 pub mod wsl;
 
@@ -63,11 +64,7 @@ pub fn remote_line(spec: &Spec) -> String {
 /// (`/mnt/c/…`), so a Windows copy is never run on Linux files; the program itself still gets
 /// the whole PATH.
 pub fn remote_script(spec: &Spec, skip_windows: bool) -> String {
-    let cd = match spec.cwd.strip_prefix("~/") {
-        Some(rest) => format!("cd \"$HOME\"/{}", sh_quote(rest)),
-        None if spec.cwd == "~" || spec.cwd.is_empty() => "cd \"$HOME\"".into(),
-        None => format!("cd {}", sh_quote(spec.cwd)),
-    };
+    let cd = cd_line(spec.cwd);
     let mut words = vec!["exec".to_string(), "env".to_string()];
     for v in spec.env.iter().filter(|v| valid_env_key(&v.key)) {
         words.push(sh_quote(&format!("{}={}", v.key, v.value)));
@@ -88,6 +85,15 @@ pub fn remote_script(spec: &Spec, skip_windows: bool) -> String {
     words.extend(spec.args.iter().map(|a| sh_quote(a)));
     lines.push(words.join(" "));
     lines.join("\n")
+}
+
+/// `cd <folder>`, with a leading `~` meaning the home folder.
+pub(crate) fn cd_line(cwd: &str) -> String {
+    match cwd.strip_prefix("~/") {
+        Some(rest) => format!("cd \"$HOME\"/{}", sh_quote(rest)),
+        None if cwd == "~" || cwd.is_empty() => "cd \"$HOME\"".into(),
+        None => format!("cd {}", sh_quote(cwd)),
+    }
 }
 
 /// `$oah_path`: `$PATH` without WSL's Windows drives.

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { LoaderCircle, Mic, Square } from "lucide-react"
 import { toast } from "sonner"
 import { Tip } from "@/components/Tip"
+import { inTerminal } from "@/lib/terminal"
 import { cn } from "@/lib/utils"
 import { keyCapture, matchesKey, record, useVoice, voice, type Recording } from "@/lib/voice"
 import { useApp } from "@/store/app"
@@ -69,7 +70,7 @@ export function Dictation({ onText }: { onText: (text: string) => void }) {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       const { phase, state, settings } = live.current
-      if (keyCapture.on) return
+      if (keyCapture.on || (inTerminal(e.target) && !rec.current)) return
       if (e.key === "Escape" && rec.current) {
         e.preventDefault()
         e.stopPropagation()

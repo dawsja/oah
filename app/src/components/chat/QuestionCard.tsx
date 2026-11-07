@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Check, ChevronLeft, MessageCircleQuestion } from "lucide-react"
 import type { Question, QuestionRequest } from "@/lib/chat"
+import { inTerminal } from "@/lib/terminal"
 import { cn } from "@/lib/utils"
 
 /** The agent's questions, docked above the composer, one at a time. Number keys pick an option
@@ -52,6 +53,8 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A terminal's keys are the shell's.
+      if (inTerminal(e.target)) return
       // The typed-answer field keeps its keys; an empty composer doesn't.
       const inField = e.target instanceof HTMLInputElement
       const composerTyping = e.target instanceof HTMLTextAreaElement && e.target.value.trim() !== ""

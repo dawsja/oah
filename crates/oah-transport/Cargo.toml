@@ -1,6 +1,6 @@
 [package]
 name = "oah-transport"
-description = "oah: runs a program in a folder on this computer or on an SSH host"
+description = "oah: runs a program in a folder on this computer, on an SSH host or in a WSL distro"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,3 +9,4 @@ license.workspace = true
 oah-core.workspace = true
 serde.workspace = true
 which = "8"
+portable-pty = "0.9"

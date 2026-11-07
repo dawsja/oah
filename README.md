@@ -30,6 +30,14 @@ Electron.
   message from the changes with the project agent's cheapest model: Haiku, Codex's fast model,
   or a free OpenCode one), History (graph), Pull Request (`gh`: open one,
   review state, checks).
+- **Terminal.** A panel under the chat (Ctrl+` or the shell button in the title bar shows and
+  hides it) with a shell where the project is: PowerShell (7 if installed) on Windows, your
+  `$SHELL` on Linux, your login shell inside the distro for a WSL project, and over `ssh -t` for
+  an SSH project, so it's already connected. Each tab says which shell it is (PowerShell,
+  bash, zsh…) and where it runs. Terminals open in the chat's worktree, several per project in
+  tabs, and keep running with their scrollback while the panel is hidden or another project is
+  open; `exit` closes one, a failed or dropped one waits for Enter to start again. Ctrl+C copies
+  a selection (Ctrl+Shift+C always), Ctrl+V pastes.
 - **WSL.** On Windows, a project can live in a WSL distro. oah runs the agent CLI, git, gh and
   file reads inside the distro (`wsl.exe -d <distro> -e …`), so the agent works on Linux files
   with Linux tools; a Windows copy of a CLI that WSL puts on PATH is never used. Add one from
@@ -56,14 +64,14 @@ Corners are subtle: 2px tags, 4px controls and rows, 6px cards and panels.
 crates/
   oah-core       data folder (~/.config/oah/app, or $OAH_HOME/app), settings.json, chats on disk
   oah-transport  runs a program in a folder: locally, over ssh, or in a WSL distro; distros,
-                 host checks, remote folders
+                 host checks, remote folders; terminals (a shell in a pty, wherever the project is)
   oah-agents     Claude Code (stream-json), Codex (app-server) and ACP (OpenCode, added agents)
                  drivers → ChatEvent; sign-in, models and plan limits; a scripted mock
                  (OAH_MOCK_AGENT=1)
   oah-git        git and gh: status, diffs, commits, branches, sync, graph, worktrees, PRs
   oah-voice      speech to text (transcribe.cpp; needs CMake to build)
 app/
-  src-tauri      the Tauri shell: commands, chat-event / voice-state events
+  src-tauri      the Tauri shell: commands, chat-event / voice-state events, terminal channels
   src            React + Tailwind (shadcn primitives, 6px radius scale)
 ```
 

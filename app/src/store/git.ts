@@ -69,16 +69,27 @@ export const useGit = create<GitStore>((set, get) => ({
   },
 }))
 
+function scopeOf(project: { id: string; path: string } | null, chatId: string | null, meta: { projectId: string; cwd: string } | undefined, draftCwd: string | null): Scope | null {
+  if (!project) return null
+  const open = meta && meta.projectId === project.id ? meta.cwd : chatId ? null : draftCwd
+  const cwd = open && open !== project.path ? open : null
+  return { projectId: project.id, cwd }
+}
+
 /** The folder the side panel works on: the open chat's (a worktree) or the project's. */
 export function useScope(): Scope | null {
   const project = useProject()
   const chatId = useApp((s) => s.chatId)
   const meta = useChats((s) => s.metas.find((m) => m.id === chatId))
   const draftCwd = useApp((s) => s.draftCwd)
-  if (!project) return null
-  const open = meta && meta.projectId === project.id ? meta.cwd : chatId ? null : draftCwd
-  const cwd = open && open !== project.path ? open : null
-  return { projectId: project.id, cwd }
+  return scopeOf(project, chatId, meta, draftCwd)
+}
+
+/** `useScope` outside React, as things are now. */
+export function currentScope(): Scope | null {
+  const { settings, projectId, chatId, draftCwd } = useApp.getState()
+  const project = settings?.projects.find((p) => p.id === projectId) ?? null
+  return scopeOf(project, chatId, useChats.getState().metas.find((m) => m.id === chatId), draftCwd)
 }
 
 /** The scope's status, kept fresh: polled every few seconds (slower over SSH) and after turns. */

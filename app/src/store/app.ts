@@ -12,6 +12,9 @@ type Layout = {
   rightWidth: number
   rightOpen: boolean
   rightTab: RightTab
+  /** The terminal panel under the chat: shown, and its height. */
+  terminalOpen: boolean
+  terminalHeight: number
 }
 
 type AppStore = {
@@ -38,7 +41,7 @@ type AppStore = {
 }
 
 const LAYOUT_KEY = "oah.layout"
-const defaultLayout: Layout = { sidebarWidth: 272, rightWidth: 340, rightOpen: true, rightTab: "scm" }
+const defaultLayout: Layout = { sidebarWidth: 272, rightWidth: 340, rightOpen: true, rightTab: "scm", terminalOpen: false, terminalHeight: 280 }
 
 function loadLayout(): Layout {
   try {

@@ -4,6 +4,7 @@
 mod chats;
 mod git;
 mod secrets;
+mod terminal;
 mod voice;
 
 use std::sync::Mutex;
@@ -22,6 +23,7 @@ use tauri::{AppHandle, Manager, State};
 pub(crate) struct AppState {
     pub(crate) settings: Mutex<Settings>,
     chats: chats::Chats,
+    terminals: terminal::Terminals,
     voice: voice::Voice,
 }
 
@@ -401,6 +403,7 @@ pub fn run() {
         .manage(AppState {
             settings: Mutex::new(settings),
             chats: chats::Chats::new(ChatStore::new(paths::chats_dir())),
+            terminals: terminal::Terminals::default(),
             voice: voice::Voice::default(),
         })
         .setup(|app| {
@@ -473,12 +476,18 @@ pub fn run() {
             voice::voice_enable,
             voice::voice_disable,
             voice::voice_transcribe,
+            terminal::terminal_shell,
+            terminal::terminal_open,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_close,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oah")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 app.state::<AppState>().chats.stop_all();
+                app.state::<AppState>().terminals.close_all();
             }
         });
 }

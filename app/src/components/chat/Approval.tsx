@@ -4,12 +4,15 @@ import type { ApprovalRequest, Decision } from "@/lib/chat"
 import { useRelative } from "./cwd"
 import { DiffLines } from "./DiffView"
 import { Markdown } from "./Markdown"
+import { inTerminal } from "@/lib/terminal"
 import { cn } from "@/lib/utils"
 
 /** The agent's question, docked above the composer: Allow (Enter), Always (A), Deny (Esc). */
 export function ApprovalCard({ request, queued = 0, onAnswer }: { request: ApprovalRequest; queued?: number; onAnswer: (d: Decision) => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A terminal's keys are the shell's (Enter there must not allow anything).
+      if (inTerminal(e.target)) return
       const typing = e.target instanceof HTMLTextAreaElement && e.target.value.trim() !== ""
       if (typing || e.ctrlKey || e.altKey || e.metaKey) return
       if (e.key === "Enter") onAnswer("allow")

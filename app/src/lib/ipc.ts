@@ -51,6 +51,24 @@ export const ipc = {
   chatRename: (chatId: string, title: string) => call<ChatMeta>("chat_rename", { chatId, title }),
 }
 
+/** What a terminal's shell sends: output, then its exit. */
+export type TerminalEvent = { kind: "data"; data: string } | { kind: "exit"; code: number | null }
+
+export const terminal = {
+  /** The shell a new terminal in the project runs, when known without starting one (this computer). */
+  shell: (projectId: string) => call<string | null>("terminal_shell", { projectId }),
+  /** Starts a shell where the project is; its output arrives through `onEvent`. */
+  async open(projectId: string, cwd: string | null, cols: number, rows: number, onEvent: (e: TerminalEvent) => void) {
+    const { Channel } = await import("@tauri-apps/api/core")
+    const channel = new Channel<TerminalEvent>()
+    channel.onmessage = onEvent
+    return call<{ id: string; shell: string | null }>("terminal_open", { projectId, cwd, cols, rows, onEvent: channel })
+  },
+  write: (id: string, data: string) => call<void>("terminal_write", { id, data }),
+  resize: (id: string, cols: number, rows: number) => call<void>("terminal_resize", { id, cols, rows }),
+  close: (id: string) => call<void>("terminal_close", { id }),
+}
+
 /** Calls `fn` for every chat event the app emits; returns the unsubscribe. */
 export async function onChatEvent(fn: (chatId: string, event: ChatEvent) => void): Promise<() => void> {
   const { listen } = await import("@tauri-apps/api/event")
