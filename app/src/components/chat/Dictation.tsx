@@ -9,8 +9,9 @@ import { useApp } from "@/store/app"
 const MAX_SECONDS = 180
 const BARS = 16
 
-/** The composer's mic: click to start and stop, or hold the hold-to-talk key. What was said is
- *  transcribed on this computer and handed to `onText`. Esc throws a recording away. */
+/** The composer's mic, shown only once voice is turned on in Settings: click to start and stop,
+ *  or hold the hold-to-talk key. What was said is transcribed on this computer and handed to
+ *  `onText`. Esc throws a recording away. */
 export function Dictation({ onText }: { onText: (text: string) => void }) {
   const state = useVoice((s) => s.state)
   const settings = useApp((s) => s.settings?.voice)
@@ -67,12 +68,12 @@ export function Dictation({ onText }: { onText: (text: string) => void }) {
   // Hold to talk, and Esc to cancel.
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      const { phase, settings } = live.current
+      const { phase, state, settings } = live.current
       if (e.key === "Escape" && rec.current) {
         e.preventDefault()
         e.stopPropagation()
         cancel()
-      } else if (settings?.holdKey && matchesKey(e, settings.holdKey) && !e.repeat && phase === "idle") {
+      } else if (state.state === "ready" && settings?.holdKey && matchesKey(e, settings.holdKey) && !e.repeat && phase === "idle") {
         e.preventDefault()
         start()
       }
@@ -115,6 +116,9 @@ export function Dictation({ onText }: { onText: (text: string) => void }) {
     if (phase === "recording" && seconds >= MAX_SECONDS) stop()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, seconds])
+
+  // Voice is opt-in (Settings → Voice): no mic until it's on.
+  if (state.state !== "ready" && state.state !== "downloading" && phase === "idle") return null
 
   return (
     <>

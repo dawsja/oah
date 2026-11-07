@@ -40,8 +40,10 @@ Electron.
   A stopped distro is left asleep until you open one of its projects.
 - **SSH hosts.** Hosts from `~/.ssh/config` (with `Include`) or added by hand. A remote project
   runs the agent CLI, git and gh over `ssh`, so the agent works on that machine's files.
-- **Voice.** Dictation transcribed on this computer with NVIDIA Parakeet (a one-time 731 MB
-  download). Nothing you say leaves the machine.
+- **Voice (optional).** Off until you turn it on in Settings → Voice, which asks before the
+  one-time 731 MB download of NVIDIA Parakeet. Dictation is then transcribed on this computer;
+  nothing you say leaves the machine. The mic appears in the message box only while voice is on,
+  and turning it off deletes the model.
 - **Usage.** Plan limits for Claude, Codex and OpenCode Go (session, week, month), in a title bar
   popover and in Settings → Usage, with tokens and cost per project.
 - **Settings.** Providers, Voice, Appearance (dark, light, system), Usage, SSH Hosts, Projects.

@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch"
 import { useApp } from "@/store/app"
 import { useVoice, voice as voiceApi } from "@/lib/voice"
 import { toast } from "sonner"
+import { confirmAction } from "@/components/Prompt"
 import { Group, Row, Section } from "./layout"
 
 /** Microphones the webview can see (labels appear once mic access was granted). */
@@ -25,7 +26,19 @@ export function VoiceSection() {
   const mics = useMicrophones()
   const state = useVoice((s) => s.state)
   const on = state.state === "ready" || state.state === "downloading"
-  const toggle = (v: boolean) => (v ? voiceApi.enable() : voiceApi.disable()).catch((e) => toast.error(String(e)))
+  const toggle = async (v: boolean) => {
+    // Voice is opt-in: nothing is downloaded until the user agrees to it here.
+    if (v && state.state !== "ready") {
+      const ok = await confirmAction({
+        title: "Download the voice model?",
+        description:
+          "Speech to text needs NVIDIA Parakeet (0.6B, about 731 MB), downloaded once from Hugging Face. It runs on this computer: nothing you say leaves it. You can delete it any time by turning voice off.",
+        confirm: "Download",
+      })
+      if (!ok) return
+    }
+    await (v ? voiceApi.enable() : voiceApi.disable()).catch((e) => toast.error(String(e)))
+  }
   const label =
     state.state === "ready"
       ? "ready · runs on this computer"
@@ -41,7 +54,7 @@ export function VoiceSection() {
       <Group>
         <Row
           label="Speech to text"
-          description="Turning it on downloads NVIDIA Parakeet (0.6B, about 731 MB) once. Turning it off deletes it."
+          description="Optional, and off until you turn it on. Turning it on asks before downloading NVIDIA Parakeet (0.6B, about 731 MB); turning it off deletes it."
         >
           <Switch checked={on} disabled={state.state === "unsupported"} onCheckedChange={toggle} aria-label="Speech to text" />
         </Row>
