@@ -21,6 +21,7 @@ tauri-build = { version = "2.7", features = [] }
 oah-core.workspace = true
 oah-agents.workspace = true
 oah-git.workspace = true
+oah-transport.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12", features = [] }

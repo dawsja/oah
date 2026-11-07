@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react"
-import { FolderPlus, Plus, Server, Trash2 } from "lucide-react"
+import { FolderPlus, LoaderCircle, Plus, Server, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ipc } from "@/lib/ipc"
+import type { HostCheck, Tool } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { useApp } from "@/store/app"
 import { Dot, Group, Section } from "./layout"
+import { pickRemoteFolder } from "./RemoteFolder"
 
 export function SshSection() {
   const hosts = useApp((s) => s.settings!.sshHosts)
@@ -12,6 +15,7 @@ export function SshSection() {
   const addProject = useApp((s) => s.addProject)
   const [configHosts, setConfigHosts] = useState<string[]>([])
   const [draft, setDraft] = useState("")
+  const [checks, setChecks] = useState<Record<string, HostCheck | "checking">>({})
 
   useEffect(() => {
     ipc.sshConfigHosts().then(setConfigHosts, () => setConfigHosts([]))
@@ -22,11 +26,21 @@ export function SshSection() {
     if (!h || hosts.some((x) => x.host === h)) return
     update((s) => void s.sshHosts.push({ host: h, port: 0, identityFile: "", label: "" }))
     setDraft("")
+    test(h)
   }
 
-  const addRemoteProject = (host: string) => {
-    const path = window.prompt(`Folder on ${host}`, "~/code/")
-    if (path) addProject({ kind: "ssh", host }, path)
+  const test = async (host: string) => {
+    setChecks((c) => ({ ...c, [host]: "checking" }))
+    const r = await ipc.sshCheck(host).catch((e) => ({ ok: false, error: String(e) }) as HostCheck)
+    setChecks((c) => ({ ...c, [host]: r }))
+  }
+
+  const addFolder = async (host: string) => {
+    const path = await pickRemoteFolder(host)
+    if (path) {
+      await addProject({ kind: "ssh", host }, path)
+      useApp.getState().closeSettings()
+    }
   }
 
   const all = [
@@ -37,11 +51,11 @@ export function SshSection() {
   return (
     <Section
       title="SSH Hosts"
-      description="Machines oah can work on. The agent CLI runs there over ssh, so its tools see that machine's files and shell. Key-based logins only."
+      description="Machines oah can work on. The agent CLI runs there over ssh, so its tools see that machine's files and shell. Key-based logins only (BatchMode)."
     >
       <Group title="Add a host">
         <div className="flex gap-2 p-3">
-          <Input className="h-8 flex-1 font-mono text-[12px]" placeholder="user@hostname or an alias from ~/.ssh/config" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
+          <Input className="h-8 flex-1 font-mono text-[12px]" placeholder="user@hostname, or an alias from ~/.ssh/config" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
           <Button size="sm" onClick={add} disabled={!draft.trim()}>
             <Plus /> Add host
           </Button>
@@ -51,30 +65,72 @@ export function SshSection() {
         {all.length === 0 ? (
           <div className="px-4 py-3 text-[12px] text-faint">No hosts yet.</div>
         ) : (
-          all.map((h) => (
-            <div key={h.host} className="group flex items-center gap-3 px-4 py-2.5">
-              <Server className="size-4 text-cyan" />
-              <div className="min-w-0 flex-1">
-                <div className="font-mono text-[12.5px]">{h.label || h.host}</div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
-                  <Dot tone="off" /> Not checked · {h.manual ? "added here" : "~/.ssh/config"}
+          all.map((h) => {
+            const c = checks[h.host]
+            return (
+              <div key={h.host}>
+                <div className="flex items-center gap-3 px-4 py-2.5">
+                  <Server className="size-4 text-cyan" />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-[12.5px]">{h.label || h.host}</div>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+                      {c === "checking" ? (
+                        <>
+                          <LoaderCircle className="size-3 animate-spin" /> Connecting…
+                        </>
+                      ) : c?.ok ? (
+                        <>
+                          <Dot tone="ok" /> Connected · {c.os} · {c.home}
+                        </>
+                      ) : c ? (
+                        <>
+                          <Dot tone="err" /> <span className="truncate text-red">{c.error}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Dot tone="off" /> Not checked · {h.manual ? "added here" : "~/.ssh/config"}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <Button variant="outline" size="xs" onClick={() => test(h.host)} disabled={c === "checking"}>
+                    Test
+                  </Button>
+                  <Button variant="outline" size="xs" onClick={() => addFolder(h.host)}>
+                    <FolderPlus /> Add folder
+                  </Button>
+                  {h.manual ? (
+                    <Button variant="ghost" size="icon-xs" aria-label="Remove host" onClick={() => update((s) => void (s.sshHosts = s.sshHosts.filter((x) => x.host !== h.host)))}>
+                      <Trash2 />
+                    </Button>
+                  ) : (
+                    <span className="size-6" />
+                  )}
                 </div>
+                {c && c !== "checking" && c.ok ? (
+                  <div className="grid grid-cols-4 gap-px border-t bg-border">
+                    {(["claude", "codex", "git", "gh"] as const).map((t) => (
+                      <ToolCell key={t} name={t === "claude" ? "Claude Code" : t === "codex" ? "Codex" : t} tool={c[t]} needed={t !== "gh"} />
+                    ))}
+                  </div>
+                ) : null}
               </div>
-              <Button variant="outline" size="xs">Test</Button>
-              <Button variant="outline" size="xs" onClick={() => addRemoteProject(h.host)}>
-                <FolderPlus /> Add folder
-              </Button>
-              {h.manual ? (
-                <Button variant="ghost" size="icon-xs" aria-label="Remove host" onClick={() => update((s) => void (s.sshHosts = s.sshHosts.filter((x) => x.host !== h.host)))}>
-                  <Trash2 />
-                </Button>
-              ) : (
-                <span className="size-6" />
-              )}
-            </div>
-          ))
+            )
+          })
         )}
       </Group>
     </Section>
+  )
+}
+
+function ToolCell({ name, tool, needed }: { name: string; tool: Tool; needed: boolean }) {
+  const version = tool.version?.match(/\d+\.\d+(\.\d+)?/)?.[0]
+  return (
+    <div className="bg-card px-3 py-2">
+      <div className="flex items-center gap-1.5 text-[12px]">
+        <Dot tone={tool.path ? "ok" : needed ? "warn" : "off"} /> {name}
+      </div>
+      <div className={cn("mt-0.5 truncate font-mono text-[11px]", tool.path ? "text-muted-foreground" : "text-faint")}>{tool.path ? (version ? `v${version}` : "installed") : "not installed"}</div>
+    </div>
   )
 }

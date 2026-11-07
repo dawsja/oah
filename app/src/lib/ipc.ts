@@ -3,7 +3,7 @@
 // without the shell.
 
 import type { ChatEvent, ChatMeta, Decision } from "./chat"
-import type { Account, AgentKind, AppInfo, Limits, Location, PermissionMode, Probe, Project, Settings } from "./types"
+import type { Account, AgentKind, AppInfo, HostCheck, Limits, Location, PermissionMode, Probe, Project, Settings } from "./types"
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
@@ -22,6 +22,8 @@ export const ipc = {
   projectAdd: (location: Location, path: string) => call<[Settings, Project]>("project_add", { location, path }),
   projectRemove: (id: string) => call<Settings>("project_remove", { id }),
   sshConfigHosts: () => call<string[]>("ssh_config_hosts"),
+  sshCheck: (host: string) => call<HostCheck>("ssh_check", { host }),
+  sshListDir: (host: string, path: string) => call<{ path: string; dirs: string[] }>("ssh_list_dir", { host, path }),
   providerProbe: (kind: AgentKind, binary: string) => call<Probe>("provider_probe", { kind, binary }),
   providerAccount: (kind: AgentKind, host: string | null = null) => call<Account>("provider_account", { kind, host }),
   providerLimits: (kind: AgentKind) => call<Limits>("provider_limits", { kind }),

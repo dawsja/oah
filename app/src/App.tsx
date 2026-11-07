@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { PromptHost } from "@/components/Prompt"
+import { RemoteFolderHost } from "@/components/settings/RemoteFolder"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ChatView } from "@/components/chat/ChatView"
@@ -69,6 +70,7 @@ export function App() {
       </div>
       <Toaster position="bottom-right" />
       <PromptHost />
+      <RemoteFolderHost />
     </TooltipProvider>
   )
 }

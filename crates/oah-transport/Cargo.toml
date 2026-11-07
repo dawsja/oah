@@ -7,4 +7,5 @@ license.workspace = true
 
 [dependencies]
 oah-core.workspace = true
+serde.workspace = true
 which = "8"

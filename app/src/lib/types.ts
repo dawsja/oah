@@ -72,3 +72,6 @@ export type Probe = { found: boolean; path: string | null; version: string | nul
 export type Account = { signedIn: boolean; label: string | null; plan: string | null; error: string | null }
 export type LimitWindow = { label: string; usedPercent: number; resetsAt: number | null }
 export type Limits = { windows: LimitWindow[]; error: string | null }
+
+export type Tool = { path: string | null; version: string | null }
+export type HostCheck = { ok: boolean; error: string | null; home: string | null; os: string | null; git: Tool; gh: Tool; claude: Tool; codex: Tool }

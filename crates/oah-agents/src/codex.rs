@@ -139,7 +139,12 @@ impl CodexDriver {
                 if let Some(turn_id) = state.lock().unwrap().turn_id.take() {
                     sink(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted: true });
                 }
-                let message = Some(tail.lock().unwrap().clone()).filter(|m| !m.is_empty());
+                // 127: the shell couldn't find the program (on an SSH host, usually not installed).
+                let message = if code == Some(127) {
+                    Some(format!("Codex isn't installed there, or isn't on that machine's PATH."))
+                } else {
+                    Some(tail.lock().unwrap().clone()).filter(|m| !m.is_empty())
+                };
                 sink(ChatEvent::Exited { code, message });
             });
         }

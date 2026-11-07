@@ -92,6 +92,18 @@ fn ssh_config_hosts() -> Vec<String> {
     ssh::user_config_hosts()
 }
 
+/// Logs in to an SSH host and lists the tools oah uses there.
+#[tauri::command]
+async fn ssh_check(host: String) -> CmdResult<oah_transport::remote::HostCheck> {
+    tauri::async_runtime::spawn_blocking(move || oah_transport::remote::check(&host)).await.map_err(err)
+}
+
+/// A folder on an SSH host and its subfolders (empty path: home).
+#[tauri::command]
+async fn ssh_list_dir(host: String, path: String) -> CmdResult<oah_transport::remote::Listing> {
+    tauri::async_runtime::spawn_blocking(move || oah_transport::remote::list_dir(&host, &path)).await.map_err(err)?
+}
+
 /// Whether an agent CLI is installed, where, and which version. Runs off the UI thread.
 #[tauri::command]
 async fn provider_probe(kind: AgentKind, binary: String) -> Probe {
@@ -217,6 +229,8 @@ pub fn run() {
             project_add,
             project_remove,
             ssh_config_hosts,
+            ssh_check,
+            ssh_list_dir,
             provider_probe,
             provider_account,
             provider_limits,

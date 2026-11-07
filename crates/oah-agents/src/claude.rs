@@ -113,7 +113,12 @@ impl ClaudeDriver {
                 state.lock().unwrap().alive = false;
                 let code = child.lock().unwrap().as_mut().and_then(|c| c.wait().ok()).and_then(|s| s.code());
                 std::thread::sleep(std::time::Duration::from_millis(50));
-                let message = Some(tail.lock().unwrap().clone()).filter(|m| !m.is_empty());
+                // 127: the shell couldn't find the program (on an SSH host, usually not installed).
+                let message = if code == Some(127) {
+                    Some(format!("Claude Code isn't installed there, or isn't on that machine's PATH."))
+                } else {
+                    Some(tail.lock().unwrap().clone()).filter(|m| !m.is_empty())
+                };
                 if let Some(turn_id) = state.lock().unwrap().turn_id.take() {
                     sink(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted: true });
                 }

@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use oah_core::settings::{EnvVar, Location};
+pub mod remote;
+
 use oah_core::ssh::{sh_quote, valid_host};
 
 /// What to run and where.
