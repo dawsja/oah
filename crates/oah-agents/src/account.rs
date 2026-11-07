@@ -105,7 +105,8 @@ pub fn parse_codex_status(text: &str) -> Account {
 
 /// `opencode auth list`: one line per signed-in provider (and API keys from the environment).
 pub fn parse_opencode_auth(text: &str) -> Account {
-    // The list draws boxes and bullets around provider names; keep words that look like names.
+    // The list is coloured and draws boxes and bullets around provider names; keep the names.
+    let text = strip_ansi(text);
     let providers: Vec<String> = text
         .lines()
         .map(|l| l.trim_matches(|c: char| !c.is_alphanumeric() && c != ' ' && c != '-' && c != '.').trim().to_string())
@@ -124,6 +125,27 @@ pub fn parse_opencode_auth(text: &str) -> Account {
     } else {
         Account { signed_in: true, label: Some(providers.join(", ")), plan: None, error: None }
     }
+}
+
+/// Text without terminal colour codes (`ESC [ … letter`).
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for d in chars.by_ref() {
+                    if d.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 // ---- Claude ----------------------------------------------------------------------------------
@@ -341,6 +363,16 @@ mod tests {
         let c = parse_codex_status("Logged in using ChatGPT\n");
         assert!(c.signed_in && c.label.as_deref() == Some("ChatGPT"));
         assert!(!parse_codex_status("Not logged in").signed_in);
+    }
+
+    #[test]
+    fn reads_opencode_sign_in() {
+        // Real `opencode auth list` output (1.19.5), colours and all.
+        let out = "\u{1b}[0m\n\u{1b}[90m┌\u{1b}[39m  Credentials \u{1b}[90m~\\.local\\share\\opencode\\auth.json\n\u{1b}[90m│\u{1b}[39m\n\u{1b}[34m●\u{1b}[39m  OpenAI \u{1b}[90moauth\n\u{1b}[90m│\u{1b}[39m\n\u{1b}[90m└\u{1b}[39m  1 credentials\n";
+        let a = parse_opencode_auth(out);
+        assert!(a.signed_in);
+        assert_eq!(a.label.as_deref(), Some("OpenAI"));
+        assert!(!parse_opencode_auth("┌  Credentials\n└  0 credentials\n").signed_in);
     }
 
     #[test]

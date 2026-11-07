@@ -1018,6 +1018,87 @@ not a model
         assert_eq!((m[1].id.as_str(), m[1].name.as_str(), m[1].description.as_str()), ("openai/gpt-6", "gpt-6", "openai"));
     }
 
+    /// Against a real OpenCode (ignored): OAH_TEST_DIR is a project folder, OAH_TEST_MODEL an
+    /// optional model. Runs a turn, answers approvals, then reopens the session and asks about it.
+    #[test]
+    #[ignore]
+    fn real_opencode_turn_and_resume() {
+        use crate::driver::{Driver, Prompt};
+        let dir = std::env::var("OAH_TEST_DIR").expect("OAH_TEST_DIR");
+        let model = std::env::var("OAH_TEST_MODEL").ok();
+        let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
+        let start = |resume: Option<String>| {
+            let e = events.clone();
+            let sink: Sink = Arc::new(move |ev| e.lock().unwrap().push(ev));
+            let opts = StartOptions {
+                kind: AgentKind::Opencode,
+                cwd: dir.clone(),
+                location: oah_core::settings::Location::Local,
+                binary: String::new(),
+                model: model.clone(),
+                permission: PermissionMode::Ask,
+                resume,
+                env: vec![],
+                args: vec![],
+            };
+            AcpDriver::start(opts, sink).expect("start opencode")
+        };
+        let run = |d: &mut AcpDriver, text: &str| -> String {
+            let from = events.lock().unwrap().len();
+            d.send(Prompt { id: "p".into(), text: text.into(), images: vec![] }).unwrap();
+            let t0 = std::time::Instant::now();
+            loop {
+                assert!(t0.elapsed() < Duration::from_secs(300), "turn took too long");
+                thread::sleep(Duration::from_millis(200));
+                let evs: Vec<ChatEvent> = events.lock().unwrap()[from..].to_vec();
+                for e in &evs {
+                    if let ChatEvent::Approval { request } = e {
+                        if d.state.lock().unwrap().pending.contains_key(&request.request_id) {
+                            eprintln!("  approving: {}", request.title);
+                            d.answer(&request.request_id, Decision::Allow).unwrap();
+                        }
+                    }
+                }
+                if evs.iter().any(|e| matches!(e, ChatEvent::TurnFinished { .. })) {
+                    let mut text = String::new();
+                    for e in &evs {
+                        match e {
+                            ChatEvent::TextDelta { text: t, .. } => text.push_str(t),
+                            ChatEvent::ToolStarted { tool, .. } => eprintln!("  tool: {:?} {}", tool.kind, tool.title),
+                            ChatEvent::ToolFinished { ok, .. } => eprintln!("  tool done ok={ok}"),
+                            ChatEvent::Context { used_tokens, window_tokens } => eprintln!("  context {used_tokens}/{window_tokens}"),
+                            ChatEvent::TurnFinished { usage, cost_usd, .. } => eprintln!("  finished usage={usage:?} cost={cost_usd:?}"),
+                            ChatEvent::Error { message } => eprintln!("  error: {message}"),
+                            _ => {}
+                        }
+                    }
+                    return text;
+                }
+            }
+        };
+        let mut d = start(None);
+        let session = events.lock().unwrap().iter().find_map(|e| match e {
+            ChatEvent::Started { session_id, model, .. } => {
+                eprintln!("started session={session_id:?} model={model:?}");
+                session_id.clone()
+            }
+            _ => None,
+        });
+        let models =
+            events.lock().unwrap().iter().find_map(|e| if let ChatEvent::Models { models, .. } = e { Some(models.len()) } else { None });
+        eprintln!("models offered: {models:?}");
+        let a = run(&mut d, "Read src/cart.js and tell me in one sentence what subtotal() does. Don't change any files.");
+        eprintln!("answer 1: {a}");
+        assert!(!a.trim().is_empty());
+        d.stop();
+        drop(d);
+        let mut d2 = start(session);
+        let b = run(&mut d2, "Which file did you just read? Answer with only the path.");
+        eprintln!("answer 2 (resumed): {b}");
+        assert!(b.contains("cart"), "the resumed session remembers: {b}");
+        d2.stop();
+    }
+
     #[test]
     fn refuses_file_system_requests() {
         let (ev, _) = run(
