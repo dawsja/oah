@@ -612,13 +612,15 @@ fn message_uuid(id: &str) -> String {
     format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
 }
 
-/// Drops the messages a `result` answered from `waiting`. It names them in `user_message_uuids`;
-/// a CLI that doesn't answered the oldest. An interrupt drops the ones it cut off too.
+/// Drops the messages a `result` answered from `waiting`. It names them in `user_message_uuids`,
+/// an interrupted one too: a message still queued behind a stopped turn isn't cancelled, it runs
+/// next (the interrupt's reply lists it as `still_queued`), so it keeps waiting. A CLI that
+/// doesn't name them answered the oldest, and its interrupt drops the rest.
 fn settle(waiting: &mut Vec<String>, result: &Value, interrupted: bool) {
-    if interrupted {
-        waiting.clear();
-    } else if let Some(done) = result["user_message_uuids"].as_array() {
+    if let Some(done) = result["user_message_uuids"].as_array() {
         waiting.retain(|u| !done.iter().any(|d| d.as_str() == Some(u)));
+    } else if interrupted {
+        waiting.clear();
     } else if !waiting.is_empty() {
         waiting.remove(0);
     }
@@ -1042,9 +1044,19 @@ mod tests {
         assert_eq!((finished(&ev), started(&ev), turn.is_some(), waiting), (1, 1, true, vec!["b".to_string()]));
         let (ev, turn, _) = run_waiting(&["a", "b"], &[result(&["a"]), result(&["b"])]);
         assert_eq!((finished(&ev), started(&ev), turn), (2, 1, None));
-        // An interrupt drops what it cut off.
-        let stopped = json!({"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.0,"usage":{}});
-        let (ev, turn, _) = run_waiting(&["a", "b"], &[stopped]);
+        // Stopped with one queued behind it: the stopped turn names only its own message (as
+        // Claude Code 2.1.319 does), and the queued one still runs, as the next turn.
+        let stopped = |uuids: &[&str]| json!({"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.0,"usage":{},"user_message_uuids":uuids});
+        let (ev, turn, waiting) = run_waiting(&["a", "b"], &[stopped(&["a"])]);
+        assert_eq!((finished(&ev), started(&ev), turn.is_some(), waiting), (1, 1, true, vec!["b".to_string()]));
+        let (ev, turn, _) = run_waiting(&["a", "b"], &[stopped(&["a"]), result(&["b"])]);
+        assert_eq!((finished(&ev), started(&ev), turn), (2, 1, None));
+        // Stopped with a message folded into it: both named, nothing runs after.
+        let (ev, turn, _) = run_waiting(&["a", "b"], &[stopped(&["a", "b"])]);
+        assert_eq!((finished(&ev), started(&ev), turn), (1, 0, None));
+        // A CLI that doesn't name them: an interrupt drops what it cut off.
+        let bare = json!({"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.0,"usage":{}});
+        let (ev, turn, _) = run_waiting(&["a", "b"], &[bare]);
         assert_eq!((finished(&ev), started(&ev), turn), (1, 0, None));
         // A CLI that doesn't list them: one result per message, as before.
         let (ev, turn, _) = run_waiting(&["a", "b"], &[json!({"type":"result","subtype":"success","total_cost_usd":0.0,"usage":{}})]);
