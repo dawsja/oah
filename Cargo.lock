@@ -2689,7 +2689,7 @@ dependencies = [
 
 [[package]]
 name = "oah-agents"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "oah-core",
  "oah-transport",
@@ -2701,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "oah-app"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "keyring",
@@ -2726,7 +2726,7 @@ dependencies = [
 
 [[package]]
 name = "oah-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "dirs 6.0.0",
  "serde",
@@ -2738,7 +2738,7 @@ dependencies = [
 
 [[package]]
 name = "oah-git"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "oah-core",
@@ -2750,7 +2750,7 @@ dependencies = [
 
 [[package]]
 name = "oah-transport"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "oah-core",
  "portable-pty",
@@ -2760,7 +2760,7 @@ dependencies = [
 
 [[package]]
 name = "oah-voice"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "oah-core",
  "serde",
