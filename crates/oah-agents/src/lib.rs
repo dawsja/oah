@@ -9,4 +9,5 @@ pub mod driver;
 pub mod event;
 pub mod jsonrpc;
 pub mod mock;
+pub mod oneshot;
 pub mod probe;

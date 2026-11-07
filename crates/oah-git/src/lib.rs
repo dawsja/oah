@@ -329,6 +329,58 @@ pub fn read_file(repo: &Repo, path: &str, max: usize) -> Result<String, String> 
     }
 }
 
+/// What a commit would hold, for writing its message: the staged diff (or every change when
+/// nothing is staged), new files' contents, and recent subjects for the repo's style. Cut to
+/// about `max` characters.
+pub fn commit_context(repo: &Repo, max: usize) -> Result<String, String> {
+    let st = status(repo)?;
+    let staged = !st.staged.is_empty();
+    let mut out = String::new();
+    let subjects = repo.git(&["log", "-8", "--format=%s"]).unwrap_or_default();
+    if !subjects.trim().is_empty() {
+        out.push_str("Recent commit subjects (match their style):\n");
+        out.push_str(subjects.trim_end());
+        out.push_str("\n\n");
+    }
+    let range: Vec<&str> = if staged {
+        vec!["diff", "--cached"]
+    } else if st.head.is_some() {
+        vec!["diff", "HEAD"]
+    } else {
+        vec!["diff"]
+    };
+    let stat = repo.git(&[range.clone(), vec!["--stat"]].concat()).unwrap_or_default();
+    let diff = repo.git(&[range, vec!["--no-color", "--no-ext-diff"]].concat())?;
+    out.push_str(if staged { "The staged changes:\n" } else { "The changes:\n" });
+    out.push_str(stat.trim_end());
+    out.push_str("\n\n");
+    out.push_str(&diff);
+    if !staged {
+        let new: Vec<&str> = st.untracked.iter().map(|c| c.path.as_str()).collect();
+        for path in new.iter().take(12) {
+            if out.len() > max {
+                break;
+            }
+            match read_file(repo, path, 8 * 1024) {
+                Ok(text) => out.push_str(&format!("\nNew file {path}:\n{text}\n")),
+                Err(_) => out.push_str(&format!("\nNew file {path} (binary)\n")),
+            }
+        }
+        if new.len() > 12 {
+            out.push_str(&format!("\n…and {} more new files\n", new.len() - 12));
+        }
+    }
+    if out.len() > max {
+        let mut cut = max;
+        while !out.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        out.truncate(cut);
+        out.push_str("\n…(cut)\n");
+    }
+    Ok(out)
+}
+
 /// An image file's type, from its extension (`None`: not one oah shows).
 pub fn image_mime(path: &str) -> Option<&'static str> {
     let ext = path.rsplit('.').next()?.to_ascii_lowercase();

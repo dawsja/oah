@@ -463,6 +463,7 @@ pub fn run() {
             git::files_grep,
             git::file_read,
             git::file_read_image,
+            git::git_suggest_message,
             git::worktree_list,
             git::worktree_create,
             git::worktree_remove,

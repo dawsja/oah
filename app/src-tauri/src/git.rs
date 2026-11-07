@@ -1,6 +1,7 @@
 //! Git commands for the side panel. Each names the project and, optionally, the folder inside
 //! it to use (a worktree); git runs where the project is.
 
+use oah_core::settings::{AgentKind, Location};
 use oah_git::{self as git, Branch, Change, GraphRow, GrepHit, Repo, Status, SyncOp};
 use tauri::{AppHandle, Manager};
 
@@ -123,6 +124,67 @@ pub async fn file_read(app: AppHandle, project_id: String, cwd: Option<String>, 
 #[tauri::command]
 pub async fn file_read_image(app: AppHandle, project_id: String, cwd: Option<String>, path: String) -> CmdResult<String> {
     with(app, project_id, cwd, move |r| git::read_image(r, &path, 20 * 1024 * 1024)).await
+}
+
+/// A commit message for what's staged (or everything, when nothing is), written by the project's
+/// agent with its cheapest model. Returns the message and which model wrote it.
+#[tauri::command]
+pub async fn git_suggest_message(app: AppHandle, project_id: String, cwd: Option<String>) -> CmdResult<(String, String)> {
+    let r = repo(&app, &project_id, cwd)?;
+    let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+    let project = settings.projects.iter().find(|p| p.id == project_id).cloned().ok_or("no such project")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let context = git::commit_context(&r, 40_000)?;
+        if context.trim_end().ends_with("changes:") {
+            return Err("There's nothing to commit.".to_string());
+        }
+        let question = format!("{COMMIT_PROMPT}\n\n{context}");
+        // The project's agent first, then the others; each with its cheapest model.
+        let first = project.default_agent.unwrap_or(settings.providers.default_agent);
+        let mut tried = Vec::new();
+        for kind in std::iter::once(first).chain([AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode]) {
+            if kind == AgentKind::Acp || tried.contains(&kind) {
+                continue;
+            }
+            tried.push(kind);
+            let provider = settings.providers.get(kind);
+            if !provider.enabled {
+                continue;
+            }
+            let binary = provider.binary_on(&r.location);
+            if r.location == Location::Local && oah_agents::probe::resolve(kind, &binary).is_none() {
+                continue;
+            }
+            let cheap = oah_agents::oneshot::cheapest(kind, &binary, &r.location, &r.path);
+            match oah_agents::oneshot::ask(kind, &binary, &r.location, &r.path, &cheap, &question) {
+                Ok(reply) => {
+                    let msg = oah_agents::oneshot::clean_message(&reply);
+                    if !msg.is_empty() {
+                        return Ok((msg, format!("{} · {}", kind_label(kind), cheap.label)));
+                    }
+                }
+                Err(e) if e.contains("isn't installed") => continue,
+                Err(e) => return Err(format!("{} couldn't write it: {e}", kind_label(kind))),
+            }
+        }
+        Err("No agent CLI is set up to write it (Settings → Providers).".to_string())
+    })
+    .await
+    .map_err(err)?
+}
+
+const COMMIT_PROMPT: &str = "Write the git commit message for the change below. Reply with the message only: no quotes, \
+no code fences, no preamble. First line: a summary in the imperative mood, at most 72 characters, \
+in the style of the recent subjects. Then, only if the change needs explaining, a blank line and \
+a few short lines on what changed and why. Don't describe what's obvious from the summary.";
+
+fn kind_label(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Claude => "Claude Code",
+        AgentKind::Codex => "Codex",
+        AgentKind::Opencode => "OpenCode",
+        AgentKind::Acp => "ACP agent",
+    }
 }
 
 // ---- Worktrees and pull requests -------------------------------------------------------------

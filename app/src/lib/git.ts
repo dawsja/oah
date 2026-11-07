@@ -62,6 +62,8 @@ export const git = {
   files: (s: Scope) => call<string[]>("files_list", s),
   grep: (s: Scope, pattern: string) => call<GrepHit[]>("files_grep", s, { pattern }),
   read: (s: Scope, path: string) => call<string>("file_read", s, { path }),
+  /** A commit message for what's staged (or everything), from the cheapest model: [message, who]. */
+  suggestMessage: (s: Scope) => call<[string, string]>("git_suggest_message", s),
   /** An image file as a `data:` URL. */
   readImage: (s: Scope, path: string) => call<string>("file_read_image", s, { path }),
   prState: (s: Scope) => call<PrState>("pr_state", s),

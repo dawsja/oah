@@ -1,6 +1,7 @@
 import { useState } from "react"
-import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, CloudDownload, FileDiff, Minus, Plus, RefreshCw, Undo2 } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, CloudDownload, FileDiff, LoaderCircle, Minus, Plus, RefreshCw, Sparkles, Undo2 } from "lucide-react"
 import { confirmAction } from "@/components/Prompt"
+import { toast } from "sonner"
 import { Tip } from "@/components/Tip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { git, KIND_COLOR, KIND_LETTER, type Change, type Scope, type Status } from "@/lib/git"
@@ -21,6 +22,8 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
   const run = useGit((s) => s.run)
   const busy = useGit((s) => s.busy)
   const [message, setMessage] = useState("")
+  const [writing, setWriting] = useState(false)
+  const [writtenBy, setWrittenBy] = useState<string | null>(null)
   const changes = [...status.unstaged, ...status.untracked]
   const nothingStaged = status.staged.length === 0
   const total = status.staged.length + changes.length + status.conflicted.length
@@ -29,6 +32,7 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
     const hash = await run(scope, opts.amend ? "Amending…" : "Committing…", () => git.commit(scope, message, !!opts.amend, nothingStaged))
     if (hash === undefined) return
     setMessage("")
+    setWrittenBy(null)
     if (opts.push) await run(scope, "Pushing…", () => git.sync(scope, "push"))
   }
 
@@ -79,9 +83,13 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
       </div>
 
       <div className="border-b p-3">
+        <div className="relative">
         <textarea
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          onChange={(e) => {
+            setMessage(e.target.value)
+            setWrittenBy(null)
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && e.ctrlKey) {
               e.preventDefault()
@@ -89,9 +97,33 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
             }
           }}
           rows={3}
-          placeholder={`Message (Ctrl Enter to commit on ${status.branch ?? "HEAD"})`}
-          className="rounded-md block w-full resize-none border border-input bg-background px-2.5 py-2 text-[12.5px] outline-none placeholder:text-faint focus:border-ring/70"
+          readOnly={writing}
+          placeholder={writing ? "Writing a commit message…" : `Message (Ctrl Enter to commit on ${status.branch ?? "HEAD"})`}
+          className={cn("rounded-md block w-full resize-none border border-input bg-background py-2 pr-8 pl-2.5 text-[12.5px] outline-none placeholder:text-faint focus:border-ring/70", writing && "shimmer")}
         />
+          <Tip content={writing ? "Writing…" : nothingStaged ? "Write a message from all changes (cheapest model)" : "Write a message from the staged changes (cheapest model)"}>
+            <button
+              className="rounded-md absolute top-1.5 right-1.5 grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-gold disabled:opacity-50"
+              aria-label="Write a commit message"
+              disabled={writing || total === 0}
+              onClick={async () => {
+                setWriting(true)
+                try {
+                  const [msg, by] = await git.suggestMessage(scope)
+                  setMessage(msg)
+                  setWrittenBy(by)
+                } catch (e) {
+                  toast.error(String(e))
+                } finally {
+                  setWriting(false)
+                }
+              }}
+            >
+              {writing ? <LoaderCircle className="size-3.5 animate-spin text-gold" /> : <Sparkles className="size-3.5" />}
+            </button>
+          </Tip>
+        </div>
+        {writtenBy ? <div className="mt-1 text-[10.5px] text-faint">Written by {writtenBy}. Check it before you commit.</div> : null}
         <div className="mt-2 flex">
           <button
             className="rounded-l-md flex h-7 flex-1 items-center justify-center gap-1.5 bg-primary text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint"

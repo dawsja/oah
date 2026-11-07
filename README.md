@@ -25,7 +25,9 @@ Electron.
 - **Projects and worktrees.** Each project lists its worktrees and the chats in each one. A new
   worktree is a branch in its own folder, so several chats can work on one repo at once.
 - **Side panel.** Files (tree, filter, search in files, add to chat), Source Control (stage,
-  discard, commit, branches, push, pull, sync), History (graph), Pull Request (`gh`: open one,
+  discard, commit, branches, push, pull, sync; the sparkle in the message box writes the commit
+  message from the changes with the project agent's cheapest model: Haiku, Codex's fast model,
+  or a free OpenCode one), History (graph), Pull Request (`gh`: open one,
   review state, checks).
 - **WSL.** On Windows, a project can live in a WSL distro. oah runs the agent CLI, git, gh and
   file reads inside the distro (`wsl.exe -d <distro> -e …`), so the agent works on Linux files
