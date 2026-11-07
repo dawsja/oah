@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window: app commands, window controls, dialogs, clipboard and opening links.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:webview:default",
+    "dialog:allow-open",
+    "dialog:allow-ask",
+    "clipboard-manager:allow-write-text",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }, { "url": "http://*" }]
+    },
+    "opener:allow-reveal-item-in-dir"
+  ]
+}

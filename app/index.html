@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>oah</title>
+    <script>
+      // Paint the saved theme before React loads, so the window never flashes the wrong one.
+      try {
+        var t = localStorage.getItem("oah.theme") || "system";
+        var dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+      } catch (e) { document.documentElement.classList.add("dark"); }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

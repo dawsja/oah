@@ -1,0 +1,28 @@
+[package]
+name = "oah-app"
+description = "oah — open agent harness, the desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "oah"
+
+[[bin]]
+name = "oah"
+path = "src/main.rs"
+
+[lib]
+name = "oah_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+oah-core.workspace = true
+oah-agents = { path = "../../crates/oah-agents" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.12", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
