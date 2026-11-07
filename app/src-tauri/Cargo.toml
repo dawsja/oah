@@ -22,9 +22,15 @@ oah-core.workspace = true
 oah-agents.workspace = true
 oah-git.workspace = true
 oah-transport.workspace = true
+oah-voice.workspace = true
+base64 = "0.22"
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
+
+[target.'cfg(windows)'.dependencies]
+# Answering WebView2's microphone prompt for voice (wry's own copy).
+webview2-com = "=0.39.1"

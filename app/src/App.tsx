@@ -11,6 +11,7 @@ import { Sidebar } from "@/components/shell/Sidebar"
 import { TitleBar } from "@/components/shell/TitleBar"
 import { useApp } from "@/store/app"
 import { useChats } from "@/store/chats"
+import { initVoice } from "@/lib/voice"
 
 export function App() {
   const load = useApp((s) => s.load)
@@ -20,7 +21,10 @@ export function App() {
   const setLayout = useApp((s) => s.setLayout)
 
   useEffect(() => {
-    load().then(() => useChats.getState().init())
+    load().then(() => {
+      useChats.getState().init()
+      initVoice()
+    })
   }, [load])
 
   useEffect(() => {

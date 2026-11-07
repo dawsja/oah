@@ -1,0 +1,6 @@
+# Voice (crates/oah-voice): transcribe.cpp / ggml must not be tuned to the CPU that builds it:
+# the release installer is built on GitHub's machines (AVX-512), and on a PC without those
+# instructions transcribing crashed with an illegal instruction (a Ryzen 7 3700X). A portable floor instead: AVX2, FMA, F16C and BMI2, which every CPU Windows 11 runs on
+# has, and no AVX-512. transcribe-cpp-sys passes these to CMake and rebuilds when they change.
+[env]
+TRANSCRIBE_CMAKE_ARGS = "-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF -DGGML_AVX512_BF16=OFF -DGGML_AVX_VNNI=OFF"

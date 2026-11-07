@@ -3,6 +3,7 @@
 
 mod chats;
 mod git;
+mod voice;
 
 use std::sync::Mutex;
 
@@ -20,6 +21,7 @@ use tauri::{AppHandle, Manager, State};
 pub(crate) struct AppState {
     pub(crate) settings: Mutex<Settings>,
     chats: chats::Chats,
+    voice: voice::Voice,
 }
 
 pub(crate) type CmdResult<T> = Result<T, String>;
@@ -60,7 +62,9 @@ fn settings_get(state: State<AppState>) -> Settings {
 
 /// Replaces the settings with `settings` and saves them.
 #[tauri::command]
-fn settings_set(state: State<AppState>, settings: Settings) -> CmdResult<Settings> {
+fn settings_set(state: State<AppState>, mut settings: Settings) -> CmdResult<Settings> {
+    // Voice on/off follows the model download (voice.rs), not the page's copy.
+    settings.voice.enabled = state.settings.lock().unwrap().voice.enabled;
     settings.save(&paths::settings_file()).map_err(err)?;
     *state.settings.lock().unwrap() = settings.clone();
     Ok(settings)
@@ -221,7 +225,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .manage(AppState { settings: Mutex::new(settings), chats: chats::Chats::new(ChatStore::new(paths::chats_dir())) })
+        .manage(AppState { settings: Mutex::new(settings), chats: chats::Chats::new(ChatStore::new(paths::chats_dir())), voice: voice::Voice::default() })
+        .setup(|app| {
+            // Voice state (and with it the microphone answer) before the page asks.
+            let _ = voice::voice_state(app.handle().clone());
+            #[cfg(windows)]
+            if let Some(w) = app.get_webview_window("main") {
+                voice::answer_microphone(&w);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             app_info,
             settings_get,
@@ -266,6 +279,10 @@ pub fn run() {
             git::worktree_remove,
             git::pr_state,
             git::pr_create,
+            voice::voice_state,
+            voice::voice_enable,
+            voice::voice_disable,
+            voice::voice_transcribe,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oah")

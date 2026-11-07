@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react"
-import { ArrowUp, ChevronDown, Mic, Paperclip, Square } from "lucide-react"
+import { ArrowUp, ChevronDown, Paperclip, Square } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { AgentGlyph } from "@/components/icons"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { AGENTS, AGENT_LABEL, PERMISSION_LABEL, type AgentKind, type PermissionMode } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { Dictation } from "./Dictation"
 
 export type ComposerProps = {
   agent: AgentKind
@@ -114,11 +115,7 @@ export function Composer(p: ComposerProps) {
               <Paperclip className="size-3.5" />
             </button>
           </Tip>
-          <Tip content="Dictate (hold Ctrl Space)">
-            <button className="grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Dictate">
-              <Mic className="size-3.5" />
-            </button>
-          </Tip>
+          <Dictation onText={(t) => window.dispatchEvent(new CustomEvent("oah:insert", { detail: t + " " }))} />
           {p.running ? (
             <Tip content="Stop (Esc)">
               <button className="ml-1 grid size-7 place-items-center bg-foreground text-background hover:opacity-90" aria-label="Stop" onClick={p.onStop}>

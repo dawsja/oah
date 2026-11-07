@@ -3,6 +3,8 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useApp } from "@/store/app"
+import { useVoice, voice as voiceApi } from "@/lib/voice"
+import { toast } from "sonner"
 import { Group, Row, Section } from "./layout"
 
 /** Microphones the webview can see (labels appear once mic access was granted). */
@@ -21,6 +23,18 @@ export function VoiceSection() {
   const voice = useApp((s) => s.settings!.voice)
   const update = useApp((s) => s.update)
   const mics = useMicrophones()
+  const state = useVoice((s) => s.state)
+  const on = state.state === "ready" || state.state === "downloading"
+  const toggle = (v: boolean) => (v ? voiceApi.enable() : voiceApi.disable()).catch((e) => toast.error(String(e)))
+  const label =
+    state.state === "ready"
+      ? "ready · runs on this computer"
+      : state.state === "downloading"
+        ? `downloading ${state.percent}%`
+        : state.state === "error" || state.state === "unsupported"
+          ? state.error
+          : "off"
+  const pct = state.state === "downloading" ? state.percent : state.state === "ready" ? 100 : 0
 
   return (
     <Section title="Voice" description="Dictate prompts. Speech is turned into text on this computer: nothing you say leaves it.">
@@ -29,13 +43,15 @@ export function VoiceSection() {
           label="Speech to text"
           description="Turning it on downloads NVIDIA Parakeet (0.6B, about 731 MB) once. Turning it off deletes it."
         >
-          <Switch checked={voice.enabled} onCheckedChange={(v) => update((s) => void (s.voice.enabled = v))} aria-label="Speech to text" />
+          <Switch checked={on} disabled={state.state === "unsupported"} onCheckedChange={toggle} aria-label="Speech to text" />
         </Row>
         <div className="flex items-center gap-3 px-4 py-2.5">
-          <div className="h-1.5 flex-1 bg-muted">
-            <div className="h-full bg-primary" style={{ width: voice.enabled ? "0%" : "0%" }} />
+          <div className="flex h-2 flex-1 gap-px">
+            {Array.from({ length: 40 }, (_, i) => (
+              <span key={i} className={i < Math.round(pct / 2.5) ? "flex-1 bg-primary" : "flex-1 bg-muted"} />
+            ))}
           </div>
-          <span className="font-mono text-[11px] text-faint">{voice.enabled ? "model not downloaded" : "off"}</span>
+          <span className={state.state === "error" || state.state === "unsupported" ? "max-w-[60%] truncate text-[11px] text-red" : "font-mono text-[11px] text-faint"}>{label}</span>
         </div>
       </Group>
       <Group title="Input">
