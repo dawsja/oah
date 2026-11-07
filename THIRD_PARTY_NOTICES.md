@@ -1,6 +1,6 @@
 # Third-party notices
 
-oah's interface is modeled on, and ports parts of, these MIT-licensed projects.
+oah ports parts of this MIT-licensed project.
 
 ## Orca — https://github.com/stablyai/orca
 
@@ -28,14 +28,9 @@ DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-## T3 Code — https://github.com/pingdotgg/t3code
-
-Both themes follow T3 Code's: the true-black dark theme and the zinc light theme, with oah's yellow in place of its blue.
-Licensed under the MIT License, with the same terms as above (Copyright (c) 2026 T3 Tools Inc.).
-
 ## Agent marks
 
 oah shows each agent next to its name with the agent's own mark: the Claude mark (Anthropic),
-the OpenAI mark for Codex (OpenAI), and the OpenCode mark (from opencode.ai's favicon). The
-SVG paths are as Orca ships them. These marks are trademarks of their owners, used only to
-identify their products; they aren't covered by oah's MIT license.
+the OpenAI mark for Codex (OpenAI), and the OpenCode mark (from opencode.ai's favicon). These
+marks are trademarks of their owners, used only to identify their products; they aren't
+covered by oah's MIT license.

@@ -1,6 +1,6 @@
-// Fuzzy path matching for the composer's @ menu (after Orca's quick-open search): each term is a
-// greedy subsequence of the lowercased path; gaps cost, matches right after / . - _ or at a
-// camelCase hump earn, a term inside the file name earns a lot. Lower scores are better.
+// Fuzzy path matching for the composer's @ menu: each term is a greedy subsequence of the
+// lowercased path; gaps cost, matches right after / . - _ or at a camelCase hump earn, a term
+// inside the file name earns a lot. Lower scores are better.
 
 const BOUNDARY = new Set(["/", ".", "-", "_", "\\"])
 
