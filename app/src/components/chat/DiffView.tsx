@@ -2,6 +2,7 @@ import { useState } from "react"
 import { ChevronDown, ChevronRight, FileDiff as FileDiffIcon } from "lucide-react"
 import type { FileDiff } from "@/lib/chat"
 import { cn } from "@/lib/utils"
+import { useRelative } from "./cwd"
 
 type Line = { cls: "a" | "d" | "h" | "c"; text: string; old?: number; new?: number }
 
@@ -60,12 +61,13 @@ export function DiffStat({ added, removed }: { added: number; removed: number })
 /** A file's diff in the chat: header with the path and counts, lines below (collapsible). */
 export function DiffCard({ diff, defaultOpen = true }: { diff: FileDiff; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
+  const rel = useRelative()
   return (
     <div className="border bg-card">
       <button className="flex h-8 w-full items-center gap-2 px-3 text-left text-[12px] hover:bg-accent" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3 text-faint" /> : <ChevronRight className="size-3 text-faint" />}
         <FileDiffIcon className="size-3.5 text-muted-foreground" />
-        <span className="truncate font-mono">{diff.path}</span>
+        <span className="truncate font-mono">{rel(diff.path)}</span>
         <span className="ml-auto">
           <DiffStat added={diff.added} removed={diff.removed} />
         </span>

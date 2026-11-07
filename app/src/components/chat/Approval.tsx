@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { FilePen, ShieldQuestion, SquareTerminal } from "lucide-react"
 import type { ApprovalRequest, Decision } from "@/lib/chat"
+import { useRelative } from "./cwd"
 import { DiffLines } from "./DiffView"
 
 /** The agent's question, docked above the composer: Allow (Enter), Always (A), Deny (Esc). */
@@ -19,15 +20,16 @@ export function ApprovalCard({ request, onAnswer }: { request: ApprovalRequest; 
     return () => window.removeEventListener("keydown", onKey)
   }, [request, onAnswer])
 
+  const rel = useRelative()
   const Icon = request.kind === "command" ? SquareTerminal : request.kind === "edit" ? FilePen : ShieldQuestion
   return (
     <div className="border border-primary/60 bg-card">
       <div className="flex items-start gap-2.5 px-3.5 pt-3">
         <Icon className="mt-0.5 size-4 shrink-0 text-gold" />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold">{request.title}</div>
+          <div className="text-[13px] font-semibold">{rel(request.title)}</div>
           {request.detail ? (
-            <div className={request.kind === "command" ? "mt-1.5 border bg-background px-2.5 py-1.5 font-mono text-[12px] break-all text-code" : "mt-0.5 text-[12.5px] text-muted-foreground"}>{request.detail}</div>
+            <div className={request.kind === "command" ? "mt-1.5 border bg-background px-2.5 py-1.5 font-mono text-[12px] break-all text-code" : "mt-0.5 text-[12.5px] text-muted-foreground"}>{rel(request.detail)}</div>
           ) : null}
         </div>
       </div>

@@ -68,11 +68,13 @@ export type Transcript = {
   plan: PlanItem[]
   context: { used: number; window: number } | null
   model: string | null
+  /** The agent's working folder, to show paths relative to it. */
+  cwd: string | null
   /** The approval waiting for an answer, if any. */
   pending: ApprovalRequest | null
 }
 
-export const emptyTranscript = (): Transcript => ({ items: [], running: false, plan: [], context: null, model: null, pending: null })
+export const emptyTranscript = (): Transcript => ({ items: [], running: false, plan: [], context: null, model: null, cwd: null, pending: null })
 
 let seq = 0
 const uid = (p: string) => `${p}-${++seq}`
@@ -89,7 +91,7 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
 
   switch (e.type) {
     case "started":
-      return { ...t, model: e.model ?? t.model }
+      return { ...t, model: e.model ?? t.model, cwd: e.cwd ?? t.cwd }
     case "userMessage":
       return push({ kind: "user", id: e.id, text: e.text, images: e.images }, { running: true })
     case "turnStarted":
@@ -164,6 +166,8 @@ export type Block = { kind: "work"; id: string; items: Item[] } | { kind: "item"
 export function blocks(items: Item[]): Block[] {
   const out: Block[] = []
   for (const it of items) {
+    // Allowed requests need no row (the tool row shows what ran); waiting ones are docked.
+    if (it.kind === "approval" && it.decision !== "deny") continue
     const work = it.kind === "reasoning" || it.kind === "tool"
     const last = out[out.length - 1]
     if (work && last?.kind === "work") last.items.push(it)
@@ -190,4 +194,18 @@ export function ago(ms: number, now = Date.now()): string {
   if (s < 3600) return `${Math.floor(s / 60)}m`
   if (s < 86400) return `${Math.floor(s / 3600)}h`
   return `${Math.floor(s / 86400)}d`
+}
+
+/** `path` relative to `cwd` when it's inside it; also drops a leading `cd "<cwd>" && `. */
+export function relative(text: string, cwd: string | null): string {
+  if (!cwd || !text) return text
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "")
+  const base = norm(cwd)
+  let out = text
+  for (const q of ['"', "'", ""]) out = out.replace(`cd ${q}${cwd}${q} && `, "").replace(`cd ${q}${base}${q} && `, "")
+  const flat = norm(out)
+  const win = /^[a-z]:\//i.test(base)
+  if (win ? flat.toLowerCase().startsWith(base.toLowerCase() + "/") : flat.startsWith(base + "/")) return flat.slice(base.length + 1)
+  // Paths inside a longer text (a command): drop the folder prefix wherever it appears.
+  return out.split(cwd.replace(/[\\/]+$/, "") + (cwd.includes("\\") ? "\\" : "/")).join("")
 }

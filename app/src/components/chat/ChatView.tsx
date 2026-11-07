@@ -12,6 +12,7 @@ import { useApp, useProject } from "@/store/app"
 import { useChats } from "@/store/chats"
 import { ApprovalCard } from "./Approval"
 import { Composer } from "./Composer"
+import { CwdContext } from "./cwd"
 import { Transcript } from "./Transcript"
 
 /** The middle of the window: the open chat, or a new one in the current project. */
@@ -79,6 +80,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
   const chats = useChats.getState()
 
   return (
+    <CwdContext.Provider value={transcript.cwd ?? meta.cwd}>
     <div className="flex h-full min-w-0 flex-col bg-background">
       <ChatHeader meta={meta} transcript={transcript} model={transcript.model || meta.model || d.model} />
       <Transcript transcript={transcript} className="flex-1" />
@@ -99,6 +101,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
         />
       </div>
     </div>
+    </CwdContext.Provider>
   )
 }
 

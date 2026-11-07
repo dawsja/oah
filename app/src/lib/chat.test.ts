@@ -56,3 +56,15 @@ describe("blocks", () => {
   })
 })
 
+
+describe("relative", () => {
+  it("shortens paths inside the working folder", async () => {
+    const { relative } = await import("./chat")
+    const cwd = String.raw`C:\Users\me\demo`
+    expect(relative(String.raw`C:\Users\me\demo\src\cart.js`, cwd)).toBe("src/cart.js")
+    expect(relative(String.raw`cd "C:\Users\me\demo" && npm test`, cwd)).toBe("npm test")
+    expect(relative(String.raw`cat C:\Users\me\demo\a.txt`, cwd)).toBe("cat a.txt")
+    expect(relative("/home/u/x/a.rs", "/home/u/x")).toBe("a.rs")
+    expect(relative("/home/u/xy/a.rs", "/home/u/x")).toBe("/home/u/xy/a.rs")
+  })
+})

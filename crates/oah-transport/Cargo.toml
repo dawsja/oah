@@ -1,0 +1,10 @@
+[package]
+name = "oah-transport"
+description = "oah: runs a program in a folder on this computer or on an SSH host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oah-core.workspace = true
+which = "8"

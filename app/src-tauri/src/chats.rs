@@ -52,7 +52,17 @@ impl Chats {
                 let _ = self.store.save(m);
             }
         }
-        live.get_mut(chat_id).unwrap().send(prompt)
+        match live.get_mut(chat_id).unwrap().send(prompt.clone()) {
+            // The CLI exited since the last message: start it again, resuming its session.
+            Err(e) if e.contains("isn't running") => {
+                live.remove(chat_id);
+                let mut driver = self.start(app, settings, chat_id, permission)?;
+                let r = driver.send(prompt);
+                live.insert(chat_id.to_string(), driver);
+                r
+            }
+            r => r,
+        }
     }
 
     fn start(&self, app: &AppHandle, settings: &Settings, chat_id: &str, permission: Option<PermissionMode>) -> Result<Box<dyn Driver>, String> {

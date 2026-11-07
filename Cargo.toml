@@ -10,6 +10,8 @@ repository = "https://github.com/dawsja/oah"
 
 [workspace.dependencies]
 oah-core = { path = "crates/oah-core" }
+oah-transport = { path = "crates/oah-transport" }
+oah-agents = { path = "crates/oah-agents" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

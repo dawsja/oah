@@ -2279,6 +2279,7 @@ name = "oah-agents"
 version = "0.2.0"
 dependencies = [
  "oah-core",
+ "oah-transport",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -2310,6 +2311,14 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "uuid",
+]
+
+[[package]]
+name = "oah-transport"
+version = "0.2.0"
+dependencies = [
+ "oah-core",
+ "which",
 ]
 
 [[package]]

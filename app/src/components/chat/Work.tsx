@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Brain, Check, ChevronDown, ChevronRight, FilePen, FileText, Globe, ListTree, Loader2, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react"
 import type { Item, ToolItem, ToolKind } from "@/lib/chat"
 import { cn } from "@/lib/utils"
+import { useRelative } from "./cwd"
 import { DiffCard, DiffStat } from "./DiffView"
 
 const ICON: Record<ToolKind, LucideIcon> = {
@@ -72,6 +73,7 @@ function Reasoning({ text }: { text: string }) {
 
 export function ToolRow({ item }: { item: ToolItem }) {
   const [open, setOpen] = useState(false)
+  const rel = useRelative()
   const Icon = ICON[item.tool.kind]
   const hasOutput = !!item.output.trim()
   return (
@@ -83,7 +85,7 @@ export function ToolRow({ item }: { item: ToolItem }) {
       >
         <Icon className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="shrink-0 text-muted-foreground">{VERB[item.tool.kind]}</span>
-        <span className={cn("min-w-0 truncate font-mono text-[12px]", item.tool.kind === "bash" ? "text-code" : "text-foreground")}>{item.tool.title}</span>
+        <span className={cn("min-w-0 truncate font-mono text-[12px]", item.tool.kind === "bash" ? "text-code" : "text-foreground")}>{rel(item.tool.title)}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
           {item.diff ? <DiffStat added={item.diff.added} removed={item.diff.removed} /> : null}
           {item.status === "running" ? (
