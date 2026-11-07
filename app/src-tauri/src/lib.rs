@@ -3,6 +3,7 @@
 
 mod chats;
 mod git;
+mod secrets;
 mod voice;
 
 use std::sync::Mutex;
@@ -63,8 +64,10 @@ fn settings_get(state: State<AppState>) -> Settings {
 /// Replaces the settings with `settings` and saves them.
 #[tauri::command]
 fn settings_set(state: State<AppState>, mut settings: Settings) -> CmdResult<Settings> {
+    let before = state.settings.lock().unwrap().clone();
     // Voice on/off follows the model download (voice.rs), not the page's copy.
-    settings.voice.enabled = state.settings.lock().unwrap().voice.enabled;
+    settings.voice.enabled = before.voice.enabled;
+    secrets::stash(&mut settings, &before)?;
     settings.save(&paths::settings_file()).map_err(err)?;
     *state.settings.lock().unwrap() = settings.clone();
     Ok(settings)
@@ -202,6 +205,21 @@ fn chat_answer(state: State<AppState>, chat_id: String, request_id: String, deci
 }
 
 #[tauri::command]
+fn chat_answer_question(
+    state: State<AppState>,
+    chat_id: String,
+    request_id: String,
+    answers: std::collections::BTreeMap<String, Vec<String>>,
+) -> CmdResult<()> {
+    state.chats.answer_question(&chat_id, &request_id, answers)
+}
+
+#[tauri::command]
+fn chat_set_model(state: State<AppState>, chat_id: String, model: String) -> CmdResult<ChatMeta> {
+    state.chats.set_model(&chat_id, &model)
+}
+
+#[tauri::command]
 fn chat_set_permission(state: State<AppState>, chat_id: String, mode: PermissionMode) -> CmdResult<()> {
     state.chats.set_permission(&chat_id, mode)
 }
@@ -226,14 +244,22 @@ fn chat_rename(state: State<AppState>, chat_id: String, title: String) -> CmdRes
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let settings = Settings::load(&paths::settings_file()).unwrap_or_else(|e| {
+    let mut settings = Settings::load(&paths::settings_file()).unwrap_or_else(|e| {
         eprintln!("oah: {e}; starting with default settings");
         Settings::default()
     });
+    // Values typed before the keychain existed move there now.
+    let before = settings.clone();
+    if secrets::stash(&mut settings, &before).is_ok() && settings != before {
+        let _ = settings.save(&paths::settings_file());
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
+        // Window size, position and maximized state, remembered between runs.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState {
             settings: Mutex::new(settings),
             chats: chats::Chats::new(ChatStore::new(paths::chats_dir())),
@@ -269,6 +295,8 @@ pub fn run() {
             chat_interrupt,
             chat_answer,
             chat_set_permission,
+            chat_answer_question,
+            chat_set_model,
             chat_close,
             chat_delete,
             chat_rename,

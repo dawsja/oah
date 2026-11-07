@@ -5,7 +5,7 @@ import { useRelative } from "./cwd"
 import { DiffLines } from "./DiffView"
 
 /** The agent's question, docked above the composer: Allow (Enter), Always (A), Deny (Esc). */
-export function ApprovalCard({ request, onAnswer }: { request: ApprovalRequest; onAnswer: (d: Decision) => void }) {
+export function ApprovalCard({ request, queued = 0, onAnswer }: { request: ApprovalRequest; queued?: number; onAnswer: (d: Decision) => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLTextAreaElement && e.target.value.trim() !== ""
@@ -27,7 +27,10 @@ export function ApprovalCard({ request, onAnswer }: { request: ApprovalRequest; 
       <div className="flex items-start gap-2.5 px-3.5 pt-3">
         <Icon className="mt-0.5 size-4 shrink-0 text-gold" />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold">{rel(request.title)}</div>
+          <div className="flex items-baseline gap-2 text-[13px] font-semibold">
+            {rel(request.title)}
+            {queued ? <span className="rounded-sm border px-1 text-[10.5px] font-normal text-muted-foreground">+{queued} more waiting</span> : null}
+          </div>
           {request.detail ? (
             <div className={request.kind === "command" ? "rounded-md mt-1.5 border bg-background px-2.5 py-1.5 font-mono text-[12px] break-all text-code" : "mt-0.5 text-[12.5px] text-muted-foreground"}>{rel(request.detail)}</div>
           ) : null}

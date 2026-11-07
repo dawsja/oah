@@ -36,6 +36,11 @@ struct State {
     pending: HashMap<String, (Value, Value)>,
     /// The turn being run, for `TurnFinished`.
     turn_id: Option<String>,
+    /// Messages sent while a turn ran: Claude runs each as its own turn after the current one.
+    queued: u32,
+    seq: u32,
+    /// AskUserQuestion requests waiting: request id → the tool input.
+    questions: HashMap<String, Value>,
     /// `total_cost_usd` is per process; turns report the difference.
     cost_so_far: f64,
     /// Messages whose text arrived as stream deltas (their final text isn't sent again).
@@ -162,6 +167,7 @@ impl Driver for ClaudeDriver {
                 s.turn_id = Some(turn_id.clone());
                 true
             } else {
+                s.queued += 1;
                 false
             }
         };
@@ -186,6 +192,26 @@ impl Driver for ClaudeDriver {
         };
         (self.sink)(ChatEvent::ApprovalResolved { request_id: request_id.into(), decision });
         self.write(&json!({"type": "control_response", "response": {"subtype": "success", "request_id": request_id, "response": response}}))
+    }
+
+    fn answer_question(&mut self, request_id: &str, answers: std::collections::BTreeMap<String, Vec<String>>) -> DriverResult<()> {
+        let input = self.state.lock().unwrap().questions.remove(request_id).ok_or("that question was already answered")?;
+        // AskUserQuestion takes answers keyed by the question's text; several picks are joined.
+        let mut by_text = serde_json::Map::new();
+        for (i, q) in input["questions"].as_array().into_iter().flatten().enumerate() {
+            let text = q["question"].as_str().unwrap_or("").to_string();
+            if let Some(a) = answers.get(&format!("q{i}")).filter(|a| !a.is_empty()) {
+                by_text.insert(text, json!(a.join(", ")));
+            }
+        }
+        (self.sink)(ChatEvent::QuestionResolved { request_id: request_id.into(), answers });
+        let response = json!({"behavior": "allow", "updatedInput": {"questions": input["questions"], "answers": by_text}});
+        self.write(&json!({"type": "control_response", "response": {"subtype": "success", "request_id": request_id, "response": response}}))
+    }
+
+    fn set_model(&mut self, model: &str) -> DriverResult<()> {
+        let m = if model.is_empty() { Value::Null } else { json!(model) };
+        self.write(&json!({"type": "control_request", "request_id": format!("oah-model-{}", self.turn), "request": {"subtype": "set_model", "model": m}}))
     }
 
     fn set_permission(&mut self, mode: PermissionMode) -> DriverResult<()> {
@@ -227,11 +253,14 @@ impl Translator {
 
     fn handle(&mut self, v: &Value) {
         match v["type"].as_str().unwrap_or("") {
-            "system" if v["subtype"] == "init" => self.emit(ChatEvent::Started {
-                session_id: v["session_id"].as_str().map(String::from),
-                model: v["model"].as_str().map(String::from),
-                cwd: v["cwd"].as_str().map(String::from),
-            }),
+            "system" if v["subtype"] == "init" => {
+                self.emit(ChatEvent::Started {
+                    session_id: v["session_id"].as_str().map(String::from),
+                    model: v["model"].as_str().map(String::from),
+                    cwd: v["cwd"].as_str().map(String::from),
+                });
+                self.emit(ChatEvent::Models { models: models(), current: v["model"].as_str().map(String::from) });
+            }
             "stream_event" => self.stream_event(&v["event"]),
             "assistant" => self.assistant(v),
             "user" => self.tool_results(v),
@@ -346,6 +375,50 @@ impl Translator {
         let request_id = v["request_id"].as_str().unwrap_or("").to_string();
         let name = req["tool_name"].as_str().unwrap_or("");
         let input = req["input"].clone();
+        if name == "AskUserQuestion" {
+            let questions = input["questions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, q)| Question {
+                    id: format!("q{i}"),
+                    header: q["header"].as_str().unwrap_or("").into(),
+                    question: q["question"].as_str().unwrap_or("").into(),
+                    options: q["options"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|o| QuestionOption {
+                            label: o["label"].as_str().unwrap_or("").into(),
+                            description: o["description"].as_str().unwrap_or("").into(),
+                        })
+                        .collect(),
+                    multi: q["multiSelect"].as_bool().unwrap_or(false),
+                    other: true,
+                    secret: false,
+                })
+                .collect();
+            self.state.lock().unwrap().questions.insert(request_id.clone(), input);
+            self.emit(ChatEvent::Question { request: QuestionRequest { request_id, questions } });
+            return;
+        }
+        if name == "ExitPlanMode" {
+            let plan = input["plan"].as_str().map(String::from);
+            self.state.lock().unwrap().pending.insert(request_id.clone(), (input, req["permission_suggestions"].clone()));
+            self.emit(ChatEvent::Approval {
+                request: ApprovalRequest {
+                    request_id,
+                    item_id: req["tool_use_id"].as_str().map(String::from),
+                    kind: ApprovalKind::Other,
+                    title: "Leave plan mode and start on this plan?".into(),
+                    detail: plan,
+                    diff: None,
+                    can_remember: false,
+                },
+            });
+            return;
+        }
         let call = tool_call(name, &input);
         let (kind, title, detail, diff) = match call.kind {
             ToolKind::Bash => (ApprovalKind::Command, "Run a command".to_string(), input["command"].as_str().map(String::from), None),
@@ -381,6 +454,7 @@ impl Translator {
             let cost = (total - s.cost_so_far).max(0.0);
             s.cost_so_far = total;
             s.pending.clear();
+            s.questions.clear();
             (s.turn_id.take(), cost)
         };
         let u = &v["usage"];
@@ -420,7 +494,31 @@ impl Translator {
                 self.emit(ChatEvent::Context { used_tokens: used, window_tokens: window });
             }
         }
+        // A message sent during that turn runs now, as the next turn.
+        let next = {
+            let mut s = self.state.lock().unwrap();
+            if s.queued > 0 {
+                s.queued -= 1;
+                s.seq += 1;
+                let id = format!("turn-q{}", s.seq);
+                s.turn_id = Some(id.clone());
+                Some(id)
+            } else {
+                None
+            }
+        };
+        if let Some(turn_id) = next {
+            self.emit(ChatEvent::TurnStarted { turn_id });
+        }
     }
+}
+
+/// The models Claude Code takes by alias (any full model id works too).
+pub fn models() -> Vec<ModelOption> {
+    [("opus", "Opus", "Most capable"), ("sonnet", "Sonnet", "Fast and capable"), ("haiku", "Haiku", "Fastest, cheapest")]
+        .into_iter()
+        .map(|(id, name, description)| ModelOption { id: id.into(), name: name.into(), description: description.into() })
+        .collect()
 }
 
 /// Claude's tool names to oah's kinds, with a one-line title.
@@ -542,6 +640,8 @@ mod tests {
             json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"ok"}]},"tool_use_result":{"filePath":"a.txt","structuredPatch":[{"oldStart":1,"oldLines":1,"newStart":1,"newLines":1,"lines":["-hello","+hello world"]}]}}),
             json!({"type":"result","subtype":"success","is_error":false,"duration_ms":6499,"total_cost_usd":0.0123,"usage":{"input_tokens":6,"output_tokens":506,"cache_read_input_tokens":100487,"cache_creation_input_tokens":54628,"iterations":[{"input_tokens":2,"cache_read_input_tokens":54008,"cache_creation_input_tokens":620}]},"modelUsage":{"claude-haiku-5-5":{"contextWindow":1000000}}}),
         ]);
+        assert!(matches!(&ev[1], ChatEvent::Models { models, current: Some(c) } if models.len() == 3 && c == "claude-haiku-5-5"));
+        let ev: Vec<ChatEvent> = ev.into_iter().filter(|e| !matches!(e, ChatEvent::Models { .. })).collect();
         assert!(matches!(&ev[0], ChatEvent::Started { session_id: Some(s), .. } if s == "s1"));
         assert!(matches!(&ev[1], ChatEvent::TextDelta { item_id, text } if item_id == "m1:0" && text == "Hi"));
         assert!(!ev.iter().any(|e| matches!(e, ChatEvent::Text { .. })), "streamed text isn't sent twice");
@@ -566,6 +666,20 @@ mod tests {
             e => panic!("{e:?}"),
         }
         assert!(matches!(&ev[6], ChatEvent::Context { used_tokens: 54630, window_tokens: 1_000_000 }));
+    }
+
+    #[test]
+    fn asks_questions_and_queues_turns() {
+        let ev = run(&[
+            json!({"type":"control_request","request_id":"q1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which database?","header":"DB","multiSelect":false,"options":[{"label":"Postgres","description":"SQL"},{"label":"SQLite","description":"file"}]}]}}}),
+        ]);
+        match &ev[0] {
+            ChatEvent::Question { request } => {
+                assert_eq!(request.questions[0].id, "q0");
+                assert_eq!(request.questions[0].options[1].label, "SQLite");
+            }
+            e => panic!("{e:?}"),
+        }
     }
 
     #[test]

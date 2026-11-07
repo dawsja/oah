@@ -24,12 +24,15 @@ oah-git.workspace = true
 oah-transport.workspace = true
 oah-voice.workspace = true
 base64 = "0.22"
+keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-window-state = "2"
 
 [target.'cfg(windows)'.dependencies]
 # Answering WebView2's microphone prompt for voice (wry's own copy).

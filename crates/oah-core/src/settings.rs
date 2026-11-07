@@ -61,6 +61,13 @@ impl Providers {
             AgentKind::Codex => &self.codex,
         }
     }
+
+    pub fn get_mut(&mut self, kind: AgentKind) -> &mut Provider {
+        match kind {
+            AgentKind::Claude => &mut self.claude,
+            AgentKind::Codex => &mut self.codex,
+        }
+    }
 }
 
 /// How much an agent may do without asking.
@@ -107,7 +114,11 @@ impl Default for Provider {
 #[serde(default)]
 pub struct EnvVar {
     pub key: String,
+    /// Empty once the value is in the OS keychain (`in_keychain`).
     pub value: String,
+    /// The value lives in the OS keychain, not in this file.
+    #[serde(rename = "inKeychain")]
+    pub in_keychain: bool,
 }
 
 // ---- Voice -----------------------------------------------------------------------------------

@@ -169,9 +169,9 @@ function EnvRows({ kind, provider }: { kind: AgentKind; provider: Provider }) {
       <div className="flex items-center">
         <div className="flex-1">
           <div className="text-[13px] font-medium">Environment</div>
-          <div className="mt-0.5 text-[12px] text-muted-foreground">Extra variables for the {AGENT_LABEL[kind]} process.</div>
+          <div className="mt-0.5 text-[12px] text-muted-foreground">Extra variables for the {AGENT_LABEL[kind]} process. Values are kept in your OS keychain, not in oah's settings file.</div>
         </div>
-        <Button variant="outline" size="xs" onClick={() => edit((p) => void p.env.push({ key: "", value: "" }))}>
+        <Button variant="outline" size="xs" onClick={() => edit((p) => void p.env.push({ key: "", value: "", inKeychain: false }))}>
           <Plus /> Add
         </Button>
       </div>
@@ -180,7 +180,13 @@ function EnvRows({ kind, provider }: { kind: AgentKind; provider: Provider }) {
           {provider.env.map((v, i) => (
             <div key={i} className="flex gap-1">
               <Input className="h-7 w-48 font-mono text-[12px]" placeholder="NAME" defaultValue={v.key} onBlur={(e) => edit((p) => void (p.env[i].key = e.target.value.trim()))} />
-              <Input className="h-7 flex-1 font-mono text-[12px]" placeholder="value" type="password" defaultValue={v.value} onBlur={(e) => edit((p) => void (p.env[i].value = e.target.value))} />
+              <Input
+                className="h-7 flex-1 font-mono text-[12px]"
+                placeholder={v.inKeychain ? "•••••• saved in keychain (type to replace)" : "value"}
+                type="password"
+                defaultValue={v.value}
+                onBlur={(e) => e.target.value && edit((p) => void (p.env[i].value = e.target.value))}
+              />
               <Button variant="ghost" size="icon-sm" aria-label="Remove" onClick={() => edit((p) => void p.env.splice(i, 1))}>
                 <X />
               </Button>

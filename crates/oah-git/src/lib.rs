@@ -36,7 +36,7 @@ impl Repo {
     fn env() -> Vec<EnvVar> {
         [("GIT_OPTIONAL_LOCKS", "0"), ("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C"), ("GIT_PAGER", "cat")]
             .iter()
-            .map(|(k, v)| EnvVar { key: (*k).into(), value: (*v).into() })
+            .map(|(k, v)| EnvVar { key: (*k).into(), value: (*v).into(), in_keychain: false })
             .collect()
     }
 

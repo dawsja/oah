@@ -13,6 +13,7 @@ import { useChats } from "@/store/chats"
 import { useGit, useScope } from "@/store/git"
 import { Viewer } from "./Viewer"
 import { ApprovalCard } from "./Approval"
+import { QuestionCard } from "./QuestionCard"
 import { Composer } from "./Composer"
 import { CwdContext } from "./cwd"
 import { Transcript } from "./Transcript"
@@ -96,7 +97,11 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
       <Transcript transcript={transcript} className="flex-1" />
       <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-2 px-6 pb-4">
         {transcript.plan.length ? <PlanDock items={transcript.plan} /> : null}
-        {transcript.pending ? <ApprovalCard request={transcript.pending} onAnswer={(dec) => chats.answer(meta.id, transcript.pending!.requestId, dec)} /> : null}
+        {transcript.questions[0] ? (
+          <QuestionCard request={transcript.questions[0]} onAnswer={(a) => chats.answerQuestion(meta.id, transcript.questions[0].requestId, a)} />
+        ) : transcript.approvals[0] ? (
+          <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
+        ) : null}
         <Composer
           agent={meta.agent}
           model={transcript.model || meta.model || d.model}

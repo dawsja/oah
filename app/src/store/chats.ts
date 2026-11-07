@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { create } from "zustand"
 import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript } from "@/lib/chat"
 import { ipc, onChatEvent } from "@/lib/ipc"
+import { notify } from "@/lib/notify"
 import type { AgentKind, PermissionMode } from "@/lib/types"
 import { useApp } from "./app"
 
@@ -21,6 +22,8 @@ type ChatsStore = {
   send(chatId: string | null, text: string, opts: { agent: AgentKind; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] }): Promise<void>
   interrupt(chatId: string): Promise<void>
   answer(chatId: string, requestId: string, decision: Decision): Promise<void>
+  answerQuestion(chatId: string, requestId: string, answers: Record<string, string[]>): Promise<void>
+  setModel(chatId: string, model: string): Promise<void>
   remove(chatId: string): Promise<void>
   rename(chatId: string, title: string): Promise<void>
   setPermission(chatId: string, mode: PermissionMode): void
@@ -85,6 +88,15 @@ export const useChats = create<ChatsStore>((set, get) => ({
     await ipc.chatAnswer(chatId, requestId, decision).catch((e) => toast.error(String(e)))
   },
 
+  async answerQuestion(chatId, requestId, answers) {
+    await ipc.chatAnswerQuestion(chatId, requestId, answers).catch((e) => toast.error(String(e)))
+  },
+
+  async setModel(chatId, model) {
+    const meta = await ipc.chatSetModel(chatId, model).catch((e) => (toast.error(String(e)), null))
+    if (meta) set((s) => ({ metas: s.metas.map((m) => (m.id === chatId ? meta : m)) }))
+  },
+
   async remove(chatId) {
     await ipc.chatDelete(chatId).catch((e) => toast.error(String(e)))
     set((s) => {
@@ -109,6 +121,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
 let queue: [string, ChatEvent][] = []
 let scheduled = false
 function apply(chatId: string, event: ChatEvent) {
+  notify(event, useChats.getState().metas.find((m) => m.id === chatId))
   queue.push([chatId, event])
   if (scheduled) return
   scheduled = true

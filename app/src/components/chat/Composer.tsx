@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 import { ArrowUp, ChevronDown, Paperclip, Square, X } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { AgentGlyph } from "@/components/icons"
@@ -30,6 +31,7 @@ const PERMISSIONS: PermissionMode[] = ["ask", "acceptEdits", "plan", "fullAccess
 export type Attachment = { mime: string; data: string; name: string }
 
 const MAX_IMAGE = 5 * 1024 * 1024
+const MAX_IMAGES = 8
 
 function readImage(file: File): Promise<Attachment | null> {
   if (!file.type.startsWith("image/") || file.size > MAX_IMAGE) return Promise.resolve(null)
@@ -49,8 +51,12 @@ export function Composer(p: ComposerProps) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
   const addFiles = async (files: Iterable<File>) => {
-    const read = (await Promise.all([...files].map(readImage))).filter((a): a is Attachment => !!a)
-    if (read.length) setImages((cur) => [...cur, ...read].slice(0, 8))
+    const all = [...files]
+    const tooBig = all.filter((f) => f.type.startsWith("image/") && f.size > MAX_IMAGE)
+    if (tooBig.length) toast.error(`${tooBig.map((f) => f.name || "That image").join(", ")} is over 5 MB`)
+    if (all.some((f) => !f.type.startsWith("image/"))) toast.info("Only images can be attached (PNG, JPEG, GIF, WebP)")
+    const read = (await Promise.all(all.map(readImage))).filter((a): a is Attachment => !!a)
+    if (read.length) setImages((cur) => [...cur, ...read].slice(0, MAX_IMAGES))
   }
   // "Add to chat" from the side panel puts `@path ` at the cursor.
   useEffect(() => {
@@ -173,7 +179,7 @@ export function Composer(p: ComposerProps) {
           </DropdownMenuContent>
         </DropdownMenu>
         <div className="ml-auto flex items-center gap-0.5">
-          <Tip content="Attach image">
+          <Tip content="Attach images (up to 5 MB each, 8 at a time)">
             <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Attach image" onClick={() => picker.current?.click()}>
               <Paperclip className="size-3.5" />
             </button>

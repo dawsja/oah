@@ -57,6 +57,14 @@ pub trait Driver: Send {
     fn set_permission(&mut self, _mode: PermissionMode) -> DriverResult<()> {
         Ok(())
     }
+    /// Answers a [`crate::event::QuestionRequest`]: answers by question id.
+    fn answer_question(&mut self, _request_id: &str, _answers: std::collections::BTreeMap<String, Vec<String>>) -> DriverResult<()> {
+        Err("this agent doesn't ask questions".into())
+    }
+    /// Switches the model for the next turns.
+    fn set_model(&mut self, _model: &str) -> DriverResult<()> {
+        Ok(())
+    }
     /// Ends the CLI process.
     fn stop(&mut self);
 }

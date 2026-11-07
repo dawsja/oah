@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window: app commands, window controls, dialogs, clipboard and opening links.",
-  "windows": ["main"],
+  "description": "The main window: app commands, window controls, dialogs, clipboard, notifications and opening links.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
@@ -15,8 +17,17 @@
     "clipboard-manager:allow-write-text",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://*" }, { "url": "http://*" }]
+      "allow": [
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*"
+        }
+      ]
     },
-    "opener:allow-reveal-item-in-dir"
+    "opener:allow-reveal-item-in-dir",
+    "notification:default",
+    "window-state:default"
   ]
 }

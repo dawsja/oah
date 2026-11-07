@@ -4,7 +4,7 @@ import { AgentGlyph } from "@/components/icons"
 import { confirmAction, promptText } from "@/components/Prompt"
 import { Tip } from "@/components/Tip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ago, type ChatMeta } from "@/lib/chat"
+import { ago, waiting, type ChatMeta } from "@/lib/chat"
 import { samePath, worktrees as wt, type Worktree } from "@/lib/git"
 import { inTauri, pickFolder } from "@/lib/ipc"
 import type { Project } from "@/lib/types"
@@ -283,7 +283,7 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
         useChats.getState().open(meta.id)
       }}
     >
-      {t?.pending ? (
+      {waiting(t) ? (
         <span className="rounded-full size-1.5 shrink-0 bg-primary" />
       ) : t?.running ? (
         <LoaderCircle className="size-3 shrink-0 animate-spin text-gold" />

@@ -5,11 +5,18 @@ import { cn } from "@/lib/utils"
 import { Markdown } from "./Markdown"
 import { WorkGroup } from "./Work"
 
+/** Blocks mounted at once; older ones come in by this many. */
+const WINDOW = 150
+
 /** The conversation: user prompts on the right, the agent's work and answers on the left. */
 export function Transcript({ transcript, className }: { transcript: T; className?: string }) {
   const scroller = useRef<HTMLDivElement>(null)
   const [stuck, setStuck] = useState(true)
-  const list = blocks(transcript.items)
+  const all = blocks(transcript.items)
+  // Long chats mount only their latest blocks; older ones load on request.
+  const [limit, setLimit] = useState(WINDOW)
+  const hidden = Math.max(0, all.length - limit)
+  const list = hidden ? all.slice(hidden) : all
   const lastWork = list.findLastIndex((b) => b.kind === "work")
 
   // Follow new content while the view is at the bottom.
@@ -29,14 +36,27 @@ export function Transcript({ transcript, className }: { transcript: T; className
     <div className={cn("relative min-h-0", className)}>
       <div ref={scroller} className="h-full overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-4 px-6 pt-6 pb-10">
-          {list.map((b, i) =>
-            b.kind === "work" ? (
-              <WorkGroup key={b.id} items={b.items} live={transcript.running && i === lastWork && i >= list.length - 2} />
-            ) : (
-              <Row key={`${b.item.kind}-${b.item.id}`} item={b.item} />
-            ),
-          )}
-          {transcript.running && !transcript.pending && list[list.length - 1]?.kind !== "work" ? <span className="shimmer self-start text-[12.5px]">Working…</span> : null}
+          {hidden ? (
+            <button
+              className="self-center rounded-md border px-3 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => {
+                const el = scroller.current
+                const from = el ? el.scrollHeight - el.scrollTop : 0
+                setLimit((n) => n + WINDOW)
+                // Keep the reader where they were as older blocks appear above.
+                requestAnimationFrame(() => el && (el.scrollTop = el.scrollHeight - from))
+              }}
+            >
+              Show {Math.min(hidden, WINDOW)} earlier
+            </button>
+          ) : null}
+          {list.map((b, i) => (
+            // Off-screen blocks skip layout and paint until they scroll into view.
+            <div key={b.kind === "work" ? b.id : `${b.item.kind}-${b.item.id}`} className="[contain-intrinsic-size:auto_120px] [content-visibility:auto]">
+              {b.kind === "work" ? <WorkGroup items={b.items} live={transcript.running && i === lastWork && i >= list.length - 2} /> : <Row item={b.item} />}
+            </div>
+          ))}
+          {transcript.running && !transcript.approvals.length && !transcript.questions.length && list[list.length - 1]?.kind !== "work" ? <span className="shimmer self-start text-[12.5px]">Working…</span> : null}
         </div>
       </div>
       {!stuck ? (

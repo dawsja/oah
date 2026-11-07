@@ -39,6 +39,8 @@ struct State {
     turn_id: Option<String>,
     /// Approval requests waiting: our request id → (JSON-RPC id, kind).
     pending: HashMap<String, (Value, ApprovalKind)>,
+    /// Questions waiting: our request id → the JSON-RPC id.
+    questions: HashMap<String, Value>,
     /// File changes by item id, for the approval card's diff.
     changes: HashMap<String, Vec<FileDiff>>,
     usage: Option<Usage>,
@@ -183,10 +185,14 @@ impl CodexDriver {
         let thread_id = thread["id"].as_str().ok_or("Codex didn't start a thread")?.to_string();
         d.state.lock().unwrap().thread_id = Some(thread_id.clone());
         let cwd = thread["environments"][0]["cwd"].as_str().map(String::from).or(Some(opts.cwd.clone()));
-        (d.sink)(ChatEvent::Started {
-            session_id: Some(thread_id),
-            model: result["model"].as_str().map(String::from).or(opts.model.clone()),
-            cwd,
+        let current = result["model"].as_str().map(String::from).or(opts.model.clone());
+        (d.sink)(ChatEvent::Started { session_id: Some(thread_id), model: current.clone(), cwd });
+        // The model picker: Codex's own list.
+        let (rpc, sink) = (d.rpc.clone(), d.sink.clone());
+        thread::spawn(move || {
+            if let Ok(list) = rpc.call("model/list", json!({}), Duration::from_secs(30)) {
+                sink(ChatEvent::Models { models: parse_models(&list), current });
+            }
         });
         Ok(d)
     }
@@ -249,6 +255,19 @@ impl Driver for CodexDriver {
         self.rpc.reply(&rpc_id, json!({"decision": d}))
     }
 
+    fn answer_question(&mut self, request_id: &str, answers: std::collections::BTreeMap<String, Vec<String>>) -> DriverResult<()> {
+        let rpc_id = self.state.lock().unwrap().questions.remove(request_id).ok_or("that question was already answered")?;
+        let body: serde_json::Map<String, Value> = answers.iter().map(|(k, v)| (k.clone(), json!({"answers": v}))).collect();
+        (self.sink)(ChatEvent::QuestionResolved { request_id: request_id.into(), answers });
+        self.rpc.reply(&rpc_id, json!({"answers": body}))
+    }
+
+    fn set_model(&mut self, model: &str) -> DriverResult<()> {
+        // Applied with the next turn/start.
+        self.model = Some(model.to_string()).filter(|m| !m.is_empty());
+        Ok(())
+    }
+
     fn set_permission(&mut self, mode: PermissionMode) -> DriverResult<()> {
         // Applied with the next turn/start.
         self.permission = mode;
@@ -308,6 +327,7 @@ impl Translator {
                 | "item/fileChange/requestApproval"
                 | "execCommandApproval"
                 | "applyPatchApproval" => self.approval(id, method, p),
+                "item/tool/requestUserInput" => self.question(id, p),
                 _ => {
                     let _ = self.rpc.write(
                         &json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "oah doesn't support this request"}}),
@@ -371,6 +391,7 @@ impl Translator {
                 let (turn_id, usage) = {
                     let mut st = self.state.lock().unwrap();
                     st.pending.clear();
+                    st.questions.clear();
                     st.turn_id = None;
                     (s(&turn["id"]), st.usage.take())
                 };
@@ -486,6 +507,31 @@ impl Translator {
         }
     }
 
+    fn question(&mut self, rpc_id: &Value, p: &Value) {
+        let request_id = format!("cxq-{rpc_id}");
+        let questions = p["questions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|q| Question {
+                id: s(&q["id"]),
+                header: s(&q["header"]),
+                question: s(&q["question"]),
+                options: q["options"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|o| QuestionOption { label: s(&o["label"]), description: s(&o["description"]) })
+                    .collect(),
+                multi: false,
+                other: q["isOther"].as_bool().unwrap_or(false),
+                secret: q["isSecret"].as_bool().unwrap_or(false),
+            })
+            .collect();
+        self.state.lock().unwrap().questions.insert(request_id.clone(), rpc_id.clone());
+        self.emit(ChatEvent::Question { request: QuestionRequest { request_id, questions } });
+    }
+
     fn approval(&mut self, rpc_id: &Value, method: &str, p: &Value) {
         let item_id = p["itemId"].as_str().or(p["callId"].as_str()).map(String::from);
         let request_id = format!("cx-{}", rpc_id);
@@ -507,6 +553,21 @@ impl Translator {
         self.state.lock().unwrap().pending.insert(request_id.clone(), (rpc_id.clone(), kind));
         self.emit(ChatEvent::Approval { request: ApprovalRequest { request_id, item_id, kind, title, detail, diff, can_remember: true } });
     }
+}
+
+/// `model/list` → the picker's options (hidden models left out).
+pub fn parse_models(v: &Value) -> Vec<ModelOption> {
+    v["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| !m["hidden"].as_bool().unwrap_or(false))
+        .map(|m| ModelOption {
+            id: m["model"].as_str().or(m["id"].as_str()).unwrap_or("").into(),
+            name: m["displayName"].as_str().or(m["model"].as_str()).unwrap_or("").into(),
+            description: m["description"].as_str().unwrap_or("").into(),
+        })
+        .collect()
 }
 
 fn s(v: &Value) -> String {
@@ -619,6 +680,27 @@ mod tests {
             }
             e => panic!("{e:?}"),
         }
+    }
+
+    #[test]
+    fn asks_questions_and_lists_models() {
+        let (ev, state) = run(&[
+            json!({"method":"item/tool/requestUserInput","id":9,"params":{"questions":[{"id":"env","header":"Env","question":"Which environment?","isOther":true,"isSecret":false,"options":[{"label":"staging","description":""}]}]}}),
+        ]);
+        match &ev[0] {
+            ChatEvent::Question { request } => {
+                assert_eq!(request.request_id, "cxq-9");
+                assert_eq!(request.questions[0].id, "env");
+                assert!(request.questions[0].other);
+            }
+            e => panic!("{e:?}"),
+        }
+        assert!(state.lock().unwrap().questions.contains_key("cxq-9"));
+        let m = parse_models(
+            &json!({"data":[{"id":"a","model":"gpt-6","displayName":"GPT-6","description":"x","hidden":false},{"id":"b","model":"old","displayName":"Old","hidden":true}]}),
+        );
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].id, "gpt-6");
     }
 
     #[test]

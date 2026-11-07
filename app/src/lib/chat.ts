@@ -17,6 +17,10 @@ export type ApprovalRequest = {
   canRemember: boolean
 }
 export type PlanItem = { text: string; status: "pending" | "inProgress" | "completed" }
+export type QuestionOption = { label: string; description: string }
+export type Question = { id: string; header: string; question: string; options: QuestionOption[]; multi: boolean; other: boolean; secret: boolean }
+export type QuestionRequest = { requestId: string; questions: Question[] }
+export type ModelOption = { id: string; name: string; description: string }
 export type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
 
 export type ChatEvent =
@@ -31,6 +35,9 @@ export type ChatEvent =
   | { type: "toolFinished"; itemId: string; ok: boolean; output: string; diff: FileDiff | null }
   | { type: "approval"; request: ApprovalRequest }
   | { type: "approvalResolved"; requestId: string; decision: Decision }
+  | { type: "question"; request: QuestionRequest }
+  | { type: "questionResolved"; requestId: string; answers: Record<string, string[]> }
+  | { type: "models"; models: ModelOption[]; current: string | null }
   | { type: "plan"; items: PlanItem[] }
   | { type: "turnFinished"; turnId: string; usage: Usage | null; costUsd: number | null; durationMs: number | null; interrupted: boolean }
   | { type: "context"; usedTokens: number; windowTokens: number }
@@ -59,6 +66,7 @@ export type Item =
   | { kind: "reasoning"; id: string; text: string }
   | ToolItem
   | { kind: "approval"; id: string; request: ApprovalRequest; decision: Decision | null }
+  | { kind: "question"; id: string; request: QuestionRequest; answers: Record<string, string[]> | null }
   | { kind: "turnEnd"; id: string; usage: Usage | null; costUsd: number | null; durationMs: number | null; interrupted: boolean }
   | { kind: "notice"; id: string; level: "info" | "warn" | "error"; text: string }
 
@@ -70,11 +78,18 @@ export type Transcript = {
   model: string | null
   /** The agent's working folder, to show paths relative to it. */
   cwd: string | null
-  /** The approval waiting for an answer, if any. */
-  pending: ApprovalRequest | null
+  /** Approvals waiting for an answer, oldest first (the first one is shown). */
+  approvals: ApprovalRequest[]
+  /** Questions waiting for an answer, oldest first. */
+  questions: QuestionRequest[]
+  /** What the agent offers; empty until it says. */
+  models: ModelOption[]
 }
 
-export const emptyTranscript = (): Transcript => ({ items: [], running: false, plan: [], context: null, model: null, cwd: null, pending: null })
+export const emptyTranscript = (): Transcript => ({ items: [], running: false, plan: [], context: null, model: null, cwd: null, approvals: [], questions: [], models: [] })
+
+/** Something is waiting for the user. */
+export const waiting = (t: Transcript | undefined) => !!t && (t.approvals.length > 0 || t.questions.length > 0)
 
 let seq = 0
 const uid = (p: string) => `${p}-${++seq}`
@@ -122,13 +137,23 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
       return replace(i, { ...cur, status: e.ok ? "ok" : "error", output: e.output, diff: e.diff ?? cur.diff })
     }
     case "approval":
-      return push({ kind: "approval", id: e.request.requestId, request: e.request, decision: null }, { pending: e.request })
+      return push({ kind: "approval", id: e.request.requestId, request: e.request, decision: null }, { approvals: [...t.approvals, e.request] })
     case "approvalResolved": {
       const i = find(e.requestId, "approval")
-      const pending = t.pending?.requestId === e.requestId ? null : t.pending
-      if (i < 0) return { ...t, pending }
-      return { ...replace(i, { ...(items[i] as Extract<Item, { kind: "approval" }>), decision: e.decision }), pending }
+      const approvals = t.approvals.filter((a) => a.requestId !== e.requestId)
+      if (i < 0) return { ...t, approvals }
+      return { ...replace(i, { ...(items[i] as Extract<Item, { kind: "approval" }>), decision: e.decision }), approvals }
     }
+    case "question":
+      return push({ kind: "question", id: e.request.requestId, request: e.request, answers: null }, { questions: [...t.questions, e.request] })
+    case "questionResolved": {
+      const i = find(e.requestId, "question")
+      const questions = t.questions.filter((q) => q.requestId !== e.requestId)
+      if (i < 0) return { ...t, questions }
+      return { ...replace(i, { ...(items[i] as Extract<Item, { kind: "question" }>), answers: e.answers }), questions }
+    }
+    case "models":
+      return { ...t, models: e.models, model: e.current ?? t.model }
     case "plan":
       return { ...t, plan: e.items }
     case "turnFinished": {
@@ -137,7 +162,8 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
       return {
         ...t,
         running: false,
-        pending: null,
+        approvals: [],
+        questions: [],
         items: [...settled, { kind: "turnEnd", id: e.turnId, usage: e.usage, costUsd: e.costUsd, durationMs: e.durationMs, interrupted: e.interrupted }],
       }
     }
@@ -146,17 +172,17 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
     case "notice":
       return push({ kind: "notice", id: uid("n"), level: e.level, text: e.text })
     case "error":
-      return push({ kind: "notice", id: uid("e"), level: "error", text: e.message }, { running: false, pending: null })
+      return push({ kind: "notice", id: uid("e"), level: "error", text: e.message }, { running: false, approvals: [], questions: [] })
     case "exited":
       return e.code && e.code !== 0
-        ? push({ kind: "notice", id: uid("x"), level: "error", text: e.message ?? `The agent exited (code ${e.code}).` }, { running: false, pending: null })
-        : { ...t, running: false, pending: null }
+        ? push({ kind: "notice", id: uid("x"), level: "error", text: e.message ?? `The agent exited (code ${e.code}).` }, { running: false, approvals: [], questions: [] })
+        : { ...t, running: false, approvals: [], questions: [] }
   }
 }
 
 export function replay(events: ChatEvent[]): Transcript {
   // A reopened chat isn't running, whatever its log ended with.
-  return { ...events.reduce(reduce, emptyTranscript()), running: false, pending: null }
+  return { ...events.reduce(reduce, emptyTranscript()), running: false, approvals: [], questions: [] }
 }
 
 /** A turn's items between its user message and its end, grouped for display: each run of
@@ -168,6 +194,7 @@ export function blocks(items: Item[]): Block[] {
   for (const it of items) {
     // Allowed requests need no row (the tool row shows what ran); waiting ones are docked.
     if (it.kind === "approval" && it.decision !== "deny") continue
+    if (it.kind === "question" && !it.answers) continue
     const work = it.kind === "reasoning" || it.kind === "tool"
     const last = out[out.length - 1]
     if (work && last?.kind === "work") last.items.push(it)

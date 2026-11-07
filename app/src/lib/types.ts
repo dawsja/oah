@@ -12,7 +12,8 @@ export const PERMISSION_LABEL: Record<PermissionMode, string> = {
   fullAccess: "Full access",
 }
 
-export type EnvVar = { key: string; value: string }
+/** `value` is empty once it is saved in the OS keychain (`inKeychain`). */
+export type EnvVar = { key: string; value: string; inKeychain: boolean }
 
 export type Provider = {
   enabled: boolean

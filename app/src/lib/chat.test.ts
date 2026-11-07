@@ -22,9 +22,13 @@ describe("reduce", () => {
       { type: "toolStarted", itemId: "x", tool },
       { type: "approval", request: { requestId: "r", itemId: "x", kind: "edit", title: "Edit a.rs", detail: null, diff: null, canRemember: true } },
     ])
-    expect(t.pending?.requestId).toBe("r")
+    expect(t.approvals[0]?.requestId).toBe("r")
+    t = reduce(t, { type: "approval", request: { requestId: "r2", itemId: null, kind: "command", title: "Run", detail: "ls", diff: null, canRemember: false } })
+    expect(t.approvals.map((a) => a.requestId)).toEqual(["r", "r2"])
     t = reduce(t, { type: "approvalResolved", requestId: "r", decision: "allow" })
-    expect(t.pending).toBeNull()
+    expect(t.approvals.map((a) => a.requestId)).toEqual(["r2"])
+    t = reduce(t, { type: "approvalResolved", requestId: "r2", decision: "deny" })
+    expect(t.approvals).toEqual([])
     expect(t.items.find((i) => i.kind === "approval")).toMatchObject({ decision: "allow" })
     t = reduce(t, { type: "toolStarted", itemId: "y", tool: { ...tool, kind: "bash", title: "sleep 9" } })
     t = reduce(t, { type: "turnFinished", turnId: "t1", usage: null, costUsd: null, durationMs: 10, interrupted: true })
@@ -39,7 +43,7 @@ describe("reduce", () => {
       { type: "approval", request: { requestId: "r", itemId: null, kind: "command", title: "Run", detail: "ls", diff: null, canRemember: false } },
     ])
     expect(t.running).toBe(false)
-    expect(t.pending).toBeNull()
+    expect(t.approvals).toEqual([])
   })
 })
 

@@ -58,6 +58,20 @@ pub enum ChatEvent {
         request_id: String,
         decision: Decision,
     },
+    /// The agent asks the user to choose or type something.
+    Question {
+        request: QuestionRequest,
+    },
+    /// Answers by question id (several for multi-select; empty when skipped).
+    QuestionResolved {
+        request_id: String,
+        answers: std::collections::BTreeMap<String, Vec<String>>,
+    },
+    /// The models this agent offers, and the one in use.
+    Models {
+        models: Vec<ModelOption>,
+        current: Option<String>,
+    },
     /// The agent's plan / todo list, replaced whole.
     Plan {
         items: Vec<PlanItem>,
@@ -179,6 +193,44 @@ pub struct ApprovalRequest {
     pub diff: Option<FileDiff>,
     /// Whether "allow for this chat" is offered.
     pub can_remember: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionRequest {
+    pub request_id: String,
+    pub questions: Vec<Question>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Question {
+    pub id: String,
+    /// A short label ("Database").
+    pub header: String,
+    pub question: String,
+    pub options: Vec<QuestionOption>,
+    /// More than one option may be picked.
+    pub multi: bool,
+    /// A typed answer is allowed besides the options.
+    pub other: bool,
+    /// The answer shouldn't be shown or logged (a password).
+    pub secret: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionOption {
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOption {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

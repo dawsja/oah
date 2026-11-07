@@ -89,7 +89,10 @@ mod tests {
     #[test]
     fn builds_a_quoted_remote_line() {
         let loc = Location::Ssh { host: "devbox".into() };
-        let env = [EnvVar { key: "API_KEY".into(), value: "a'b".into() }, EnvVar { key: "bad key".into(), value: "x".into() }];
+        let env = [
+            EnvVar { key: "API_KEY".into(), value: "a'b".into(), in_keychain: false },
+            EnvVar { key: "bad key".into(), value: "x".into(), in_keychain: false },
+        ];
         let spec = Spec { location: &loc, cwd: "~/code/my app", program: "claude", args: vec!["-p".into(), "it's".into()], env: &env };
         let line = remote_line(&spec);
         assert_eq!(
