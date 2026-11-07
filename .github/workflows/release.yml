@@ -1,7 +1,7 @@
 name: Release
 
 # A v* tag (matching app/package.json's version) builds the installers, signs them, and
-# publishes them: to dl.oah.dev (R2; the app's updater and the install scripts read
+# publishes them: to dl.oah.dev (R2; the app's updater and oah.dev's download links read
 # desktop/latest.json there) and to a GitHub release.
 #
 # Secrets (each step skips itself when its secrets aren't set):
@@ -117,5 +117,3 @@ jobs:
           files: |
             app/release/oah-desktop-*
             app/release/latest.json
-            scripts/install-desktop.sh
-            scripts/install-desktop.ps1

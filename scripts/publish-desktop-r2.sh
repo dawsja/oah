@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # Upload a desktop release from app/release/ (scripts/collect.ts per target,
-# then scripts/manifest.ts) to the R2 bucket served at https://dl.oah.dev, next
-# to the CLI's files:
+# then scripts/manifest.ts) to the R2 bucket served at https://dl.oah.dev:
 #
-#   install-desktop.sh  install-desktop.ps1                   no-cache
 #   desktop/v<version>/oah-desktop-<version>-<platform>.<ext>  immutable
 #                                       (+ .sha256, and .sig for the updater)
 #   desktop/v<version>/latest.json      this release's manifest  immutable
-#   desktop/latest.json  desktop/latest.txt                     no-cache, uploaded last
+#   desktop/latest.json                 the newest release       no-cache, uploaded last
 #
-# The app's background updater reads desktop/latest.json; so do the installers.
+# The app's background updater reads desktop/latest.json; so do oah.dev's download links.
 # A version is published once (versioned files are cached forever): if it's
 # already on dl.oah.dev this exits without uploading — bump "version" in
 # app/package.json. OAH_R2_OVERWRITE=1 overrides that (then purge the cache).
@@ -63,9 +61,6 @@ for f in "${files[@]}"; do
   put "desktop/v$version/$name" "$f" "$type" "$immutable"
 done
 put "desktop/v$version/latest.json" "$REL/latest.json" "application/json; charset=utf-8" "$immutable"
-put "install-desktop.sh" "scripts/install-desktop.sh" "text/x-shellscript; charset=utf-8" "no-cache"
-put "install-desktop.ps1" "scripts/install-desktop.ps1" "text/plain; charset=utf-8" "no-cache"
-# Last, so the updater and installers never see a version whose files aren't up yet.
+# Last, so the updater and download links never see a version whose files aren't up yet.
 put "desktop/latest.json" "$REL/latest.json" "application/json; charset=utf-8" "no-cache"
-put "desktop/latest.txt" "$REL/latest.txt" "text/plain; charset=utf-8" "no-cache"
 echo "done: $PUBLIC/desktop/latest.json → $version"

@@ -3,7 +3,7 @@
 //
 //   platforms  the app's background updater (tauri-plugin-updater static format):
 //              each install finds `{os}-{arch}-{installer}`, then `{os}-{arch}`.
-//   files      the install scripts and download links: what to download per platform.
+//   files      oah.dev's download links: what to download per platform.
 //
 //   bun scripts/manifest.ts [--base https://dl.oah.dev] [--notes "…"]
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
