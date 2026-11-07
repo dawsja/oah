@@ -716,10 +716,18 @@ impl Translator {
 /// per line.
 pub fn opencode_models(binary: &str, location: &oah_core::settings::Location, cwd: &str) -> DriverResult<Vec<ModelOption>> {
     let program = if binary.trim().is_empty() { "opencode" } else { binary.trim() };
-    let args = vec!["models".into(), "--verbose".into()];
-    let out = oah_transport::run(&Spec { location, cwd, program, args, env: &[] }, None, Duration::from_secs(30))?;
+    let run = |args: &[&str]| {
+        let args = args.iter().map(|a| a.to_string()).collect();
+        oah_transport::run(&Spec { location, cwd, program, args, env: &[] }, None, Duration::from_secs(30))
+    };
+    // `--verbose` adds names and effort levels; OpenCode 2 dropped the flag, so then the plain list.
+    let mut out = run(&["models", "--verbose"])?;
     if !out.ok() {
-        return Err(out.stderr.lines().last().unwrap_or("opencode models failed").to_string());
+        out = run(&["models"])?;
+    }
+    if !out.ok() {
+        let why = out.stderr.lines().chain(out.stdout.lines()).map(str::trim).rfind(|l| !l.is_empty());
+        return Err(why.unwrap_or("opencode models failed").to_string());
     }
     Ok(parse_opencode_models(&out.stdout))
 }
@@ -1086,6 +1094,26 @@ mod tests {
 
     fn upd(u: Value) -> Value {
         json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": u}})
+    }
+
+    /// OpenCode 2 has no `models --verbose`: the plain list still comes back.
+    #[test]
+    #[cfg(unix)]
+    fn lists_opencode_2_models() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("oah-opencode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("opencode");
+        let script = "#!/bin/sh\nfor a; do [ \"$a\" = --verbose ] && { echo 'ERROR' >&2; echo '  Unrecognized flag: --verbose in command opencode models' >&2; exit 1; }; done\nprintf 'opencode/big-pickle\\nopencode/glm-5.3-flash-free\\n'\n";
+        std::fs::write(&bin, script).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let loc = oah_core::settings::Location::Local;
+        let m = opencode_models(bin.to_str().unwrap(), &loc, dir.to_str().unwrap()).unwrap();
+        assert_eq!(m.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["opencode/big-pickle", "opencode/glm-5.3-flash-free"]);
+        assert_eq!((m[0].name.as_str(), m[0].description.as_str()), ("big-pickle", "opencode"));
+        std::fs::write(&bin, "#!/bin/sh\necho 'not signed in' >&2\nexit 2\n").unwrap();
+        assert_eq!(opencode_models(bin.to_str().unwrap(), &loc, dir.to_str().unwrap()).unwrap_err().to_string(), "not signed in");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
