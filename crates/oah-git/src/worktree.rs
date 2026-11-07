@@ -114,7 +114,8 @@ pub fn add(repo: &Repo, path: &str, branch: &str, base: &str) -> Result<Worktree
 
 /// Removes a worktree (`force`: even with uncommitted changes), and its branch when asked.
 pub fn remove(repo: &Repo, path: &str, force: bool, delete_branch: bool) -> Result<(), String> {
-    let branch = worktrees(repo)?.into_iter().find(|w| same(&w.path, path)).and_then(|w| w.branch);
+    let local = !repo.location.is_remote();
+    let branch = worktrees(repo)?.into_iter().find(|w| same(&w.path, path) || (local && same_file(&w.path, path))).and_then(|w| w.branch);
     let mut args = vec!["worktree", "remove"];
     if force {
         args.push("--force");
@@ -128,6 +129,15 @@ pub fn remove(repo: &Repo, path: &str, force: bool, delete_branch: bool) -> Resu
     }
     let _ = repo.git(&["worktree", "prune"]);
     Ok(())
+}
+
+/// Same folder on this computer, after resolving links and Windows short (8.3) names, which
+/// `git worktree list` never prints.
+fn same_file(a: &str, b: &str) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// Same path, whichever slashes and (on Windows) case.
