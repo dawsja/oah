@@ -2,11 +2,24 @@ import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { ArrowUp, Check, ChevronDown, File, Paperclip, Slash, Sparkles, Square, X } from "lucide-react"
 import { Tip } from "@/components/Tip"
+import { openImages } from "@/components/ImageView"
 import { AgentGlyph } from "@/components/icons"
 import { promptText } from "@/components/Prompt"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { agentKey, agentName, parseAgentKey, type AgentRef } from "@/lib/agents"
-import type { ModelOption, SlashCommand } from "@/lib/chat"
+import { effortLabel, type ModelOption, type SlashCommand } from "@/lib/chat"
 import { filterCommands, menuCommands, ownCommand, slashQuery, type MenuCommand, type OwnCommand } from "@/lib/commands"
 import { fuzzyPaths, mention, mentionAt } from "@/lib/fuzzy"
 import { git } from "@/lib/git"
@@ -22,9 +35,12 @@ export type ComposerProps = {
   agents?: AgentRef[]
   onAgent?: (a: AgentRef) => void
   model: string
+  /** Reasoning effort; empty: the model's default. */
+  effort?: string
   /** The agent's models; empty while unknown. */
   models?: ModelOption[]
-  onModel?: (id: string) => void
+  /** Picks a model and its effort (empty: the model's default). */
+  onModel?: (id: string, effort: string) => void
   /** Called when the model menu or the / menu opens, to load the agent's lists. */
   onModelsOpen?: () => void
   /** The agent's slash commands (the / menu adds oah's own). */
@@ -120,7 +136,7 @@ export function Composer(p: ComposerProps) {
       const m =
         p.models?.find((x) => x.id.toLowerCase() === a || x.name.toLowerCase() === a) ??
         p.models?.find((x) => x.id.toLowerCase().includes(a) || x.name.toLowerCase().includes(a))
-      p.onModel?.(m?.id ?? args)
+      p.onModel?.(m?.id ?? args, p.effort ?? "")
       toast.success(`Model: ${m?.name ?? args}`)
     } else if (own === "plan") {
       p.onPermission?.("plan")
@@ -212,7 +228,9 @@ export function Composer(p: ComposerProps) {
         <div className="flex flex-wrap gap-1.5 px-3 pt-3">
           {images.map((img, i) => (
             <div key={i} className="rounded-md group/img relative size-14 border bg-background">
-              <img src={`data:${img.mime};base64,${img.data}`} alt={img.name} className="size-full object-cover" />
+              <button className="size-full" aria-label={`View ${img.name}`} onClick={() => openImages(images.map((x) => ({ src: `data:${x.mime};base64,${x.data}`, name: x.name })), i)}>
+                <img src={`data:${img.mime};base64,${img.data}`} alt={img.name} className="size-full object-cover" />
+              </button>
               <button
                 className="rounded-full absolute -top-1.5 -right-1.5 hidden size-4 place-items-center bg-foreground text-background group-hover/img:grid"
                 aria-label="Remove image"
@@ -371,30 +389,32 @@ export function Composer(p: ComposerProps) {
           <DropdownMenuTrigger asChild disabled={!p.onModel}>
             <button className="rounded-md flex h-7 max-w-56 items-center gap-1 px-2 font-mono text-[11.5px] text-muted-foreground hover:bg-accent disabled:hover:bg-transparent">
               <span className="truncate">{p.models?.find((m) => m.id === p.model)?.name ?? (p.model || "default model")}</span>
+              {p.effort ? <span className="shrink-0 text-faint">· {effortLabel(p.effort)}</span> : null}
               {p.onModel ? <ChevronDown className="size-3 shrink-0" /> : null}
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto">
-            <DropdownMenuLabel>Model</DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => p.onModel?.("")}>
+            <DropdownMenuLabel>Model{p.models?.some((m) => m.efforts.length) ? <span className="ml-1.5 font-normal text-faint">→ for effort</span> : null}</DropdownMenuLabel>
+            <DropdownMenuItem onSelect={() => p.onModel?.("", "")}>
               <span className="w-3.5">{!p.model ? <Check className="size-3.5" /> : null}</span>
               The agent's default
             </DropdownMenuItem>
             {p.models === undefined || p.models.length === 0 ? <div className="px-2 py-1.5 text-[11.5px] text-faint">{p.models === undefined ? "Loading models…" : "The agent didn't list its models."}</div> : null}
-            {p.models?.map((m) => (
-              <DropdownMenuItem key={m.id} onSelect={() => p.onModel?.(m.id)}>
-                <span className="w-3.5">{m.id === p.model ? <Check className="size-3.5" /> : null}</span>
-                <span className="min-w-0">
-                  <span className="block truncate">{m.name}</span>
-                  {m.description ? <span className="block truncate text-[11px] text-faint">{m.description}</span> : null}
-                </span>
-              </DropdownMenuItem>
-            ))}
+            {p.models?.map((m) =>
+              m.efforts.length ? (
+                <ModelWithEffort key={m.id} model={m} selected={m.id === p.model} effort={m.id === p.model ? (p.effort ?? "") : ""} onPick={(e) => p.onModel?.(m.id, e)} />
+              ) : (
+                <DropdownMenuItem key={m.id} onSelect={() => p.onModel?.(m.id, "")}>
+                  <span className="w-3.5">{m.id === p.model ? <Check className="size-3.5" /> : null}</span>
+                  <ModelText model={m} />
+                </DropdownMenuItem>
+              ),
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={async () => {
                 const id = await promptText({ title: "Use a model", description: "Any model id the agent accepts.", value: p.model, placeholder: "model id", mono: true, confirm: "Use" })
-                if (id) p.onModel?.(id)
+                if (id) p.onModel?.(id, "")
               }}
             >
               <span className="w-3.5" /> Other model…
@@ -448,5 +468,54 @@ export function Composer(p: ComposerProps) {
         </div>
       </div>
     </div>
+  )
+}
+
+function ModelText({ model }: { model: ModelOption }) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className="block truncate">{model.name}</span>
+      {model.description ? <span className="block truncate text-[11px] text-faint">{model.description}</span> : null}
+    </span>
+  )
+}
+
+/** A model whose effort can be picked: hover or click it, and the levels open to the right. */
+function ModelWithEffort({ model, selected, effort, onPick }: { model: ModelOption; selected: boolean; effort: string; onPick: (effort: string) => void }) {
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className="gap-2">
+        <span className="w-3.5">{selected ? <Check className="size-3.5" /> : null}</span>
+        <ModelText model={model} />
+        {selected && effort ? <span className="shrink-0 text-[11px] text-gold">{effortLabel(effort)}</span> : null}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-48">
+        <DropdownMenuLabel className="text-[11px] font-normal text-faint">{model.name} · effort</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={() => onPick("")}>
+          <span className="w-3.5">{selected && !effort ? <Check className="size-3.5" /> : null}</span>
+          <span className="flex-1">Default</span>
+          {model.defaultEffort ? <span className="text-[11px] text-faint">{effortLabel(model.defaultEffort)}</span> : null}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {model.efforts.map((e) => (
+          <DropdownMenuItem key={e} onSelect={() => onPick(e)}>
+            <span className="w-3.5">{selected && effort === e ? <Check className="size-3.5" /> : null}</span>
+            <span className="flex-1">{effortLabel(e)}</span>
+            <EffortBars level={model.efforts.indexOf(e)} of={model.efforts.length} />
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  )
+}
+
+/** A small rising meter: how much thinking this level asks for. */
+function EffortBars({ level, of }: { level: number; of: number }) {
+  return (
+    <span className="flex h-3 items-end gap-px" aria-hidden>
+      {Array.from({ length: of }, (_, i) => (
+        <span key={i} className={cn("w-[3px]", i <= level ? "bg-gold" : "bg-muted")} style={{ height: `${4 + (8 * (i + 1)) / of}px` }} />
+      ))}
+    </span>
   )
 }

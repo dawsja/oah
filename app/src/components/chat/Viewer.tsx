@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ArrowLeft, AtSign, Minus, Plus } from "lucide-react"
-import { git, type Scope } from "@/lib/git"
+import { git, isImagePath, type Scope } from "@/lib/git"
+import { ImageStage } from "@/components/ImageView"
 import { useGit, type Viewer as V } from "@/store/git"
 import { addToChat } from "@/components/right/Files"
 import { DiffLines, DiffStat, parsePatch } from "./DiffView"
@@ -21,7 +22,9 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
         ? git.diff(scope, viewer.path, viewer.staged, viewer.untracked)
         : viewer.kind === "commit"
           ? git.commitDiff(scope, viewer.hash, viewer.path)
-          : git.read(scope, viewer.path)
+          : isImagePath(viewer.path)
+            ? git.readImage(scope, viewer.path)
+            : git.read(scope, viewer.path)
     p.then(setText, (e) => setError(String(e)))
     // Diffs follow the working tree.
   }, [viewer, scope.projectId, scope.cwd, viewer.kind === "diff" ? status : null])
@@ -68,7 +71,13 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
         {error ? <div className="rounded-lg m-4 border border-red/40 bg-del/40 p-3 text-[12.5px] text-red">{error}</div> : null}
         {text === null && !error ? <div className="p-4 text-[12px] text-faint">Loading…</div> : null}
         {text !== null && viewer.kind !== "file" ? text.trim() ? <DiffLines patch={text} className="py-2" /> : <div className="p-4 text-[12px] text-faint">No differences.</div> : null}
-        {text !== null && viewer.kind === "file" ? <FileText text={text} line={viewer.line} /> : null}
+        {text !== null && viewer.kind === "file" ? (
+          isImagePath(viewer.path) ? (
+            <ImageStage image={{ src: text, name: viewer.path.split("/").pop() ?? viewer.path }} className="h-full" />
+          ) : (
+            <FileText text={text} line={viewer.line} />
+          )
+        ) : null}
       </div>
     </div>
   )

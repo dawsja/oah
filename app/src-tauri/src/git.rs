@@ -119,6 +119,12 @@ pub async fn file_read(app: AppHandle, project_id: String, cwd: Option<String>, 
     with(app, project_id, cwd, move |r| git::read_file(r, &path, 512 * 1024)).await
 }
 
+/// An image file as a `data:` URL, for the file viewer (up to 20 MB).
+#[tauri::command]
+pub async fn file_read_image(app: AppHandle, project_id: String, cwd: Option<String>, path: String) -> CmdResult<String> {
+    with(app, project_id, cwd, move |r| git::read_image(r, &path, 20 * 1024 * 1024)).await
+}
+
 // ---- Worktrees and pull requests -------------------------------------------------------------
 
 use oah_git::github::{self, PrState};

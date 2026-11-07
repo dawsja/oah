@@ -20,6 +20,8 @@ pub struct StartOptions {
     /// The CLI; empty is the usual command.
     pub binary: String,
     pub model: Option<String>,
+    /// Reasoning effort (`low` … `max`); none is the model's default.
+    pub effort: Option<String>,
     pub permission: PermissionMode,
     /// The CLI's session id to continue, from an earlier `Started`.
     pub resume: Option<String>,
@@ -44,6 +46,9 @@ pub struct Prompt {
     pub text: String,
     #[serde(default)]
     pub images: Vec<Image>,
+    /// The images as saved with the chat (set by the app before the agent gets them).
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 pub type DriverResult<T> = Result<T, String>;
@@ -66,6 +71,15 @@ pub trait Driver: Send {
     /// Switches the model for the next turns.
     fn set_model(&mut self, _model: &str) -> DriverResult<()> {
         Ok(())
+    }
+    /// Switches the reasoning effort (empty: the model's default). `false`: the CLI only takes
+    /// it when it starts, so it has to be restarted (resuming its session) to apply it.
+    fn set_effort(&mut self, _effort: &str) -> DriverResult<bool> {
+        Ok(false)
+    }
+    /// No turn is running (so restarting the CLI loses nothing).
+    fn idle(&self) -> bool {
+        true
     }
     /// `/compact`: summarizes the conversation so far, when the agent has a way to (Codex's
     /// `thread/compact/start`). `false`: it takes `/compact` as a message instead.

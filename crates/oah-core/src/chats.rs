@@ -19,6 +19,9 @@ pub struct ChatMeta {
     pub acp_agent: Option<String>,
     /// Empty: the agent's default.
     pub model: String,
+    /// Reasoning effort (`low` … `max`); empty: the model's default.
+    #[serde(default)]
+    pub effort: String,
     pub title: String,
     /// The folder the agent works in: the project, or one of its worktrees.
     pub cwd: String,
@@ -39,6 +42,7 @@ impl Default for ChatMeta {
             agent: AgentKind::Claude,
             acp_agent: None,
             model: String::new(),
+            effort: String::new(),
             title: String::new(),
             cwd: String::new(),
             agent_session_id: None,
@@ -139,6 +143,25 @@ impl ChatStore {
             Err(e) => return Err(e.into()),
         };
         Ok(std::io::BufReader::new(f).lines().map_while(|l| l.ok()).filter_map(|l| serde_json::from_str(&l).ok()).collect())
+    }
+
+    /// Where a chat's attached images are kept (`<chat>/images/`), created on first use.
+    pub fn images_dir(&self, id: &str) -> Result<PathBuf> {
+        let dir = self.dir(id)?.join("images");
+        std::fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    /// A saved image's path, if `file` is one of ours (a plain name, no folders).
+    pub fn image_path(&self, id: &str, file: &str) -> Result<PathBuf> {
+        let ok = !file.is_empty()
+            && file.len() <= 80
+            && file.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+            && !file.starts_with('.');
+        if !ok {
+            return Err(Error::Invalid(format!("not an image name: {file:?}")));
+        }
+        Ok(self.dir(id)?.join("images").join(file))
     }
 
     pub fn delete(&self, id: &str) -> Result<()> {

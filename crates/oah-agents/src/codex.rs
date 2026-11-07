@@ -29,6 +29,7 @@ pub struct CodexDriver {
     sink: Sink,
     permission: PermissionMode,
     model: Option<String>,
+    effort: Option<String>,
 }
 
 #[derive(Default)]
@@ -108,7 +109,8 @@ impl CodexDriver {
             });
         }
 
-        let d = CodexDriver { rpc, child, state, sink, permission: opts.permission, model: opts.model.clone() };
+        let d =
+            CodexDriver { rpc, child, state, sink, permission: opts.permission, model: opts.model.clone(), effort: opts.effort.clone() };
         d.rpc.call(
             "initialize",
             json!({"clientInfo": {"name": "oah", "title": "oah", "version": env!("CARGO_PKG_VERSION")}, "capabilities": null}),
@@ -167,11 +169,15 @@ impl Driver for CodexDriver {
             id: prompt.id,
             text: prompt.text,
             images: prompt.images.iter().map(|i| i.mime.clone()).collect(),
+            files: prompt.files.clone(),
         });
         let (approval, _) = policy(self.permission);
         let mut params = json!({"threadId": thread_id, "input": input, "approvalPolicy": approval});
         if let Some(m) = &self.model {
             params["model"] = json!(m);
+        }
+        if let Some(e) = &self.effort {
+            params["effort"] = json!(e);
         }
         // A turn already running takes the message as steering input (turn/steer); if that's
         // refused, it starts a new turn.
@@ -230,6 +236,16 @@ impl Driver for CodexDriver {
         // Applied with the next turn/start.
         self.permission = mode;
         Ok(())
+    }
+
+    fn set_effort(&mut self, effort: &str) -> DriverResult<bool> {
+        // Applied with the next turn/start.
+        self.effort = Some(effort.to_string()).filter(|e| !e.is_empty());
+        Ok(true)
+    }
+
+    fn idle(&self) -> bool {
+        self.state.lock().unwrap().turn_id.is_none()
     }
 
     fn compact(&mut self, instructions: &str) -> DriverResult<bool> {
@@ -554,6 +570,13 @@ pub fn parse_models(v: &Value) -> Vec<ModelOption> {
             id: m["model"].as_str().or(m["id"].as_str()).unwrap_or("").into(),
             name: m["displayName"].as_str().or(m["model"].as_str()).unwrap_or("").into(),
             description: m["description"].as_str().unwrap_or("").into(),
+            efforts: m["supportedReasoningEfforts"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e["reasoningEffort"].as_str().or(e.as_str()).map(String::from))
+                .collect(),
+            default_effort: m["defaultReasoningEffort"].as_str().map(String::from),
         })
         .collect()
 }
@@ -685,8 +708,10 @@ mod tests {
         }
         assert!(state.lock().unwrap().questions.contains_key("cxq-9"));
         let m = parse_models(
-            &json!({"data":[{"id":"a","model":"gpt-6","displayName":"GPT-6","description":"x","hidden":false},{"id":"b","model":"old","displayName":"Old","hidden":true}]}),
+            &json!({"data":[{"id":"a","model":"gpt-6","displayName":"GPT-6","description":"x","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"low","description":""},{"reasoningEffort":"high","description":""}],"defaultReasoningEffort":"high"},{"id":"b","model":"old","displayName":"Old","hidden":true}]}),
         );
+        assert_eq!(m[0].efforts, ["low", "high"]);
+        assert_eq!(m[0].default_effort.as_deref(), Some("high"));
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].id, "gpt-6");
     }

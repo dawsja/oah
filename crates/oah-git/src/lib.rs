@@ -329,5 +329,60 @@ pub fn read_file(repo: &Repo, path: &str, max: usize) -> Result<String, String> 
     }
 }
 
+/// An image file's type, from its extension (`None`: not one oah shows).
+pub fn image_mime(path: &str) -> Option<&'static str> {
+    let ext = path.rsplit('.').next()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "avif" => "image/avif",
+        _ => return None,
+    })
+}
+
+/// An image file in the project as a `data:` URL (up to `max` bytes), read here or on the
+/// project's machine (`base64` there).
+pub fn read_image(repo: &Repo, path: &str, max: usize) -> Result<String, String> {
+    use base64::Engine;
+    if path.split(['/', '\\']).any(|p| p == "..") {
+        return Err("path leaves the project".into());
+    }
+    let mime = image_mime(path).ok_or("not an image")?;
+    let data = match &repo.location {
+        Location::Local => {
+            let full = std::path::Path::new(&repo.path).join(path);
+            let len = std::fs::metadata(&full).map_err(|e| e.to_string())?.len() as usize;
+            if len > max {
+                return Err(format!("too big to show ({} MB)", len / 1_000_000));
+            }
+            base64::engine::general_purpose::STANDARD.encode(std::fs::read(&full).map_err(|e| e.to_string())?)
+        }
+        Location::Ssh { .. } | Location::Wsl { .. } => {
+            let out = repo.exec(
+                "sh",
+                &[
+                    "-c",
+                    r#"s=$(wc -c < "$1") || exit 1; [ "$s" -le "$2" ] || { echo "too big to show" >&2; exit 3; }; base64 < "$1""#,
+                    "oah",
+                    path,
+                    &max.to_string(),
+                ],
+                None,
+                QUICK,
+            )?;
+            if !out.ok() {
+                return Err(git_error(&out));
+            }
+            out.stdout.split_whitespace().collect()
+        }
+    };
+    Ok(format!("data:{mime};base64,{data}"))
+}
+
 #[cfg(test)]
 mod tests;

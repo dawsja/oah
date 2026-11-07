@@ -61,9 +61,14 @@ struct State {
     /// Mode switching: a config option id, or the session's modes.
     mode_option: Option<String>,
     modes: Vec<String>,
+    /// The reasoning effort option (category `thought_level`) and its values, for the current
+    /// model.
+    effort_option: Option<String>,
+    efforts: Vec<String>,
     /// Cumulative cost the agent reported; turns get the difference.
     cost: f64,
     cost_at_turn: f64,
+    current_model: Option<String>,
     permission: PermissionMode,
 }
 
@@ -221,15 +226,36 @@ impl AcpDriver {
         if !models.is_empty() {
             (d.sink)(ChatEvent::Models { models, current: current.clone() });
         }
+        if opencode {
+            // The session lists only the current model's efforts; the CLI knows every model's.
+            let (sink, state, binary, location, cwd) =
+                (d.sink.clone(), d.state.clone(), program.clone(), opts.location.clone(), opts.cwd.clone());
+            thread::spawn(move || {
+                if let Ok(models) = opencode_models(&binary, &location, &cwd) {
+                    let current = state.lock().unwrap().current_model.clone();
+                    if !models.is_empty() {
+                        sink(ChatEvent::Models { models, current });
+                    }
+                }
+            });
+        }
+        d.state.lock().unwrap().current_model = current.clone();
         if let Some(m) = opts.model.as_deref().filter(|m| Some(*m) != current.as_deref()) {
             let mut me = d;
             if let Err(e) = me.set_model(m) {
                 (me.sink)(ChatEvent::Notice { level: NoticeLevel::Warn, text: format!("Couldn't switch to {m}: {e}") });
             }
             let _ = me.apply_mode(opts.permission);
+            if let Some(e) = opts.effort.as_deref().filter(|e| !e.is_empty()) {
+                let _ = me.set_effort(e);
+            }
             return Ok(me);
         }
         let _ = d.apply_mode(opts.permission);
+        let mut d = d;
+        if let Some(e) = opts.effort.as_deref().filter(|e| !e.is_empty()) {
+            let _ = d.set_effort(e);
+        }
         Ok(d)
     }
 
@@ -237,8 +263,10 @@ impl AcpDriver {
     /// `models` / `modes`).
     fn read_options(&self, session: &Value) -> (Vec<ModelOption>, Option<String>) {
         let mut st = self.state.lock().unwrap();
-        let (models, current, model_option) = models_from(session);
+        let (mut models, current, model_option) = models_from(session);
         st.model_option = model_option;
+        read_effort(&mut st, session);
+        add_efforts(&mut models, current.as_deref(), &st.efforts);
         if let Some(opts) = session["configOptions"].as_array() {
             if let Some(mode) = opts.iter().find(|o| o["category"] == "mode" || o["id"] == "mode") {
                 st.mode_option = mode["id"].as_str().map(String::from);
@@ -355,6 +383,7 @@ impl Driver for AcpDriver {
             id: prompt.id.clone(),
             text: prompt.text.clone(),
             images: prompt.images.iter().map(|i| i.mime.clone()).collect(),
+            files: prompt.files.clone(),
         });
         if self.state.lock().unwrap().busy {
             // One prompt at a time: this one runs when the current one ends.
@@ -406,14 +435,39 @@ impl Driver for AcpDriver {
             ),
             None => self.rpc.call("session/set_model", json!({"sessionId": sid, "modelId": model}), Duration::from_secs(30)),
         }?;
-        // A config option change answers with the new options.
+        // A config option change answers with the new options (and the new model's efforts).
         if r["configOptions"].is_array() {
-            let (models, current, _) = models_from(&r);
+            let mut st = self.state.lock().unwrap();
+            read_effort(&mut st, &r);
+            st.current_model = Some(model.to_string());
+            let (mut models, current, _) = models_from(&r);
+            add_efforts(&mut models, current.as_deref(), &st.efforts);
+            drop(st);
             if !models.is_empty() {
                 (self.sink)(ChatEvent::Models { models, current });
             }
         }
         Ok(())
+    }
+
+    fn set_effort(&mut self, effort: &str) -> DriverResult<bool> {
+        let sid = self.session()?;
+        let (option, values) = {
+            let s = self.state.lock().unwrap();
+            (s.effort_option.clone(), s.efforts.clone())
+        };
+        // No effort to pick for this model: nothing to do.
+        let Some(id) = option else { return Ok(true) };
+        let value = if effort.is_empty() { "default" } else { effort };
+        if !values.iter().any(|v| v == value) {
+            return Ok(true);
+        }
+        self.rpc.call("session/set_config_option", json!({"sessionId": sid, "configId": id, "value": value}), Duration::from_secs(30))?;
+        Ok(true)
+    }
+
+    fn idle(&self) -> bool {
+        !self.state.lock().unwrap().busy
     }
 
     fn set_permission(&mut self, mode: PermissionMode) -> DriverResult<()> {
@@ -520,9 +574,14 @@ impl Translator {
                 }
             }
             "config_option_update" => {
-                let (models, current, option) = models_from(u);
+                let (mut models, current, option) = models_from(u);
+                let mut st = self.state.lock().unwrap();
+                read_effort(&mut st, u);
                 if !models.is_empty() {
-                    self.state.lock().unwrap().model_option = option;
+                    st.model_option = option;
+                    st.current_model = current.clone();
+                    add_efforts(&mut models, current.as_deref(), &st.efforts);
+                    drop(st);
                     self.emit(ChatEvent::Models { models, current });
                 }
             }
@@ -649,22 +708,55 @@ impl Translator {
 /// per line.
 pub fn opencode_models(binary: &str, location: &oah_core::settings::Location, cwd: &str) -> DriverResult<Vec<ModelOption>> {
     let program = if binary.trim().is_empty() { "opencode" } else { binary.trim() };
-    let out = oah_transport::run(&Spec { location, cwd, program, args: vec!["models".into()], env: &[] }, None, Duration::from_secs(30))?;
+    let args = vec!["models".into(), "--verbose".into()];
+    let out = oah_transport::run(&Spec { location, cwd, program, args, env: &[] }, None, Duration::from_secs(30))?;
     if !out.ok() {
         return Err(out.stderr.lines().last().unwrap_or("opencode models failed").to_string());
     }
     Ok(parse_opencode_models(&out.stdout))
 }
 
+/// `opencode models` (one `provider/model` per line) or `--verbose` (each line followed by the
+/// model's JSON, whose `variants` keys are its effort levels, and `name`).
 pub fn parse_opencode_models(out: &str) -> Vec<ModelOption> {
-    out.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('{') && !l.starts_with('"') && l.contains('/') && !l.contains(' '))
-        .map(|l| {
-            let (provider, model) = l.split_once('/').unwrap_or(("", l));
-            ModelOption { id: l.to_string(), name: model.to_string(), description: provider.to_string() }
-        })
-        .collect()
+    let mut models: Vec<ModelOption> = Vec::new();
+    let mut json = String::new();
+    let flush = |models: &mut Vec<ModelOption>, json: &mut String| {
+        if let (Some(m), Ok(v)) = (models.last_mut(), serde_json::from_str::<Value>(json)) {
+            if let Some(name) = v["name"].as_str() {
+                m.name = name.to_string();
+            }
+            if let Some(vs) = v["variants"].as_object() {
+                m.efforts = vs.keys().cloned().collect();
+                m.efforts.sort_by_key(|e| effort_rank(e));
+            }
+        }
+        json.clear();
+    };
+    for line in out.lines() {
+        let t = line.trim_end();
+        let is_id = !t.is_empty() && !t.starts_with([' ', '{', '}', '"', '[', ']']) && t.contains('/') && !t.contains(' ');
+        if is_id {
+            flush(&mut models, &mut json);
+            let (provider, model) = t.split_once('/').unwrap_or(("", t));
+            models.push(ModelOption {
+                id: t.to_string(),
+                name: model.to_string(),
+                description: provider.to_string(),
+                ..Default::default()
+            });
+        } else if !models.is_empty() {
+            json.push_str(line);
+            json.push('\n');
+        }
+    }
+    flush(&mut models, &mut json);
+    models
+}
+
+/// Effort levels from lowest to highest (unknown ones last).
+fn effort_rank(e: &str) -> usize {
+    ["none", "minimal", "low", "medium", "high", "xhigh", "max"].iter().position(|x| *x == e).unwrap_or(99)
 }
 
 // ---- Helpers ---------------------------------------------------------------------------------
@@ -840,6 +932,7 @@ fn model_option(o: &Value) -> Option<ModelOption> {
         name: o["name"].as_str().unwrap_or(&id).to_string(),
         description: o["description"].as_str().unwrap_or("").to_string(),
         id,
+        ..Default::default()
     })
 }
 
@@ -852,6 +945,31 @@ fn models_from(v: &Value) -> (Vec<ModelOption>, Option<String>, Option<String>) 
     let m = &v["models"];
     let list = m["availableModels"].as_array().into_iter().flatten().filter_map(model_option).collect();
     (list, m["currentModelId"].as_str().map(String::from), None)
+}
+
+/// The session's reasoning effort option: category `thought_level` (OpenCode calls it
+/// `effort`), with its values.
+fn read_effort(st: &mut State, v: &Value) {
+    let Some(opts) = v["configOptions"].as_array() else { return };
+    match opts.iter().find(|o| o["category"] == "thought_level" || o["id"] == "effort") {
+        Some(o) => {
+            st.effort_option = o["id"].as_str().map(String::from);
+            st.efforts = select_values(&o["options"]).into_iter().map(|m| m.id).collect();
+        }
+        None => {
+            st.effort_option = None;
+            st.efforts.clear();
+        }
+    }
+}
+
+/// Gives the current model the session's effort levels (`default` is "none picked", not one).
+fn add_efforts(models: &mut [ModelOption], current: Option<&str>, efforts: &[String]) {
+    if let Some(m) = models.iter_mut().find(|m| Some(m.id.as_str()) == current) {
+        if m.efforts.is_empty() {
+            m.efforts = efforts.iter().filter(|e| *e != "default").cloned().collect();
+        }
+    }
 }
 
 /// An elicitation form → question cards, and how to read the answers back.
@@ -1127,6 +1245,42 @@ not a model
         );
         assert_eq!(m.len(), 2);
         assert_eq!((m[1].id.as_str(), m[1].name.as_str(), m[1].description.as_str()), ("openai/gpt-6", "gpt-6", "openai"));
+        // --verbose: each id followed by its JSON; variant keys are the effort levels.
+        let v = parse_opencode_models(
+            r#"opencode/beam-free
+{
+  "id": "beam-free",
+  "name": "Beam Free",
+  "variants": { "max": {"reasoningEffort": "max"}, "low": {"reasoningEffort": "low"}, "high": {"reasoningEffort": "high"} }
+}
+opencode/big-pickle
+{
+  "id": "big-pickle",
+  "name": "Big Pickle"
+}
+"#,
+        );
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].name, "Beam Free");
+        assert_eq!(v[0].efforts, ["low", "high", "max"]);
+        assert!(v[1].efforts.is_empty());
+    }
+
+    #[test]
+    fn reads_the_effort_option() {
+        let session = json!({"configOptions": [
+            {"id": "model", "category": "model", "currentValue": "opencode/beam-free", "options": [{"value": "opencode/beam-free", "name": "Beam"}, {"value": "opencode/big-pickle", "name": "Pickle"}]},
+            {"id": "effort", "category": "thought_level", "currentValue": "low", "options": [{"value": "low", "name": "Low"}, {"value": "max", "name": "Max"}, {"value": "default", "name": "Default"}]}
+        ]});
+        let mut st = State::default();
+        read_effort(&mut st, &session);
+        assert_eq!(st.effort_option.as_deref(), Some("effort"));
+        let (mut models, current, _) = models_from(&session);
+        add_efforts(&mut models, current.as_deref(), &st.efforts);
+        assert_eq!(models[0].efforts, ["low", "max"], "default isn't a level");
+        assert!(models[1].efforts.is_empty());
+        read_effort(&mut st, &json!({"configOptions": []}));
+        assert!(st.effort_option.is_none());
     }
 
     /// Against a real OpenCode (ignored): OAH_TEST_DIR is a project folder, OAH_TEST_MODEL an
@@ -1142,6 +1296,7 @@ not a model
             let e = events.clone();
             let sink: Sink = Arc::new(move |ev| e.lock().unwrap().push(ev));
             let opts = StartOptions {
+                effort: None,
                 kind: AgentKind::Opencode,
                 cwd: dir.clone(),
                 location: oah_core::settings::Location::Local,
@@ -1156,7 +1311,7 @@ not a model
         };
         let run = |d: &mut AcpDriver, text: &str| -> String {
             let from = events.lock().unwrap().len();
-            d.send(Prompt { id: "p".into(), text: text.into(), images: vec![] }).unwrap();
+            d.send(Prompt { id: "p".into(), text: text.into(), images: vec![], files: vec![] }).unwrap();
             let t0 = std::time::Instant::now();
             loop {
                 assert!(t0.elapsed() < Duration::from_secs(300), "turn took too long");

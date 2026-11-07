@@ -62,6 +62,8 @@ export const git = {
   files: (s: Scope) => call<string[]>("files_list", s),
   grep: (s: Scope, pattern: string) => call<GrepHit[]>("files_grep", s, { pattern }),
   read: (s: Scope, path: string) => call<string>("file_read", s, { path }),
+  /** An image file as a `data:` URL. */
+  readImage: (s: Scope, path: string) => call<string>("file_read_image", s, { path }),
   prState: (s: Scope) => call<PrState>("pr_state", s),
   prCreate: (s: Scope, title: string, body: string, base: string, draft: boolean) => call<string>("pr_create", s, { title, body, base, draft }),
 }
@@ -111,3 +113,6 @@ export function changeCount(s: Status | null): number {
   if (!s) return 0
   return new Set([...s.staged, ...s.unstaged, ...s.untracked, ...s.conflicted].map((c) => c.path)).size
 }
+
+/** Image files the viewer shows as pictures. */
+export const isImagePath = (path: string) => /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(path)

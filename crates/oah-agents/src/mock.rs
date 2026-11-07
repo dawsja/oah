@@ -64,7 +64,7 @@ impl Driver for MockDriver {
         stop.store(false, Ordering::SeqCst);
         let (tx, rx) = channel();
         *self.answers.lock().unwrap() = Some(tx);
-        sink(ChatEvent::UserMessage { id: prompt.id, text: prompt.text.clone(), images: vec![] });
+        sink(ChatEvent::UserMessage { id: prompt.id, text: prompt.text.clone(), images: vec![], files: prompt.files.clone() });
         let lower = prompt.text.to_lowercase();
         if lower.contains("plan") {
             thread::spawn(move || play_plan(n, sink, rx));

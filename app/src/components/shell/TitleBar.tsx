@@ -5,6 +5,7 @@ import { isRemote, locationLabel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
 import { UpdateButton } from "./Updates"
+import { UsageButton } from "./UsageButton"
 
 async function win() {
   const { getCurrentWindow } = await import("@tauri-apps/api/window")
@@ -45,6 +46,7 @@ export function TitleBar() {
       </div>
       <div data-tauri-drag-region className="h-full flex-1" onDoubleClick={() => win().then((w) => w.toggleMaximize())} />
       <UpdateButton />
+      <UsageButton />
       {view === "chat" ? (
         <Tip content="Toggle side panel" side="bottom">
           <button

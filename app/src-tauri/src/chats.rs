@@ -24,11 +24,18 @@ pub struct Chats {
     live: Mutex<HashMap<String, Box<dyn Driver>>>,
     /// Metas of chats with a live driver, updated as events arrive.
     metas: Arc<Mutex<HashMap<String, ChatMeta>>>,
+    /// Chats whose CLI restarts before the next message (an effort it only takes at start).
+    restart: Mutex<std::collections::HashSet<String>>,
 }
 
 impl Chats {
     pub fn new(store: ChatStore) -> Chats {
-        Chats { store, live: Mutex::new(HashMap::new()), metas: Arc::new(Mutex::new(HashMap::new())) }
+        Chats {
+            store,
+            live: Mutex::new(HashMap::new()),
+            metas: Arc::new(Mutex::new(HashMap::new())),
+            restart: Mutex::new(std::collections::HashSet::new()),
+        }
     }
 
     pub fn create(
@@ -37,14 +44,56 @@ impl Chats {
         agent: AgentKind,
         acp_agent: Option<String>,
         model: &str,
+        effort: &str,
         cwd: &str,
     ) -> Result<ChatMeta, String> {
         let mut meta = self.store.create(project_id, agent, model, cwd).map_err(|e| e.to_string())?;
-        if agent == AgentKind::Acp {
-            meta.acp_agent = acp_agent;
+        if agent == AgentKind::Acp || !effort.is_empty() {
+            meta.acp_agent = acp_agent.filter(|_| agent == AgentKind::Acp);
+            meta.effort = effort.to_string();
             self.store.save(&meta).map_err(|e| e.to_string())?;
         }
         Ok(meta)
+    }
+
+    /// Saves a prompt's images with the chat (so a reopened chat still shows them); returns the
+    /// file names, in order.
+    fn save_images(&self, chat_id: &str, prompt: &Prompt) -> Vec<String> {
+        use base64::Engine;
+        let Ok(dir) = self.store.images_dir(chat_id) else { return vec![] };
+        prompt
+            .images
+            .iter()
+            .enumerate()
+            .filter_map(|(i, img)| {
+                let ext = match img.mime.as_str() {
+                    "image/png" => "png",
+                    "image/jpeg" => "jpg",
+                    "image/gif" => "gif",
+                    "image/webp" => "webp",
+                    _ => "img",
+                };
+                let bytes = base64::engine::general_purpose::STANDARD.decode(img.data.as_bytes()).ok()?;
+                let name = format!("{}-{i}.{ext}", now_ms());
+                std::fs::write(dir.join(&name), bytes).ok()?;
+                Some(name)
+            })
+            .collect()
+    }
+
+    /// A saved image as a `data:` URL.
+    pub fn image(&self, chat_id: &str, file: &str) -> Result<String, String> {
+        use base64::Engine;
+        let path = self.store.image_path(chat_id, file).map_err(|e| e.to_string())?;
+        let bytes = std::fs::read(&path).map_err(|_| "that image is gone".to_string())?;
+        let mime = match file.rsplit('.').next() {
+            Some("png") => "image/png",
+            Some("jpg") => "image/jpeg",
+            Some("gif") => "image/gif",
+            Some("webp") => "image/webp",
+            _ => "application/octet-stream",
+        };
+        Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
     }
 
     /// Sends `prompt`, starting the chat's agent first if it isn't running.
@@ -53,10 +102,20 @@ impl Chats {
         app: &AppHandle,
         settings: &Settings,
         chat_id: &str,
-        prompt: Prompt,
+        mut prompt: Prompt,
         permission: Option<PermissionMode>,
     ) -> Result<(), String> {
+        if !prompt.images.is_empty() && prompt.files.is_empty() {
+            prompt.files = self.save_images(chat_id, &prompt);
+        }
         let mut live = self.live.lock().unwrap();
+        // An effort the CLI only takes at start: restart it (resuming) now that it's idle.
+        if self.restart.lock().unwrap().contains(chat_id) && live.get(chat_id).is_some_and(|d| d.idle()) {
+            if let Some(mut d) = live.remove(chat_id) {
+                d.stop();
+            }
+            self.restart.lock().unwrap().remove(chat_id);
+        }
         if !live.contains_key(chat_id) {
             let driver = self.start(app, settings, chat_id, permission)?;
             live.insert(chat_id.to_string(), driver);
@@ -111,6 +170,7 @@ impl Chats {
             location: project.location.clone(),
             binary: provider.binary_on(&project.location),
             model,
+            effort: Some(meta.effort.clone()).filter(|e| !e.is_empty()),
             permission: permission.unwrap_or(provider.permission_mode),
             resume: meta.agent_session_id.clone(),
             env: crate::secrets::resolve(&crate::secrets::scope(meta.agent, meta.acp_agent.as_deref()), &provider.env),
@@ -177,6 +237,23 @@ impl Chats {
         Ok(meta)
     }
 
+    /// Switches a chat's reasoning effort: saved, and applied now when the CLI can; otherwise the
+    /// CLI restarts (resuming its session) before the next message.
+    pub fn set_effort(&self, chat_id: &str, effort: &str) -> Result<ChatMeta, String> {
+        let mut meta = self.store.get(chat_id).map_err(|e| e.to_string())?;
+        meta.effort = effort.to_string();
+        self.store.save(&meta).map_err(|e| e.to_string())?;
+        if let Some(m) = self.metas.lock().unwrap().get_mut(chat_id) {
+            m.effort = effort.to_string();
+        }
+        if let Some(d) = self.live.lock().unwrap().get_mut(chat_id) {
+            if !d.set_effort(effort)? {
+                self.restart.lock().unwrap().insert(chat_id.to_string());
+            }
+        }
+        Ok(meta)
+    }
+
     pub fn set_permission(&self, chat_id: &str, mode: PermissionMode) -> Result<(), String> {
         match self.live.lock().unwrap().get_mut(chat_id) {
             Some(d) => d.set_permission(mode),
@@ -204,7 +281,7 @@ impl Chats {
             }
         }
         let text = format!("/compact {}", instructions.trim()).trim_end().to_string();
-        self.send(app, settings, chat_id, Prompt { id: format!("compact-{}", now_ms()), text, images: vec![] }, permission)
+        self.send(app, settings, chat_id, Prompt { id: format!("compact-{}", now_ms()), text, images: vec![], files: vec![] }, permission)
     }
 
     /// `/clear`: the agent starts a new session with the next message. The chat keeps what was

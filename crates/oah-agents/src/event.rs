@@ -17,7 +17,11 @@ pub enum ChatEvent {
     UserMessage {
         id: String,
         text: String,
+        /// The attached images' types.
         images: Vec<String>,
+        /// The same images saved with the chat (`chat_image` reads them back), in order.
+        #[serde(default)]
+        files: Vec<String>,
     },
     TurnStarted {
         turn_id: String,
@@ -248,12 +252,19 @@ pub struct SlashCommand {
     pub skill: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelOption {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// The reasoning effort levels this model takes (`low` … `max`), in order; empty when it has
+    /// none to pick.
+    #[serde(default)]
+    pub efforts: Vec<String>,
+    /// The level it uses when none is picked, when the agent says.
+    #[serde(default)]
+    pub default_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

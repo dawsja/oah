@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react"
+import { isImagePath } from "@/lib/git"
+import { ReadImage } from "./ChatImages"
 import { Brain, Check, ChevronDown, ChevronRight, FilePen, FileText, Globe, ListTree, Loader2, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react"
 import type { Item, ToolItem, ToolKind } from "@/lib/chat"
 import { cn } from "@/lib/utils"
@@ -29,6 +31,9 @@ const VERB: Record<ToolKind, string> = {
 
 /** A run of reasoning and tool calls: one summary line, expanded while the turn runs. Edits
  *  keep their diffs visible even when the run is folded. */
+/** A Read of an image file that worked: shown as a thumbnail. */
+const viewedImage = (t: ToolItem) => t.tool.kind === "read" && t.status === "ok" && !!t.tool.path && isImagePath(t.tool.path)
+
 export function WorkGroup({ items, live }: { items: Item[]; live: boolean }) {
   const [open, setOpen] = useState(live)
   // Open while the agent works on it, folded once the turn moves on.
@@ -38,6 +43,7 @@ export function WorkGroup({ items, live }: { items: Item[]; live: boolean }) {
   const failed = tools.filter((t) => t.status === "error").length
   const names = [...new Set(tools.map((t) => VERB[t.tool.kind]))]
   const diffs = tools.filter((t) => t.diff)
+  const viewed = tools.filter(viewedImage)
   const summary = tools.length === 0 ? "Thought" : `${tools.length} step${tools.length === 1 ? "" : "s"}`
 
   return (
@@ -53,7 +59,15 @@ export function WorkGroup({ items, live }: { items: Item[]; live: boolean }) {
           {items.map((it) => (it.kind === "reasoning" ? <Reasoning key={it.id} text={it.text} /> : it.kind === "tool" ? <ToolRow key={it.id} item={it} /> : null))}
         </div>
       ) : (
-        diffs.map((t) => <DiffCard key={t.id} diff={t.diff!} defaultOpen={false} />)
+        <>
+          {/* Images the agent looked at stay visible with the steps folded. */}
+          {viewed.map((t) => (
+            <ReadImage key={t.id} path={t.tool.path!} />
+          ))}
+          {diffs.map((t) => (
+            <DiffCard key={t.id} diff={t.diff!} defaultOpen={false} />
+          ))}
+        </>
       )}
     </div>
   )
@@ -97,6 +111,7 @@ export function ToolRow({ item }: { item: ToolItem }) {
           )}
         </span>
       </button>
+      {viewedImage(item) ? <ReadImage path={item.tool.path!} /> : null}
       {item.diff ? (
         <div className="mt-1 mb-1.5">
           <DiffCard diff={item.diff} defaultOpen />

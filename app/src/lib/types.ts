@@ -5,7 +5,9 @@ export type AgentKind = "claude" | "codex" | "opencode" | "acp"
 export const AGENTS: Exclude<AgentKind, "acp">[] = ["claude", "codex", "opencode"]
 export const AGENT_LABEL: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode", acp: "ACP agent" }
 /** Agents whose plan limits oah can read. */
-export const LIMIT_AGENTS: AgentKind[] = ["claude", "codex"]
+export const LIMIT_AGENTS: AgentKind[] = ["claude", "codex", "opencode"]
+/** Whose limits they are (OpenCode's are its Go plan's). */
+export const LIMIT_LABEL: Record<AgentKind, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode Go", acp: "ACP agent" }
 
 export type PermissionMode = "ask" | "acceptEdits" | "plan" | "fullAccess"
 export const PERMISSION_LABEL: Record<PermissionMode, string> = {
@@ -90,7 +92,9 @@ export type Probe = { found: boolean; path: string | null; version: string | nul
 
 export type Account = { signedIn: boolean; label: string | null; plan: string | null; error: string | null }
 export type LimitWindow = { label: string; usedPercent: number; resetsAt: number | null }
-export type Limits = { windows: LimitWindow[]; error: string | null }
+/** `extra`: rows that aren't windows (a balance; `value` null when unavailable, `note` says why). */
+export type LimitExtra = { label: string; value: string | null; note: string | null }
+export type Limits = { windows: LimitWindow[]; error: string | null; extra: LimitExtra[] }
 
 /** `windows`: not installed there, but a Windows copy is on WSL's PATH (where). */
 export type Tool = { path: string | null; version: string | null; windows: string | null }

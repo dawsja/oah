@@ -22,7 +22,7 @@ type ChatsStore = {
   send(
     chatId: string | null,
     text: string,
-    opts: { agent: AgentKind; acpId?: string | null; model?: string; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] },
+    opts: { agent: AgentKind; acpId?: string | null; model?: string; effort?: string; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] },
   ): Promise<void>
   /** `/compact`: the agent summarizes the conversation so far. */
   compact(chatId: string, instructions: string, permission: PermissionMode): Promise<void>
@@ -32,6 +32,8 @@ type ChatsStore = {
   answer(chatId: string, requestId: string, decision: Decision): Promise<void>
   answerQuestion(chatId: string, requestId: string, answers: Record<string, string[]>): Promise<void>
   setModel(chatId: string, model: string): Promise<void>
+  /** Reasoning effort for the chat (empty: the model's default). */
+  setEffort(chatId: string, effort: string): Promise<void>
   remove(chatId: string): Promise<void>
   rename(chatId: string, title: string): Promise<void>
   setPermission(chatId: string, mode: PermissionMode): void
@@ -72,7 +74,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
     try {
       if (!id) {
         if (!app.projectId) return
-        const meta = await ipc.chatCreate(app.projectId, opts.agent, opts.acpId ?? null, opts.model ?? null, opts.cwd ?? null)
+        const meta = await ipc.chatCreate(app.projectId, opts.agent, opts.acpId ?? null, opts.model ?? null, opts.effort ?? null, opts.cwd ?? null)
         id = meta.id
         set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: emptyTranscript() }, permission: { ...s.permission, [meta.id]: opts.permission } }))
         useApp.setState({ chatId: meta.id })
@@ -122,6 +124,11 @@ export const useChats = create<ChatsStore>((set, get) => ({
 
   async setModel(chatId, model) {
     const meta = await ipc.chatSetModel(chatId, model).catch((e) => (toast.error(String(e)), null))
+    if (meta) set((s) => ({ metas: s.metas.map((m) => (m.id === chatId ? meta : m)) }))
+  },
+
+  async setEffort(chatId, effort) {
+    const meta = await ipc.chatSetEffort(chatId, effort).catch((e) => (toast.error(String(e)), null))
     if (meta) set((s) => ({ metas: s.metas.map((m) => (m.id === chatId ? meta : m)) }))
   },
 

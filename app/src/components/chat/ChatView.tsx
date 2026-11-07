@@ -78,12 +78,13 @@ function NewChat({ project }: { project: Project }) {
   const d = useAgentDefaults(project, agent)
   const [permission, setPermission] = useState(d.permission)
   const [model, setModel] = useState<string | null>(null)
+  const [effort, setEffort] = useState("")
   const { models, commands, load } = useCatalog(agent, project.id)
   const { distro, starting } = useStartOpenDistro(project.location)
   const draftCwd = useApp((s) => s.draftCwd)
   const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
   const send = (text: string, images: { mime: string; data: string }[] = []) =>
-    useChats.getState().send(null, text, { agent: agent.kind, acpId: agent.acpId, model: model ?? undefined, permission, cwd: draftCwd ?? undefined, images })
+    useChats.getState().send(null, text, { agent: agent.kind, acpId: agent.acpId, model: model ?? undefined, effort: effort || undefined, permission, cwd: draftCwd ?? undefined, images })
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
@@ -113,10 +114,15 @@ function NewChat({ project }: { project: Project }) {
             onAgent={(a) => {
               setAgent(a)
               setModel(null)
+              setEffort("")
             }}
             model={model ?? d.model}
+            effort={effort}
             models={models}
-            onModel={setModel}
+            onModel={(id, e) => {
+              setModel(id)
+              setEffort(e)
+            }}
             onModelsOpen={load}
             commands={commands}
             permission={permission}
@@ -159,8 +165,12 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
         <Composer
           agent={agent}
           model={meta.model || transcript.model || d.model}
+          effort={meta.effort}
           models={models}
-          onModel={(id) => chats.setModel(meta.id, id)}
+          onModel={(id, e) => {
+            if (id !== meta.model) void chats.setModel(meta.id, id)
+            if (e !== meta.effort) void chats.setEffort(meta.id, e)
+          }}
           onModelsOpen={load}
           commands={commands}
           onClear={() => chats.clear(meta.id)}

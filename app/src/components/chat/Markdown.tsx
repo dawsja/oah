@@ -5,6 +5,7 @@ import rehypeHighlight from "rehype-highlight"
 import remarkGfm from "remark-gfm"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
+import { openImages } from "@/components/ImageView"
 
 function text(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node)
@@ -47,6 +48,12 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
         rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
         components={{
           pre: Pre,
+          img: ({ src, alt }) =>
+            typeof src === "string" && src ? (
+              <button className="my-1 block" onClick={() => openImages([{ src, name: alt || "Image" }])} aria-label={`Open ${alt || "image"}`}>
+                <img src={src} alt={alt ?? ""} loading="lazy" className="rounded-md max-h-96 max-w-full border object-contain" />
+              </button>
+            ) : null,
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noreferrer">
               {children}

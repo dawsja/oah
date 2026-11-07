@@ -20,14 +20,21 @@ export type PlanItem = { text: string; status: "pending" | "inProgress" | "compl
 export type QuestionOption = { label: string; description: string }
 export type Question = { id: string; header: string; question: string; options: QuestionOption[]; multi: boolean; other: boolean; secret: boolean }
 export type QuestionRequest = { requestId: string; questions: Question[] }
-export type ModelOption = { id: string; name: string; description: string }
+/** `efforts`: the reasoning effort levels the model takes, in order (empty: none to pick). */
+export type ModelOption = { id: string; name: string; description: string; efforts: string[]; defaultEffort: string | null }
+
+/** "xhigh" → "Extra high". */
+export function effortLabel(e: string): string {
+  const named: Record<string, string> = { xhigh: "Extra high", max: "Max", minimal: "Minimal", none: "None" }
+  return named[e] ?? e.charAt(0).toUpperCase() + e.slice(1)
+}
 /** `skill`: a Codex skill, mentioned as `$name` instead of run as `/name`. */
 export type SlashCommand = { name: string; description: string; hint: string; skill: boolean }
 export type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
 
 export type ChatEvent =
   | { type: "started"; sessionId: string | null; model: string | null; cwd: string | null }
-  | { type: "userMessage"; id: string; text: string; images: string[] }
+  | { type: "userMessage"; id: string; text: string; images: string[]; files?: string[] }
   | { type: "turnStarted"; turnId: string }
   | { type: "textDelta"; itemId: string; text: string }
   | { type: "text"; itemId: string; text: string }
@@ -53,6 +60,8 @@ export type ChatMeta = {
   id: string
   projectId: string
   agent: AgentKind
+  /** Reasoning effort; empty: the model's default. */
+  effort: string
   /** Which added ACP agent, when `agent` is "acp". */
   acpAgent: string | null
   model: string
@@ -67,7 +76,7 @@ export type ChatMeta = {
 
 export type ToolItem = { kind: "tool"; id: string; tool: ToolCall; status: "running" | "ok" | "error"; output: string; diff: FileDiff | null }
 export type Item =
-  | { kind: "user"; id: string; text: string; images: string[] }
+  | { kind: "user"; id: string; text: string; images: string[]; files: string[] }
   | { kind: "assistant"; id: string; text: string }
   | { kind: "reasoning"; id: string; text: string }
   | ToolItem
@@ -116,7 +125,7 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
     case "started":
       return { ...t, model: e.model ?? t.model, cwd: e.cwd ?? t.cwd }
     case "userMessage":
-      return push({ kind: "user", id: e.id, text: e.text, images: e.images }, { running: true })
+      return push({ kind: "user", id: e.id, text: e.text, images: e.images, files: e.files ?? [] }, { running: true })
     case "turnStarted":
       return { ...t, running: true }
     case "textDelta":

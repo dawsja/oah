@@ -126,6 +126,12 @@ async fn location_list_dir(location: Location, path: String) -> CmdResult<oah_tr
     tauri::async_runtime::spawn_blocking(move || oah_transport::remote::list_dir(&location, &path)).await.map_err(err)?
 }
 
+/// Writes bytes to a path the user picked in a Save dialog (an image from the viewer).
+#[tauri::command]
+fn save_bytes(path: String, data: Vec<u8>) -> CmdResult<()> {
+    std::fs::write(&path, data).map_err(|e| format!("couldn't write {path}: {e}"))
+}
+
 /// The WSL distros on this computer (none when WSL isn't installed, or off Windows).
 #[tauri::command]
 async fn wsl_distros() -> Vec<oah_transport::wsl::Distro> {
@@ -184,13 +190,15 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: 
                 return account::Limits {
                     windows: vec![],
                     error: Some(format!("{distro} isn't running. Open one of its projects to see these.")),
+                    extra: vec![],
                 };
             }
         }
         match kind {
             AgentKind::Claude => account::claude_limits(&location),
             AgentKind::Codex => account::codex_limits(&binary, &location),
-            AgentKind::Opencode | AgentKind::Acp => account::Limits::default(),
+            AgentKind::Opencode => account::opencode_go_limits(&location),
+            AgentKind::Acp => account::Limits::default(),
         }
     })
     .await
@@ -263,6 +271,7 @@ fn chat_create(
     agent: Option<AgentKind>,
     acp_agent: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
     cwd: Option<String>,
 ) -> CmdResult<ChatMeta> {
     let s = state.settings.lock().unwrap().clone();
@@ -272,7 +281,7 @@ fn chat_create(
     if agent == AgentKind::Acp && acp_agent.as_deref().and_then(|id| s.providers.acp_agent(id)).is_none() {
         return Err("no such ACP agent".into());
     }
-    state.chats.create(&project_id, agent, acp_agent, model.as_deref().unwrap_or(""), &cwd)
+    state.chats.create(&project_id, agent, acp_agent, model.as_deref().unwrap_or(""), effort.as_deref().unwrap_or(""), &cwd)
 }
 
 /// The chat's events so far, to replay into the transcript.
@@ -333,6 +342,17 @@ fn chat_answer_question(
 #[tauri::command]
 fn chat_set_model(state: State<AppState>, chat_id: String, model: String) -> CmdResult<ChatMeta> {
     state.chats.set_model(&chat_id, &model)
+}
+
+/// An image saved with a chat, as a `data:` URL.
+#[tauri::command]
+async fn chat_image(app: AppHandle, chat_id: String, file: String) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().chats.image(&chat_id, &file)).await.map_err(err)?
+}
+
+#[tauri::command]
+fn chat_set_effort(state: State<AppState>, chat_id: String, effort: String) -> CmdResult<ChatMeta> {
+    state.chats.set_effort(&chat_id, &effort)
 }
 
 #[tauri::command]
@@ -402,6 +422,7 @@ pub fn run() {
             location_check,
             location_list_dir,
             wsl_distros,
+            save_bytes,
             wsl_start,
             wsl_path,
             provider_probe,
@@ -419,6 +440,8 @@ pub fn run() {
             chat_clear,
             chat_answer,
             chat_set_permission,
+            chat_set_effort,
+            chat_image,
             chat_answer_question,
             chat_set_model,
             chat_close,
@@ -439,6 +462,7 @@ pub fn run() {
             git::files_list,
             git::files_grep,
             git::file_read,
+            git::file_read_image,
             git::worktree_list,
             git::worktree_create,
             git::worktree_remove,

@@ -13,11 +13,15 @@ Electron.
 - **Chat.** Streaming answers, folded tool runs, file diffs, approvals (allow, always allow,
   deny; queued when several arrive), questions the agent asks (options, multi-select, typed
   answers, one question at a time with number keys), plans to approve or send back, context and
-  token use per turn, image attachments, a model picker with each agent's own models, `@` file
-  mentions, and a `/` menu: oah's `/model`, `/plan`, `/compact` and `/clear`, then the agent's own
+  token use per turn, a model picker with each agent's own models and their effort levels (hover a
+  model: Low … Max open to the right), `@` file mentions, and a `/` menu: oah's `/model`, `/plan`, `/compact` and `/clear`, then the agent's own
   commands and skills. "Always allow" lasts for the chat's session; it never writes the agent's
   settings files. Messages sent mid-turn are steered in (Codex) or queued (Claude, ACP). Chats
   are saved and resume the agent's own session.
+- **Images.** Attach by paste, drop or the clip button; they're saved with the chat, shown as
+  thumbnails in the message, and open full-window (fit or actual size, copy, save; ← → between
+  several). Images the agent reads show beside its step, images in answers open the same way,
+  and the file viewer shows image files.
 - **Projects and worktrees.** Each project lists its worktrees and the chats in each one. A new
   worktree is a branch in its own folder, so several chats can work on one repo at once.
 - **Side panel.** Files (tree, filter, search in files, add to chat), Source Control (stage,
@@ -35,8 +39,9 @@ Electron.
   runs the agent CLI, git and gh over `ssh`, so the agent works on that machine's files.
 - **Voice.** Dictation transcribed on this computer with NVIDIA Parakeet (a one-time 731 MB
   download). Nothing you say leaves the machine.
-- **Settings.** Providers, Voice, Appearance (dark, light, system), Usage (Claude and Codex plan
-  limits, tokens and cost per project), SSH Hosts, Projects.
+- **Usage.** Plan limits for Claude, Codex and OpenCode Go (session, week, month), in a title bar
+  popover and in Settings → Usage, with tokens and cost per project.
+- **Settings.** Providers, Voice, Appearance (dark, light, system), Usage, SSH Hosts, Projects.
 
 Corners are subtle: 2px tags, 4px controls and rows, 6px cards and panels.
 

@@ -55,6 +55,8 @@ struct State {
     plans: HashSet<String>,
     /// The mode to go back to when a plan is approved: the last one that wasn't plan.
     after_plan: PermissionMode,
+    /// `claude_code_version` from `initialize`.
+    version: Option<String>,
 }
 
 pub fn permission_mode_flag(mode: PermissionMode) -> &'static str {
@@ -88,6 +90,9 @@ impl ClaudeDriver {
         }
         if let Some(m) = &opts.model {
             args.extend(["--model".into(), m.clone()]);
+        }
+        if let Some(e) = opts.effort.as_deref().filter(|e| valid_effort(e)) {
+            args.extend(["--effort".into(), e.to_string()]);
         }
         if let Some(r) = &opts.resume {
             args.extend(["--resume".into(), r.clone()]);
@@ -168,6 +173,7 @@ impl Driver for ClaudeDriver {
             id: prompt.id.clone(),
             text: prompt.text.clone(),
             images: prompt.images.iter().map(|i| i.mime.clone()).collect(),
+            files: prompt.files.clone(),
         });
         let started = {
             let mut s = self.state.lock().unwrap();
@@ -227,6 +233,22 @@ impl Driver for ClaudeDriver {
         self.write(&json!({"type": "control_request", "request_id": format!("oah-mode-{}", self.turn), "request": {"subtype": "set_permission_mode", "mode": permission_mode_flag(mode)}}))
     }
 
+    /// Claude Code 2.1.50 and newer switch effort mid-session (`apply_flag_settings`); older
+    /// ones take it only as `--effort` when they start.
+    fn set_effort(&mut self, effort: &str) -> DriverResult<bool> {
+        let live = self.state.lock().unwrap().version.as_deref().is_some_and(|v| !crate::probe::older(v, "2.1.50"));
+        if !live {
+            return Ok(false);
+        }
+        let level = if effort.is_empty() { Value::Null } else { json!(effort) };
+        self.write(&json!({"type": "control_request", "request_id": format!("oah-effort-{}", self.turn), "request": {"subtype": "apply_flag_settings", "settings": {"effortLevel": level}}}))?;
+        Ok(true)
+    }
+
+    fn idle(&self) -> bool {
+        self.state.lock().unwrap().turn_id.is_none()
+    }
+
     fn stop(&mut self) {
         self.stdin.lock().unwrap().take();
         if let Some(mut c) = self.child.lock().unwrap().take() {
@@ -278,6 +300,7 @@ impl Translator {
             "user" => self.tool_results(v),
             "control_request" => self.control_request(v),
             "control_response" if v["response"]["request_id"] == "oah-init" => {
+                self.state.lock().unwrap().version = v["response"]["response"]["claude_code_version"].as_str().map(String::from);
                 let commands = parse_commands(&v["response"]["response"]);
                 if !commands.is_empty() {
                     self.emit(ChatEvent::Commands { commands });
@@ -542,7 +565,8 @@ impl Translator {
     }
 }
 
-/// `list_models`' answer: `{models: [{value, displayName, description, disabled}]}`.
+/// `list_models`' answer: `{models: [{value, displayName, description, disabled, supportsEffort,
+/// supportedEffortLevels}]}`.
 pub fn parse_models(r: &Value) -> Vec<ModelOption> {
     r["models"]
         .as_array()
@@ -551,13 +575,25 @@ pub fn parse_models(r: &Value) -> Vec<ModelOption> {
         .filter(|m| !m["disabled"].as_bool().unwrap_or(false))
         .filter_map(|m| {
             let id = m["value"].as_str()?.to_string();
+            let efforts = if m["supportsEffort"].as_bool() == Some(true) { strings(&m["supportedEffortLevels"]) } else { vec![] };
             Some(ModelOption {
                 name: m["displayName"].as_str().unwrap_or(&id).to_string(),
                 description: m["description"].as_str().unwrap_or("").to_string(),
                 id,
+                efforts,
+                default_effort: None,
             })
         })
         .collect()
+}
+
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect()
+}
+
+/// An effort level safe to pass as a flag.
+pub fn valid_effort(e: &str) -> bool {
+    !e.is_empty() && e.len() <= 16 && e.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// The `can_use_tool` answer. "Always" keeps Claude's suggested rules for this session only (they
@@ -771,6 +807,17 @@ mod tests {
         }
         let v = out.lock().unwrap().clone();
         v
+    }
+
+    #[test]
+    fn reads_effort_levels() {
+        let m = parse_models(&json!({"models": [
+            {"value": "opus", "displayName": "Opus 5.5", "supportsEffort": true, "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
+            {"value": "claude-haiku-4-5", "displayName": "Haiku 4.5", "supportsThinkingOff": true}
+        ]}));
+        assert_eq!(m[0].efforts, ["low", "medium", "high", "xhigh", "max"]);
+        assert!(m[1].efforts.is_empty());
+        assert!(valid_effort("xhigh") && !valid_effort("hi gh") && !valid_effort(""));
     }
 
     #[test]

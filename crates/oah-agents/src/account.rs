@@ -39,6 +39,18 @@ pub struct LimitWindow {
 pub struct Limits {
     pub windows: Vec<LimitWindow>,
     pub error: Option<String>,
+    /// Rows that aren't windows: a balance, or why it isn't shown.
+    #[serde(default)]
+    pub extra: Vec<LimitExtra>,
+}
+
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitExtra {
+    pub label: String,
+    /// `None`: unavailable (see `note`).
+    pub value: Option<String>,
+    pub note: Option<String>,
 }
 
 fn program(kind: AgentKind, binary: &str) -> String {
@@ -167,7 +179,11 @@ pub fn claude_limits(location: &Location) -> Limits {
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .and_then(|v| v["claudeAiOauth"]["accessToken"].as_str().map(String::from));
     let Some(token) = token else {
-        return Limits { windows: vec![], error: Some("Sign in to Claude Code with a Claude plan to see its limits.".into()) };
+        return Limits {
+            windows: vec![],
+            error: Some("Sign in to Claude Code with a Claude plan to see its limits.".into()),
+            extra: vec![],
+        };
     };
     let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().new_agent();
     let resp = agent
@@ -178,13 +194,13 @@ pub fn claude_limits(location: &Location) -> Limits {
         .call();
     match resp {
         Ok(mut r) => match r.body_mut().read_json::<Value>() {
-            Ok(v) => Limits { windows: parse_claude_usage(&v), error: None },
-            Err(e) => Limits { windows: vec![], error: Some(format!("unexpected answer: {e}")) },
+            Ok(v) => Limits { windows: parse_claude_usage(&v), error: None, extra: vec![] },
+            Err(e) => Limits { windows: vec![], error: Some(format!("unexpected answer: {e}")), extra: vec![] },
         },
         Err(ureq::Error::StatusCode(401)) => {
-            Limits { windows: vec![], error: Some("Claude's sign-in expired. Run Claude Code once to refresh it.".into()) }
+            Limits { windows: vec![], error: Some("Claude's sign-in expired. Run Claude Code once to refresh it.".into()), extra: vec![] }
         }
-        Err(e) => Limits { windows: vec![], error: Some(format!("couldn't load Claude limits: {e}")) },
+        Err(e) => Limits { windows: vec![], error: Some(format!("couldn't load Claude limits: {e}")), extra: vec![] },
     }
 }
 
@@ -255,12 +271,98 @@ fn iso_ms(s: &str) -> Option<u64> {
     Some((secs as f64 * 1000.0 + ss * 1000.0) as u64)
 }
 
+// ---- OpenCode Go -----------------------------------------------------------------------------
+
+/// OpenCode Go's plan limits: `GET https://opencode.ai/zen/go/v1/usage` with the `opencode-go`
+/// key from OpenCode's `auth.json` (on this computer, or on `location`).
+pub fn opencode_go_limits(location: &Location) -> Limits {
+    let fail = |e: String| Limits { windows: vec![], error: Some(e), extra: vec![] };
+    let Some(key) = opencode_go_key(location) else {
+        return fail("Sign in to OpenCode Go (`opencode auth login`, pick OpenCode Go) to see its limits.".into());
+    };
+    let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(15))).http_status_as_error(false).build().new_agent();
+    let resp = agent
+        .get("https://opencode.ai/zen/go/v1/usage")
+        .header("Authorization", &format!("Bearer {key}"))
+        .header("Accept", "application/json")
+        .call();
+    let mut r = match resp {
+        Ok(r) => r,
+        Err(e) => return fail(format!("couldn't load OpenCode Go limits: {e}")),
+    };
+    let status = r.status().as_u16();
+    let body = r.body_mut().read_to_string().unwrap_or_default();
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    match opencode_go_answer(status, &body, &v) {
+        Ok(windows) => Limits {
+            windows,
+            error: None,
+            // With a key the answer has no Zen balance (that needs the console's sign-in).
+            extra: vec![LimitExtra {
+                label: "Zen balance".into(),
+                value: None,
+                note: Some("The balance isn't included in this usage answer.".into()),
+            }],
+        },
+        Err(e) => fail(e),
+    }
+}
+
+/// `{"usage": {"rolling": {percent, resetsAt}, "weekly": …, "monthly": …}}` → windows; the
+/// account's problems in plain words.
+pub fn opencode_go_answer(status: u16, body: &str, v: &Value) -> Result<Vec<LimitWindow>, String> {
+    let kind = v["error"]["type"].as_str().unwrap_or("");
+    if status == 403 || kind == "EntitlementError" {
+        return Err("This OpenCode account has no OpenCode Go subscription.".into());
+    }
+    if status == 401 || kind == "AuthError" || body.trim_start().starts_with('<') {
+        return Err("OpenCode Go turned the key down. Sign in again with `opencode auth login`.".into());
+    }
+    if !(200..300).contains(&status) {
+        return Err(format!("OpenCode Go's usage request failed ({status})."));
+    }
+    let u = &v["usage"];
+    let mut out = Vec::new();
+    for (k, label) in [("rolling", "Current session (5 hours)"), ("weekly", "This week"), ("monthly", "This month")] {
+        if let Some(p) = u[k]["percent"].as_f64() {
+            out.push(LimitWindow { label: label.into(), used_percent: p.clamp(0.0, 100.0), resets_at: reset_ms(&u[k]["resetsAt"]) });
+        }
+    }
+    if out.len() < 2 {
+        return Err("OpenCode Go answered in a way oah doesn't understand.".into());
+    }
+    Ok(out)
+}
+
+/// The `opencode-go` API key: `$OPENCODE_AUTH_CONTENT`, else `auth.json` in OpenCode's data
+/// folder (`$XDG_DATA_HOME/opencode`, or `~/.local/share/opencode`).
+fn opencode_go_key(location: &Location) -> Option<String> {
+    let text = match location {
+        Location::Local => std::env::var("OPENCODE_AUTH_CONTENT").ok().or_else(|| {
+            let data = std::env::var_os("XDG_DATA_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| oah_core::paths::home_dir().join(".local").join("share"));
+            std::fs::read_to_string(data.join("opencode").join("auth.json")).ok()
+        }),
+        _ => {
+            let args = vec!["-c".into(), r#"cat "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null"#.into()];
+            oah_transport::run(&Spec { location, cwd: "~", program: "sh", args, env: &[] }, None, Duration::from_secs(20))
+                .ok()
+                .filter(|o| o.ok())
+                .map(|o| o.stdout)
+        }
+    }?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    let e = &v["opencode-go"];
+    (e["type"] == "api").then(|| e["key"].as_str().map(String::from)).flatten().filter(|k| !k.is_empty())
+}
+
 // ---- Codex -----------------------------------------------------------------------------------
 
 pub fn codex_limits(binary: &str, location: &Location) -> Limits {
     match codex_once(&program(AgentKind::Codex, binary), location, "account/rateLimits/read", Value::Null) {
-        Ok(v) => Limits { windows: parse_codex_limits(&v), error: None },
-        Err(e) => Limits { windows: vec![], error: Some(e) },
+        Ok(v) => Limits { windows: parse_codex_limits(&v), error: None, extra: vec![] },
+        Err(e) => Limits { windows: vec![], error: Some(e), extra: vec![] },
     }
 }
 
@@ -414,6 +516,20 @@ mod tests {
         assert!(a.signed_in);
         assert_eq!(a.label.as_deref(), Some("OpenAI"));
         assert!(!parse_opencode_auth("┌  Credentials\n└  0 credentials\n").signed_in);
+    }
+
+    #[test]
+    fn reads_opencode_go_limits() {
+        let ok = json!({"usage":{"rolling":{"status":"ok","percent":30,"resetsAt":"2026-09-23T17:00:00.000Z"},"weekly":{"status":"ok","percent":51,"resetsAt":"2026-09-28T00:00:00.000Z"},"monthly":{"status":"rate-limited","percent":100,"resetsAt":"2026-10-01T00:00:00.000Z"}}});
+        let w = opencode_go_answer(200, "{}", &ok).unwrap();
+        assert_eq!(w.iter().map(|w| w.used_percent).collect::<Vec<_>>(), [30.0, 51.0, 100.0]);
+        assert_eq!(w[0].label, "Current session (5 hours)");
+        assert!(w[0].resets_at.is_some());
+        assert!(opencode_go_answer(403, "", &Value::Null).unwrap_err().contains("no OpenCode Go subscription"));
+        assert!(opencode_go_answer(200, "", &json!({"error":{"type":"EntitlementError"}})).unwrap_err().contains("subscription"));
+        assert!(opencode_go_answer(401, "", &Value::Null).unwrap_err().contains("turned the key down"));
+        assert!(opencode_go_answer(200, "<html>sign in</html>", &Value::Null).unwrap_err().contains("turned the key down"));
+        assert!(opencode_go_answer(200, "{}", &json!({"usage":{"rolling":{"percent":1}}})).is_err());
     }
 
     #[test]

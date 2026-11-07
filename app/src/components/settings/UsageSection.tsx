@@ -4,8 +4,9 @@ import { AgentGlyph } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { formatTokens } from "@/lib/chat"
 import { ipc } from "@/lib/ipc"
-import { AGENT_LABEL, LIMIT_AGENTS, type AgentKind, type Limits } from "@/lib/types"
+import { LIMIT_AGENTS, LIMIT_LABEL, type AgentKind, type Limits } from "@/lib/types"
 import { useChats } from "@/store/chats"
+import { useUsage } from "@/store/usage"
 import { useWsl } from "@/store/wsl"
 import { LocationIcon } from "@/components/LocationIcon"
 import { useApp } from "@/store/app"
@@ -41,25 +42,11 @@ export function LimitBar({ label, used, resets }: { label: string; used: number 
 export function UsageSection() {
   const projects = useApp((s) => s.settings!.projects)
   const metas = useChats((s) => s.metas)
-  const [limits, setLimits] = useState<Partial<Record<AgentKind, Limits | null>>>({})
-  const [loading, setLoading] = useState(false)
-
-  const load = async () => {
-    setLoading(true)
-    setLimits({})
-    await Promise.all(
-      LIMIT_AGENTS.map((a) =>
-        ipc.providerLimits(a).then(
-          (l) => setLimits((s) => ({ ...s, [a]: l })),
-          (e) => setLimits((s) => ({ ...s, [a]: { windows: [], error: String(e) } })),
-        ),
-      ),
-    )
-    setLoading(false)
-  }
+  const { limits, loading, load: fetchLimits } = useUsage()
+  const load = () => void fetchLimits(true)
   useEffect(() => {
-    load()
-  }, [])
+    void fetchLimits()
+  }, [fetchLimits])
 
   return (
     <Section
@@ -78,7 +65,7 @@ export function UsageSection() {
             key={a}
             title={
               <span className="flex items-center gap-1.5">
-                <AgentGlyph agent={a} className="size-3" /> {AGENT_LABEL[a]}
+                <AgentGlyph agent={a} className="size-3" /> {LIMIT_LABEL[a]}
               </span>
             }
             aside={l === undefined ? <span className="text-[11px] text-faint">Loading…</span> : null}
@@ -86,6 +73,17 @@ export function UsageSection() {
             {l?.error ? <div className="px-4 py-3 text-[12px] text-muted-foreground">{l.error}</div> : null}
             {l && !l.error && l.windows.length === 0 ? <div className="px-4 py-3 text-[12px] text-faint">No plan limits reported.</div> : null}
             {l === undefined ? <LimitBar label="…" used={null} /> : l?.windows.map((w) => <LimitBar key={w.label} label={w.label} used={w.usedPercent} resets={resets(w.resetsAt)} />)}
+            {l && !l.error
+              ? l.extra.map((x) => (
+                  <div key={x.label} className="border-t px-4 py-3 text-[12.5px]">
+                    <div className="flex items-baseline">
+                      <span className="font-medium">{x.label}</span>
+                      <span className="ml-auto font-mono text-[11.5px] text-muted-foreground">{x.value ?? "Unavailable"}</span>
+                    </div>
+                    {x.note ? <div className="mt-0.5 text-[11px] text-faint">{x.note}</div> : null}
+                  </div>
+                ))
+              : null}
           </Group>
         )
       })}
@@ -133,11 +131,18 @@ function WslLimits({ distro, refresh }: { distro: string; refresh: boolean }) {
     if (refresh || running !== true) return
     setRows({})
     for (const a of LIMIT_AGENTS) {
+      if (a === "opencode") {
+        void ipc.providerLimits(a, location).then(
+          (limits) => setRows((r) => ({ ...r, [a]: { same: null, limits } })),
+          (e) => setRows((r) => ({ ...r, [a]: { same: null, limits: { windows: [], error: String(e), extra: [] } } })),
+        )
+        continue
+      }
       Promise.all([ipc.providerAccount(a, location).catch(() => null), ipc.providerAccount(a).catch(() => null)]).then(async ([there, here]) => {
-        if (!there?.signedIn) return setRows((r) => ({ ...r, [a]: { same: null, limits: { windows: [], error: there?.error ?? `Not signed in in ${distro}.` } } }))
+        if (!there?.signedIn) return setRows((r) => ({ ...r, [a]: { same: null, limits: { windows: [], error: there?.error ?? `Not signed in in ${distro}.`, extra: [] } } }))
         // Only an email says which account it is (Codex's "ChatGPT" doesn't).
         if (here?.signedIn && there.label?.includes("@") && there.label === here.label) return setRows((r) => ({ ...r, [a]: { same: there.label, limits: null } }))
-        const limits = await ipc.providerLimits(a, location).catch((e) => ({ windows: [], error: String(e) }))
+        const limits = await ipc.providerLimits(a, location).catch((e) => ({ windows: [], error: String(e), extra: [] }))
         setRows((r) => ({ ...r, [a]: { same: null, limits } }))
       })
     }
@@ -160,7 +165,7 @@ function WslLimits({ distro, refresh }: { distro: string; refresh: boolean }) {
           return (
             <div key={a} className="border-b last:border-b-0">
               <div className="flex items-center gap-1.5 px-4 pt-2.5 text-[11.5px] text-muted-foreground">
-                <AgentGlyph agent={a} className="size-3" /> {AGENT_LABEL[a]}
+                <AgentGlyph agent={a} className="size-3" /> {LIMIT_LABEL[a]}
               </div>
               {r === undefined ? (
                 <LimitBar label="…" used={null} />
