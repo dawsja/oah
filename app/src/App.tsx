@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { PromptHost } from "@/components/Prompt"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ChatView } from "@/components/chat/ChatView"
@@ -26,7 +27,7 @@ export function App() {
       const s = useApp.getState()
       if (e.ctrlKey && (e.key === "n" || e.key === "N")) {
         e.preventDefault()
-        useApp.setState({ chatId: null, view: "chat" })
+        useApp.setState({ chatId: null, draftCwd: null, view: "chat" })
       } else if (e.ctrlKey && e.key === ",") {
         e.preventDefault()
         s.view === "settings" ? s.closeSettings() : s.openSettings()
@@ -67,6 +68,7 @@ export function App() {
         )}
       </div>
       <Toaster position="bottom-right" />
+      <PromptHost />
     </TooltipProvider>
   )
 }

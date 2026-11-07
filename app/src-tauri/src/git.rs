@@ -93,3 +93,50 @@ pub async fn files_grep(app: AppHandle, project_id: String, cwd: Option<String>,
 pub async fn file_read(app: AppHandle, project_id: String, cwd: Option<String>, path: String) -> CmdResult<String> {
     with(app, project_id, cwd, move |r| git::read_file(r, &path, 512 * 1024)).await
 }
+
+// ---- Worktrees and pull requests -------------------------------------------------------------
+
+use oah_git::github::{self, PrState};
+use oah_git::worktree::{self, Worktree};
+
+#[tauri::command]
+pub async fn worktree_list(app: AppHandle, project_id: String) -> CmdResult<Vec<Worktree>> {
+    with(app, project_id, None, worktree::worktrees).await
+}
+
+/// A new worktree on a new branch `branch`, from the project's base branch, in its worktree
+/// folder.
+#[tauri::command]
+pub async fn worktree_create(app: AppHandle, project_id: String, branch: String) -> CmdResult<Worktree> {
+    let git_opts = {
+        let state = app.state::<AppState>();
+        let s = state.settings.lock().unwrap();
+        s.projects.iter().find(|p| p.id == project_id).map(|p| p.git.clone()).ok_or("no such project")?
+    };
+    with(app, project_id, None, move |r| {
+        let path = worktree::default_dir(r, &git_opts.worktree_dir, &branch);
+        let base = worktree::default_base(r, &git_opts.base_branch);
+        worktree::add(r, &path, branch.trim(), &base)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn worktree_remove(app: AppHandle, project_id: String, path: String, force: bool) -> CmdResult<()> {
+    let delete_branch = {
+        let state = app.state::<AppState>();
+        let s = state.settings.lock().unwrap();
+        s.projects.iter().find(|p| p.id == project_id).map(|p| p.git.delete_branch_on_remove).unwrap_or(false)
+    };
+    with(app, project_id, None, move |r| worktree::remove(r, &path, force, delete_branch)).await
+}
+
+#[tauri::command]
+pub async fn pr_state(app: AppHandle, project_id: String, cwd: Option<String>) -> CmdResult<PrState> {
+    with(app, project_id, cwd, |r| Ok(github::pr_state(r))).await
+}
+
+#[tauri::command]
+pub async fn pr_create(app: AppHandle, project_id: String, cwd: Option<String>, title: String, body: String, base: String, draft: bool) -> CmdResult<String> {
+    with(app, project_id, cwd, move |r| github::pr_create(r, &title, &body, &base, draft)).await
+}

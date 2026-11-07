@@ -247,6 +247,11 @@ pub fn run() {
             git::files_list,
             git::files_grep,
             git::file_read,
+            git::worktree_list,
+            git::worktree_create,
+            git::worktree_remove,
+            git::pr_state,
+            git::pr_create,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oah")

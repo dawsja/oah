@@ -128,3 +128,26 @@ fn ahead_of_a_bare_remote() {
     sync(&r, SyncOp::Sync).unwrap();
     assert_eq!(status(&r).unwrap().ahead, 0);
 }
+
+#[test]
+fn worktrees_add_and_remove() {
+    let (dir, r) = repo();
+    std::fs::write(dir.path().join("a"), "1").unwrap();
+    commit(&r, "one", false, true).unwrap();
+    let list = worktree::worktrees(&r).unwrap();
+    assert_eq!(list.len(), 1);
+    assert!(list[0].main);
+
+    let path = worktree::default_dir(&r, "", "feat/new thing");
+    assert!(path.replace('\\', "/").ends_with("-worktrees/feat-new-thing"), "{path}");
+    let base = worktree::default_base(&r, "");
+    assert_eq!(base, "main");
+    let w = worktree::add(&r, &path, "feat/new-thing", &base).unwrap();
+    assert_eq!(w.branch.as_deref(), Some("feat/new-thing"));
+    assert!(!w.main);
+    std::fs::write(std::path::Path::new(&path).join("b"), "dirty").unwrap();
+    assert!(worktree::remove(&r, &path, false, true).is_err(), "a dirty worktree needs force");
+    worktree::remove(&r, &path, true, true).unwrap();
+    assert_eq!(worktree::worktrees(&r).unwrap().len(), 1);
+    assert!(!branches(&r).unwrap().iter().any(|b| b.name == "feat/new-thing"), "branch deleted");
+}

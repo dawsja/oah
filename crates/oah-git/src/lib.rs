@@ -3,13 +3,16 @@
 //!
 //! Every function takes a [`Repo`] (where and which folder) and returns plain data for the UI.
 
+pub mod github;
 mod graph;
 mod parse;
+pub mod worktree;
 
 use std::time::Duration;
 
 use oah_core::settings::{EnvVar, Location};
-use oah_transport::{Output, Spec};
+pub use oah_transport::Output;
+use oah_transport::Spec;
 use serde::Serialize;
 
 pub use graph::{lanes, GraphRow};

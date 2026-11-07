@@ -49,7 +49,9 @@ function NewChat({ project }: { project: Project }) {
   const [agent, setAgent] = useState<AgentKind>(project.defaultAgent ?? settings.providers.defaultAgent)
   const d = useAgentDefaults(project, agent)
   const [permission, setPermission] = useState(d.permission)
-  const send = (text: string) => useChats.getState().send(null, text, { agent, permission })
+  const draftCwd = useApp((s) => s.draftCwd)
+  const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
+  const send = (text: string) => useChats.getState().send(null, text, { agent, permission, cwd: draftCwd ?? undefined })
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
@@ -61,6 +63,9 @@ function NewChat({ project }: { project: Project }) {
               <h1 className="text-[22px] leading-tight font-semibold tracking-tight">What should we work on?</h1>
               <p className="mt-1 text-[12.5px] text-muted-foreground">
                 {AGENT_LABEL[agent]} in <span className="font-medium text-foreground">{project.name}</span>
+                {worktree ? (
+                  <span className="ml-1 border border-gold/40 px-1 font-mono text-[11px] text-gold">⎇ {worktree.branch}</span>
+                ) : null}
                 <span className="text-faint"> · {locationLabel(project.location)}</span>
               </p>
             </div>

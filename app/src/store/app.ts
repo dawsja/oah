@@ -22,6 +22,8 @@ type AppStore = {
   section: SettingsSection
   projectId: string | null
   chatId: string | null
+  /** The folder a new (unsent) chat will work in: a worktree, or null for the project. */
+  draftCwd: string | null
   layout: Layout
 
   load(): Promise<void>
@@ -54,6 +56,7 @@ export const useApp = create<AppStore>((set, get) => ({
   section: "providers",
   projectId: null,
   chatId: null,
+  draftCwd: null,
   layout: loadLayout(),
 
   async load() {
@@ -111,7 +114,7 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   selectProject(id) {
     if (id !== get().projectId) import("./git").then((m) => m.useGit.getState().open(null))
-    set({ projectId: id, view: "chat" })
+    set({ projectId: id, view: "chat", draftCwd: id === get().projectId ? get().draftCwd : null })
     if (id) localStorage.setItem("oah.project", id)
   },
   setLayout(patch) {

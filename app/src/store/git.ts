@@ -4,7 +4,7 @@
 import { useEffect } from "react"
 import { toast } from "sonner"
 import { create } from "zustand"
-import { git, type Scope, type Status } from "@/lib/git"
+import { git, worktrees as wt, type Scope, type Status, type Worktree } from "@/lib/git"
 import { useApp, useProject } from "./app"
 import { useChats } from "./chats"
 
@@ -19,6 +19,9 @@ type GitStore = {
   errors: Record<string, string | null>
   busy: string | null
   viewer: Viewer | null
+  /** Worktrees per project (empty for folders that aren't repositories). */
+  worktrees: Record<string, Worktree[]>
+  loadWorktrees(projectId: string): Promise<void>
   refresh(scope: Scope): Promise<void>
   /** Runs a git action with a busy label, then refreshes. */
   run<T>(scope: Scope, label: string, f: () => Promise<T>): Promise<T | undefined>
@@ -32,6 +35,12 @@ export const useGit = create<GitStore>((set, get) => ({
   errors: {},
   busy: null,
   viewer: null,
+  worktrees: {},
+
+  async loadWorktrees(projectId) {
+    const list = await wt.list(projectId).catch(() => [] as Worktree[])
+    set((s) => ({ worktrees: { ...s.worktrees, [projectId]: list } }))
+  },
 
   async refresh(scope) {
     try {
@@ -65,8 +74,10 @@ export function useScope(): Scope | null {
   const project = useProject()
   const chatId = useApp((s) => s.chatId)
   const meta = useChats((s) => s.metas.find((m) => m.id === chatId))
+  const draftCwd = useApp((s) => s.draftCwd)
   if (!project) return null
-  const cwd = meta && meta.projectId === project.id && meta.cwd && meta.cwd !== project.path ? meta.cwd : null
+  const open = meta && meta.projectId === project.id ? meta.cwd : chatId ? null : draftCwd
+  const cwd = open && open !== project.path ? open : null
   return { projectId: project.id, cwd }
 }
 
