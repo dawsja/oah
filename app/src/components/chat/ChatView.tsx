@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { agentChoices, agentKey, agentName, providerFor, type AgentRef } from "@/lib/agents"
 import { emptyTranscript, formatTokens, type ChatMeta, type ModelOption, type SlashCommand, type PlanItem, type Transcript as T } from "@/lib/chat"
+import { copyText } from "@/lib/clipboard"
 import { ipc, pickFolder, type Catalog } from "@/lib/ipc"
 import { locationLabel, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -207,7 +208,7 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
           >
             Rename
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => navigator.clipboard?.writeText(meta.agentSessionId ?? "")} disabled={!meta.agentSessionId}>
+          <DropdownMenuItem onSelect={() => copyText(meta.agentSessionId ?? "")} disabled={!meta.agentSessionId}>
             Copy the agent's session id
           </DropdownMenuItem>
           <DropdownMenuSeparator />

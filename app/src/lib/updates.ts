@@ -44,7 +44,7 @@ export class Updater {
 
   /** Start checking in the background (only in an installed app). */
   start(bundle: string | null) {
-    if (!bundle || !("__TAURI_INTERNALS__" in window)) return
+    if (!bundle) return
     this.bundle = bundle
     this.set({ kind: "idle" })
     setTimeout(() => void this.check(), 15_000)

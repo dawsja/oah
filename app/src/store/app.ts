@@ -151,13 +151,11 @@ export function applyAppearance(a: Appearance) {
   } catch {
     /* ignore */
   }
-  if ("__TAURI_INTERNALS__" in window) {
-    import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
-      getCurrentWindow()
-        .setTheme(a.theme === "system" ? null : a.theme)
-        .catch(() => {}),
-    )
-  }
+  import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
+    getCurrentWindow()
+      .setTheme(a.theme === "system" ? null : a.theme)
+      .catch(() => {}),
+  )
 }
 
 export function useProject() {

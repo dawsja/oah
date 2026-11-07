@@ -2,12 +2,10 @@
 // waiting for an approval or an answer. Nothing is sent while the window has focus.
 
 import type { ChatEvent, ChatMeta } from "./chat"
-import { inTauri } from "./ipc"
 
 let allowed: boolean | null = null
 
 async function permitted(): Promise<boolean> {
-  if (!inTauri) return false
   if (allowed !== null) return allowed
   const n = await import("@tauri-apps/plugin-notification")
   allowed = (await n.isPermissionGranted()) || (await n.requestPermission()) === "granted"

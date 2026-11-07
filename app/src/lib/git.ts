@@ -1,6 +1,5 @@
 // Git types (crates/oah-git) and the commands that run them in a project's folder.
 
-import { inTauri } from "./ipc"
 
 export type ChangeKind = "modified" | "added" | "deleted" | "renamed" | "copied" | "typechanged" | "conflicted" | "untracked"
 export type Change = { path: string; origPath: string | null; kind: ChangeKind; added: number; removed: number }
@@ -43,7 +42,6 @@ export type PrState = { kind: "unavailable"; reason: string } | { kind: "none"; 
 export type Scope = { projectId: string; cwd: string | null }
 
 async function call<T>(cmd: string, scope: Scope, args: Record<string, unknown> = {}): Promise<T> {
-  if (!inTauri) throw new Error("git needs the app")
   const { invoke } = await import("@tauri-apps/api/core")
   return invoke<T>(cmd, { projectId: scope.projectId, cwd: scope.cwd, ...args })
 }
@@ -69,7 +67,6 @@ export const git = {
 }
 
 async function project<T>(cmd: string, projectId: string, args: Record<string, unknown> = {}): Promise<T> {
-  if (!inTauri) throw new Error("git needs the app")
   const { invoke } = await import("@tauri-apps/api/core")
   return invoke<T>(cmd, { projectId, ...args })
 }

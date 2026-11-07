@@ -2,14 +2,12 @@ import { useEffect, useState } from "react"
 import { Check, CircleDashed, ExternalLink, GitMerge, GitPullRequest, GitPullRequestDraft, Loader2, Minus, RefreshCw, X } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { git, type PrState, type PullRequest as PR, type Scope } from "@/lib/git"
-import { inTauri } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
 import { useGit, useStatus } from "@/store/git"
 import { toast } from "sonner"
 
 function openUrl(url: string) {
-  if (inTauri) import("@tauri-apps/plugin-opener").then((m) => m.openUrl(url))
-  else window.open(url, "_blank")
+  import("@tauri-apps/plugin-opener").then((m) => m.openUrl(url))
 }
 
 /** The branch's pull request on GitHub (through `gh`): its state and checks, or a form to open one. */

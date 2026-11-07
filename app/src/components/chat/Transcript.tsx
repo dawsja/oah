@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { ArrowDown, Check, ChevronRight, CircleAlert, Copy, Image as ImageIcon, Info, ListChecks } from "lucide-react"
 import { blocks, formatDuration, formatTokens, type Decision, type Item, type Transcript as T } from "@/lib/chat"
+import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 import { Markdown } from "./Markdown"
 import { WorkGroup } from "./Work"
@@ -145,7 +146,7 @@ function AssistantText({ text }: { text: string }) {
       <button
         className="rounded-md mt-1 flex h-6 items-center gap-1 text-[11.5px] text-faint opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
         onClick={() => {
-          navigator.clipboard?.writeText(text)
+          copyText(text)
           setCopied(true)
           setTimeout(() => setCopied(false), 1200)
         }}

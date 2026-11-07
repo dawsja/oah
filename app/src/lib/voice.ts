@@ -2,7 +2,6 @@
 // side reports (crates/oah-voice).
 
 import { create } from "zustand"
-import { inTauri } from "./ipc"
 
 export type VoiceState =
   | { state: "off" }
@@ -16,7 +15,7 @@ export const useVoice = create<{ state: VoiceState }>(() => ({ state: { state: "
 let listening = false
 /** Loads the voice state once and follows `voice-state` events. */
 export async function initVoice() {
-  if (!inTauri || listening) return
+  if (listening) return
   listening = true
   const { invoke } = await import("@tauri-apps/api/core")
   const { listen } = await import("@tauri-apps/api/event")

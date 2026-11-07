@@ -1,7 +1,6 @@
 import { PanelLeft, PanelRight } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { Mark, WinClose, WinMax, WinMin } from "@/components/icons"
-import { inTauri } from "@/lib/ipc"
 import { locationLabel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
@@ -44,7 +43,7 @@ export function TitleBar() {
           </>
         ) : null}
       </div>
-      <div data-tauri-drag-region className="h-full flex-1" onDoubleClick={() => inTauri && win().then((w) => w.toggleMaximize())} />
+      <div data-tauri-drag-region className="h-full flex-1" onDoubleClick={() => win().then((w) => w.toggleMaximize())} />
       <UpdateButton />
       {view === "chat" ? (
         <Tip content="Toggle side panel" side="bottom">
@@ -58,13 +57,13 @@ export function TitleBar() {
         </Tip>
       ) : null}
       <div className="flex h-full">
-        <button className="grid w-11 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Minimize" onClick={() => inTauri && win().then((w) => w.minimize())}>
+        <button className="grid w-11 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Minimize" onClick={() => win().then((w) => w.minimize())}>
           <WinMin />
         </button>
-        <button className="grid w-11 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Maximize" onClick={() => inTauri && win().then((w) => w.toggleMaximize())}>
+        <button className="grid w-11 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Maximize" onClick={() => win().then((w) => w.toggleMaximize())}>
           <WinMax />
         </button>
-        <button className="grid w-11 place-items-center text-muted-foreground hover:bg-[#c42b1c] hover:text-white" aria-label="Close" onClick={() => inTauri && win().then((w) => w.close())}>
+        <button className="grid w-11 place-items-center text-muted-foreground hover:bg-[#c42b1c] hover:text-white" aria-label="Close" onClick={() => win().then((w) => w.close())}>
           <WinClose />
         </button>
       </div>

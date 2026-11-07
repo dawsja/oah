@@ -3,6 +3,7 @@ import { Check, Copy } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import rehypeHighlight from "rehype-highlight"
 import remarkGfm from "remark-gfm"
+import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 
 function text(node: ReactNode): string {
@@ -24,7 +25,7 @@ function Pre({ children }: { children?: ReactNode }) {
         <button
           className="ml-auto flex items-center gap-1 text-muted-foreground opacity-0 group-hover/code:opacity-100 hover:text-foreground"
           onClick={() => {
-            navigator.clipboard?.writeText(text(children).replace(/\n$/, ""))
+            copyText(text(children).replace(/\n$/, ""))
             setCopied(true)
             setTimeout(() => setCopied(false), 1200)
           }}

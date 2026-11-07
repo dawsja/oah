@@ -6,7 +6,8 @@ import { Tip } from "@/components/Tip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ago, waiting, type ChatMeta } from "@/lib/chat"
 import { samePath, worktrees as wt, type Worktree } from "@/lib/git"
-import { inTauri, pickFolder } from "@/lib/ipc"
+import { pickFolder } from "@/lib/ipc"
+import { copyText } from "@/lib/clipboard"
 import type { Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -160,10 +161,10 @@ function ProjectGroup({ project }: { project: Project }) {
               <DropdownMenuItem onSelect={() => openSettings("projects")}>
                 <Settings /> Project settings
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => navigator.clipboard?.writeText(project.path)}>
+              <DropdownMenuItem onSelect={() => copyText(project.path)}>
                 <Copy /> Copy path
               </DropdownMenuItem>
-              {!remote && inTauri ? (
+              {!remote ? (
                 <DropdownMenuItem onSelect={() => import("@tauri-apps/plugin-opener").then((m) => m.revealItemInDir(project.path))}>
                   <FolderOpen /> Show in folder
                 </DropdownMenuItem>
@@ -253,7 +254,7 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-48">
-                <DropdownMenuItem onSelect={() => navigator.clipboard?.writeText(tree!.path)}>
+                <DropdownMenuItem onSelect={() => copyText(tree!.path)}>
                   <Copy /> Copy path
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
