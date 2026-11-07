@@ -71,9 +71,9 @@ function NewChat({ project }: { project: Project }) {
             </div>
           </div>
           <Composer agent={agent} onAgent={setAgent} model={d.model} permission={permission} onPermission={setPermission} onSend={send} autoFocus />
-          <div className="mt-3 grid grid-cols-3 gap-px border bg-border text-[12px]">
+          <div className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
             {["Explain how this project is laid out", "Find and fix a failing test", "Review my uncommitted changes"].map((t) => (
-              <button key={t} className="bg-background px-3 py-2.5 text-left text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => send(t)}>
+              <button key={t} className="border bg-card px-3 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => send(t)}>
                 {t}
               </button>
             ))}
