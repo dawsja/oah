@@ -216,25 +216,16 @@ pub enum Theme {
     Light,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum Density {
-    Compact,
-    #[default]
-    Comfortable,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Appearance {
     pub theme: Theme,
-    /// Base UI size in px.
+    /// The window's zoom, as a base text size in px: 13 is 100%.
     pub ui_font_size: u32,
     /// Chat text size in px.
     pub chat_font_size: u32,
     pub sans_font: String,
     pub mono_font: String,
-    pub density: Density,
 }
 
 impl Default for Appearance {
@@ -245,7 +236,6 @@ impl Default for Appearance {
             chat_font_size: 14,
             sans_font: "Inter Variable".into(),
             mono_font: "JetBrains Mono Variable".into(),
-            density: Density::Comfortable,
         }
     }
 }

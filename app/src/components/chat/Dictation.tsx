@@ -3,7 +3,7 @@ import { LoaderCircle, Mic, Square } from "lucide-react"
 import { toast } from "sonner"
 import { Tip } from "@/components/Tip"
 import { cn } from "@/lib/utils"
-import { matchesKey, record, useVoice, voice, type Recording } from "@/lib/voice"
+import { keyCapture, matchesKey, record, useVoice, voice, type Recording } from "@/lib/voice"
 import { useApp } from "@/store/app"
 
 const MAX_SECONDS = 180
@@ -69,6 +69,7 @@ export function Dictation({ onText }: { onText: (text: string) => void }) {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       const { phase, state, settings } = live.current
+      if (keyCapture.on) return
       if (e.key === "Escape" && rec.current) {
         e.preventDefault()
         e.stopPropagation()

@@ -2,7 +2,7 @@
 
 import { create } from "zustand"
 import { ipc } from "@/lib/ipc"
-import type { AppInfo, Appearance, Location, Settings } from "@/lib/types"
+import { BASE_UI_SIZE, type AppInfo, type Appearance, type Location, type Settings } from "@/lib/types"
 
 export type SettingsSection = "providers" | "voice" | "appearance" | "usage" | "ssh" | "projects"
 export type RightTab = "files" | "scm" | "history" | "pr"
@@ -141,8 +141,6 @@ export function applyAppearance(a: Appearance) {
   const root = document.documentElement
   const dark = a.theme === "dark" || (a.theme === "system" && (media?.matches ?? true))
   root.classList.toggle("dark", dark)
-  root.dataset.density = a.density
-  root.style.setProperty("--oah-ui-size", `${a.uiFontSize}px`)
   root.style.setProperty("--oah-chat-size", `${a.chatFontSize}px`)
   root.style.setProperty("--oah-sans", `"${a.sansFont}"`)
   root.style.setProperty("--oah-mono", `"${a.monoFont}"`)
@@ -154,6 +152,12 @@ export function applyAppearance(a: Appearance) {
   import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
     getCurrentWindow()
       .setTheme(a.theme === "system" ? null : a.theme)
+      .catch(() => {}),
+  )
+  // Interface size zooms the whole window (text, icons, spacing), like the browser's zoom.
+  import("@tauri-apps/api/webview").then(({ getCurrentWebview }) =>
+    getCurrentWebview()
+      .setZoom(a.uiFontSize / BASE_UI_SIZE)
       .catch(() => {}),
   )
 }

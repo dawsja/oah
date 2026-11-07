@@ -1,9 +1,9 @@
 import { Monitor, Moon, Sun } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { Density, Theme } from "@/lib/types"
+import { BASE_UI_SIZE, type Theme } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp } from "@/store/app"
-import { Group, Row, Section, Segmented } from "./layout"
+import { Group, Row, Section } from "./layout"
 
 const THEMES: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "System", icon: Monitor },
@@ -39,11 +39,17 @@ export function AppearanceSection() {
         </div>
       </Group>
       <Group title="Text">
-        <Row label="Interface size">
-          <Stepper value={a.uiFontSize} min={11} max={16} onChange={(v) => update((s) => void (s.appearance.uiFontSize = v))} />
+        <Row label="Interface size" description="Zooms the whole window: text, icons and spacing.">
+          <Stepper
+            value={a.uiFontSize}
+            min={11}
+            max={17}
+            format={(v) => `${Math.round((v / BASE_UI_SIZE) * 100)}%`}
+            onChange={(v) => update((s) => void (s.appearance.uiFontSize = v))}
+          />
         </Row>
-        <Row label="Chat text size">
-          <Stepper value={a.chatFontSize} min={12} max={20} onChange={(v) => update((s) => void (s.appearance.chatFontSize = v))} />
+        <Row label="Chat text size" description="Messages and the message box.">
+          <Stepper value={a.chatFontSize} min={12} max={20} format={(v) => `${v}px`} onChange={(v) => update((s) => void (s.appearance.chatFontSize = v))} />
         </Row>
         <Row label="Interface font">
           <FontSelect value={a.sansFont} fonts={SANS} onChange={(v) => update((s) => void (s.appearance.sansFont = v))} />
@@ -52,29 +58,17 @@ export function AppearanceSection() {
           <FontSelect value={a.monoFont} fonts={MONO} mono onChange={(v) => update((s) => void (s.appearance.monoFont = v))} />
         </Row>
       </Group>
-      <Group title="Layout">
-        <Row label="Density" description="Compact fits more chats and files on screen.">
-          <Segmented<Density>
-            value={a.density}
-            options={[
-              { value: "compact", label: "Compact" },
-              { value: "comfortable", label: "Comfortable" },
-            ]}
-            onChange={(v) => update((s) => void (s.appearance.density = v))}
-          />
-        </Row>
-      </Group>
     </Section>
   )
 }
 
-function Stepper({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (v: number) => void }) {
+function Stepper({ value, min, max, format, onChange }: { value: number; min: number; max: number; format: (v: number) => string; onChange: (v: number) => void }) {
   return (
     <div className="overflow-hidden rounded-md flex items-center border border-input">
       <button className="h-7 w-7 text-muted-foreground hover:bg-accent disabled:opacity-40" disabled={value <= min} onClick={() => onChange(value - 1)} aria-label="Smaller">
         −
       </button>
-      <span className="w-12 border-x border-input text-center font-mono text-[12px] leading-7">{value}px</span>
+      <span className="w-12 border-x border-input text-center font-mono text-[12px] leading-7">{format(value)}</span>
       <button className="h-7 w-7 text-muted-foreground hover:bg-accent disabled:opacity-40" disabled={value >= max} onClick={() => onChange(value + 1)} aria-label="Larger">
         +
       </button>

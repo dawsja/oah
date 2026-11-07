@@ -185,7 +185,7 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased overflow-hidden select-none cursor-default;
-    font-size: var(--oah-ui-size, 13px);
+    font-size: 13px;
   }
   ::selection { background: var(--oah-selection); }
   ::-webkit-scrollbar { width: 8px; height: 8px; }

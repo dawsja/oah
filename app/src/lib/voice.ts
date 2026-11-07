@@ -110,6 +110,19 @@ export function toBase64(pcm: Float32Array): string {
 }
 
 /** `Ctrl+Space` → does this key event match it? */
+/** True while Settings is recording a new hold-to-talk key, so pressing it doesn't dictate. */
+export const keyCapture = { on: false }
+
+const MODIFIERS = new Set(["Control", "Alt", "Shift", "Meta", "AltGraph", "CapsLock", "Fn"])
+
+/** The combo a key press makes, as `matchesKey` reads it ("Ctrl+Space", "Alt+Shift+D", "F8");
+ *  null while only modifiers are down. */
+export function comboOf(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey">): string | null {
+  if (MODIFIERS.has(e.key) || e.key === "Dead" || e.key === "Unidentified") return null
+  const key = e.key === " " ? "Space" : e.key.length === 1 ? e.key.toUpperCase() : e.key
+  return [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Meta", key].filter(Boolean).join("+")
+}
+
 export function matchesKey(e: KeyboardEvent, combo: string): boolean {
   const parts = combo.split("+").map((p) => p.trim().toLowerCase())
   const key = parts[parts.length - 1]

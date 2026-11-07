@@ -23,9 +23,6 @@ const INSTALL: Partial<Record<AgentKind, string>> = {
   opencode: "npm i -g opencode-ai",
 }
 
-/** ACP agents people commonly add, as a starting point. */
-const PRESETS: { name: string; command: string; args: string[] }[] = [{ name: "Gemini CLI", command: "gemini", args: ["--experimental-acp"] }]
-
 /** Edits one agent's settings: a built-in by kind, or an added ACP agent by id. */
 type Target = { kind: AgentKind; acpId: string | null }
 function providerOf(s: Settings, t: Target): Provider | undefined {
@@ -56,11 +53,11 @@ export function ProvidersSection() {
 
 function AcpAgents({ agents }: { agents: AcpAgent[] }) {
   const update = useApp((s) => s.update)
-  const add = async (preset?: (typeof PRESETS)[number]) => {
-    const command = preset?.command ?? (await promptText({ title: "Add an ACP agent", description: "The command that starts it in ACP mode, with its arguments.", placeholder: "my-agent --acp", mono: true, confirm: "Next" }))
+  const add = async () => {
+    const command = await promptText({ title: "Add an ACP agent", description: "The command that starts it in ACP mode, with its arguments.", placeholder: "my-agent --acp", mono: true, confirm: "Next" })
     if (!command) return
-    const words = preset ? [preset.command, ...preset.args] : command.split(/\s+/)
-    const name = preset?.name ?? (await promptText({ title: "Name it", value: words[0], confirm: "Add agent" }))
+    const words = command.trim().split(/\s+/)
+    const name = await promptText({ title: "Name it", value: words[0], confirm: "Add agent" })
     if (!name) return
     update((s) =>
       void s.providers.acp.push({
@@ -82,12 +79,7 @@ function AcpAgents({ agents }: { agents: AcpAgent[] }) {
           <h2 className="text-[15px] font-semibold">ACP agents</h2>
           <p className="mt-0.5 text-[12px] text-muted-foreground">Any other agent that speaks the Agent Client Protocol. Chats with it work like the others.</p>
         </div>
-        {PRESETS.filter((p) => !agents.some((a) => a.binary === p.command)).map((p) => (
-          <Button key={p.name} variant="outline" size="sm" onClick={() => add(p)}>
-            <Plus /> {p.name}
-          </Button>
-        ))}
-        <Button size="sm" onClick={() => add()}>
+        <Button size="sm" onClick={add}>
           <Plus /> Add agent
         </Button>
       </div>

@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useApp } from "@/store/app"
-import { useVoice, voice as voiceApi } from "@/lib/voice"
+import { comboOf, keyCapture, useVoice, voice as voiceApi } from "@/lib/voice"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { confirmAction } from "@/components/Prompt"
 import { Group, Row, Section } from "./layout"
@@ -18,6 +19,51 @@ function useMicrophones() {
       .catch(() => setMics([]))
   }, [])
   return mics
+}
+
+/** Click, then press the shortcut: it's saved as soon as a non-modifier key goes down. Esc or
+ *  clicking away keeps the old one. */
+function KeyRecorder({ value, onChange }: { value: string; onChange: (combo: string) => void }) {
+  const [listening, setListening] = useState(false)
+  const [held, setHeld] = useState("")
+  const save = useRef(onChange)
+  save.current = onChange
+  useEffect(() => {
+    if (!listening) return
+    keyCapture.on = true
+    const down = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) return setListening(false)
+      const combo = comboOf(e)
+      if (!combo) {
+        setHeld([e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Meta"].filter(Boolean).join("+"))
+        return
+      }
+      save.current(combo)
+      setListening(false)
+    }
+    window.addEventListener("keydown", down, true)
+    return () => {
+      window.removeEventListener("keydown", down, true)
+      keyCapture.on = false
+      setHeld("")
+    }
+  }, [listening])
+  return (
+    <button
+      type="button"
+      className={cn(
+        "rounded-md h-7 w-40 border bg-transparent px-2 text-center font-mono text-[12px]",
+        listening ? "border-ring text-muted-foreground" : "border-input hover:bg-accent",
+      )}
+      onClick={() => setListening((l) => !l)}
+      onBlur={() => setListening(false)}
+      aria-label={listening ? "Press the new hold-to-talk key" : `Hold-to-talk key: ${value}. Click to change`}
+    >
+      {listening ? (held ? `${held}+…` : "Press a key…") : value}
+    </button>
+  )
 }
 
 export function VoiceSection() {
@@ -83,8 +129,8 @@ export function VoiceSection() {
             </SelectContent>
           </Select>
         </Row>
-        <Row label="Hold to talk" description="Hold this key in the composer to record; let go to insert the text.">
-          <Input className="h-7 w-40 text-center font-mono text-[12px]" defaultValue={voice.holdKey} onBlur={(e) => update((s) => void (s.voice.holdKey = e.target.value.trim() || "Ctrl+Space"))} />
+        <Row label="Hold to talk" description="Hold this key in the composer to record; let go to insert the text. Click the box and press a new key to change it.">
+          <KeyRecorder value={voice.holdKey} onChange={(k) => update((s) => void (s.voice.holdKey = k))} />
         </Row>
         <Row label="Stop on silence" description="Seconds of silence before recording stops by itself. 0 keeps recording until you stop.">
           <Input

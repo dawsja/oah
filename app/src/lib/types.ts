@@ -36,15 +36,17 @@ export type Providers = { claude: Provider; codex: Provider; opencode: Provider;
 export type Voice = { enabled: boolean; microphone: string; holdKey: string; silenceStopSecs: number }
 
 export type Theme = "system" | "dark" | "light"
-export type Density = "compact" | "comfortable"
 export type Appearance = {
   theme: Theme
+  /** The window's zoom, as the base text size: 13 is 100%. */
   uiFontSize: number
   chatFontSize: number
   sansFont: string
   monoFont: string
-  density: Density
 }
+
+/** The interface size that's 100% zoom. */
+export const BASE_UI_SIZE = 13
 
 export type SshHost = { host: string; port: number; identityFile: string; label: string }
 
