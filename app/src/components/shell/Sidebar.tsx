@@ -121,7 +121,8 @@ function ProjectGroup({ project }: { project: Project }) {
   const chats = metas.filter((m) => m.projectId === project.id)
   const extra = (trees ?? []).filter((w) => !w.main)
   const inMain = (m: ChatMeta) => !extra.some((w) => samePath(m.cwd, w.path))
-  const active = project.id === projectId && view === "chat" && !chatId && !draftCwd
+  // With worktrees listed, the main checkout's row shows the selection instead.
+  const active = project.id === projectId && view === "chat" && !chatId && !draftCwd && !extra.length
 
   return (
     <div className="mt-px">

@@ -1,7 +1,8 @@
 # oah — Open Agent Harness
 
-A chat-first desktop app for coding agents. oah drives **Claude Code** and **Codex** (the CLIs
-you already use, with your own sign-ins) in your projects, on this computer or on an SSH host,
+A chat-first desktop app for coding agents. oah drives **Claude Code**, **Codex**, **OpenCode**
+and any other agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com)
+(the CLIs you already use, with your own sign-ins) in your projects, on this computer or on an SSH host,
 with git, worktrees and pull requests next to the chat. Rust and Tauri; no Electron.
 
 ![oah](assets/social/oah-readme-banner-dark.png)
@@ -9,8 +10,10 @@ with git, worktrees and pull requests next to the chat. Rust and Tauri; no Elect
 ## What's in it
 
 - **Chat.** Streaming answers, folded tool runs, file diffs, approvals (allow, always allow,
-  deny), the agent's plan, context and token use per turn, image attachments. Chats are saved
-  and resume the agent's own session.
+  deny; queued when several arrive), questions the agent asks (options, multi-select, typed
+  answers), the agent's plan, context and token use per turn, image attachments, a model picker
+  with each agent's own models, `@` file mentions. Messages sent mid-turn are steered in (Codex)
+  or queued (Claude, ACP). Chats are saved and resume the agent's own session.
 - **Projects and worktrees.** Each project lists its worktrees and the chats in each one. A new
   worktree is a branch in its own folder, so several chats can work on one repo at once.
 - **Side panel.** Files (tree, filter, search in files, add to chat), Source Control (stage,
@@ -31,8 +34,9 @@ Corners are subtle: 2px tags, 4px controls and rows, 6px cards and panels.
 crates/
   oah-core       data folder (~/.config/oah/app, or $OAH_HOME/app), settings.json, chats on disk
   oah-transport  runs a program in a folder, locally or over ssh; host checks, remote folders
-  oah-agents     Claude Code (stream-json) and Codex (app-server) drivers → ChatEvent; sign-in
-                 and plan limits; a scripted mock (OAH_MOCK_AGENT=1)
+  oah-agents     Claude Code (stream-json), Codex (app-server) and ACP (OpenCode, added agents)
+                 drivers → ChatEvent; sign-in, models and plan limits; a scripted mock
+                 (OAH_MOCK_AGENT=1)
   oah-git        git and gh: status, diffs, commits, branches, sync, graph, worktrees, PRs
   oah-voice      speech to text (transcribe.cpp; needs CMake to build)
 app/
