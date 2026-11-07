@@ -4,7 +4,7 @@ export function Mark({ size = 20, label, className }: { size?: number; label?: s
   return (
     <svg viewBox="10 10 100 100" width={size} height={size} className={className} role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
       <path d="M97.95 58.14 A38 38 0 1 1 61.86 22.05" fill="none" stroke="var(--oah-brand)" strokeWidth="14" strokeLinecap="round" />
-      <circle cx="86.87" cy="33.13" r="9" fill="var(--oah-gold)" />
+      <circle cx="86.87" cy="33.13" r="9" fill="var(--primary)" />
     </svg>
   )
 }

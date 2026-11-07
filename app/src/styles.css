@@ -1,11 +1,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* T3 Code's two themes, with oah's yellow where T3 uses blue.
+/* T3 Code's two themes, with oah gold (#F5B800) where T3 uses blue.
    Dark: a true-black canvas, sidebar and chrome; cards, popovers and the composer lift to
    neutral-950 + 3% white, a user turn to + 8%; white-alpha borders and hovers.
    Light: T3's zinc scale: a zinc-25 canvas, zinc-50 sidebar, white cards and selected rows,
-   zinc-200 borders. Yellow fills keep ink text; text accents use oah Gold.
+   zinc-200 borders. Gold fills keep ink text; gold text on white goes darker (#9A6F00).
    Every corner is square: --radius is 0 and the radius scale below is pinned to 0, so no class
    can round anything (scripts/check-sharp.sh enforces it). */
 @custom-variant dark (&:is(.dark, .dark *));
@@ -19,7 +19,7 @@
   --card-foreground: #18181b;
   --popover: #ffffff;
   --popover-foreground: #18181b;
-  --primary: #ffd43b;
+  --primary: #f5b800; /* oah gold */
   --primary-foreground: #0e0e0f;
   --secondary: #fafafa; /* zinc-50 */
   --secondary-foreground: #27272a; /* zinc-800 */
@@ -30,28 +30,28 @@
   --destructive: #ef4444; /* red-500 */
   --border: #e4e4e7; /* zinc-200 */
   --input: #d4d4d8; /* zinc-300 */
-  --ring: #e0a800;
+  --ring: #e8a700;
 
   --sidebar: #fafafa; /* zinc-50 */
   --sidebar-foreground: #18181b;
-  --sidebar-primary: #ffd43b;
+  --sidebar-primary: #f5b800;
   --sidebar-primary-foreground: #0e0e0f;
   --sidebar-accent: #ffffff; /* selected row: white on zinc-50 */
   --sidebar-accent-foreground: #18181b;
   --sidebar-border: #e4e4e7;
-  --sidebar-ring: #e0a800;
+  --sidebar-ring: #e8a700;
 
   /* oah accents */
   --oah-deep: #fafafa;
   --oah-faint: #a1a1aa; /* zinc-400 */
   --oah-brand: #18181b;
-  --oah-gold: #b38600;
+  --oah-gold: #9a6f00; /* gold text on white */
   --oah-cyan: #1d4ed8; /* blue-700, T3's info */
   --oah-green: #047857; /* emerald-700 */
   --oah-red: #b91c1c; /* red-700 */
   --oah-yellow: #b45309; /* amber-700 */
   --oah-orange: #c2410c;
-  --oah-code: #8a5a00;
+  --oah-code: #8a6400;
   --oah-add-bg: color-mix(in srgb, #10b981 10%, transparent);
   --oah-del-bg: color-mix(in srgb, #ef4444 9%, transparent);
   --oah-user: color-mix(in srgb, #e4e4e7 55%, #f4f4f5); /* T3's message surface */
@@ -59,7 +59,7 @@
   --oah-pre-fg: #18181b;
   --oah-scroll: rgb(0 0 0 / 14%);
   --oah-scroll-hover: rgb(0 0 0 / 24%);
-  --oah-selection: rgb(255 212 59 / 45%);
+  --oah-selection: rgb(245 184 0 / 30%);
   color-scheme: light;
 }
 
@@ -70,7 +70,7 @@
   --card-foreground: #f5f5f5;
   --popover: color-mix(in srgb, #0a0a0a 97%, #ffffff);
   --popover-foreground: #f5f5f5;
-  --primary: #ffd43b;
+  --primary: #f5b800; /* oah gold */
   --primary-foreground: #0e0e0f;
   --secondary: rgb(255 255 255 / 3%);
   --secondary-foreground: #f5f5f5;
@@ -81,28 +81,28 @@
   --destructive: color-mix(in srgb, #ef4444 90%, #ffffff);
   --border: rgb(255 255 255 / 8%);
   --input: rgb(255 255 255 / 11%);
-  --ring: #ffd43b;
+  --ring: #f5b800;
 
   /* T3's sidebar is the canvas: true black, rows lit by white alpha. */
   --sidebar: #000000;
   --sidebar-foreground: #f1f3f7;
-  --sidebar-primary: #ffd43b;
+  --sidebar-primary: #f5b800;
   --sidebar-primary-foreground: #0e0e0f;
   --sidebar-accent: rgb(255 255 255 / 7%);
   --sidebar-accent-foreground: #f7f9ff;
   --sidebar-border: rgb(255 255 255 / 8%);
-  --sidebar-ring: #ffd43b;
+  --sidebar-ring: #f5b800;
 
   --oah-deep: #000000;
   --oah-faint: #737373; /* neutral-500 */
   --oah-brand: #e6edf3;
-  --oah-gold: #ffd43b;
+  --oah-gold: #f5b800;
   --oah-cyan: #60a5fa; /* blue-400 */
   --oah-green: #34d399; /* emerald-400 */
   --oah-red: #f87171; /* red-400 */
   --oah-yellow: #fbbf24; /* amber-400 */
   --oah-orange: #fb923c;
-  --oah-code: #ffe08a;
+  --oah-code: #ffcf4d;
   --oah-add-bg: color-mix(in srgb, #10b981 14%, transparent);
   --oah-del-bg: color-mix(in srgb, #ef4444 14%, transparent);
   --oah-user: color-mix(in srgb, #0a0a0a 92%, #ffffff); /* T3's message surface */
@@ -110,7 +110,7 @@
   --oah-pre-fg: #e5e5e5;
   --oah-scroll: rgb(255 255 255 / 8%);
   --oah-scroll-hover: rgb(255 255 255 / 12%);
-  --oah-selection: rgb(255 212 59 / 28%);
+  --oah-selection: rgb(245 184 0 / 28%);
   color-scheme: dark;
 }
 

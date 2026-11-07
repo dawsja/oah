@@ -107,7 +107,7 @@ function ThemePreview({ theme }: { theme: Theme }) {
     <div className={cn("flex h-full flex-1", dark ? "bg-black" : "bg-[#fcfcfc]")}>
       <div className={cn("w-1/3 border-r p-1.5", dark ? "border-white/10 bg-black" : "border-black/10 bg-[#fafafa]")}>
         <div className={cn("mb-1 h-1.5 w-3/4", dark ? "bg-white/15" : "bg-black/10")} />
-        <div className="mb-1 h-1.5 w-2/3 bg-[#ffd43b]" />
+        <div className="mb-1 h-1.5 w-2/3 bg-[#f5b800]" />
         <div className={cn("h-1.5 w-1/2", dark ? "bg-white/15" : "bg-black/10")} />
       </div>
       <div className="flex flex-1 flex-col justify-end p-1.5">
