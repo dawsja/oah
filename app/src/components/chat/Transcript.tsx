@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowDown, Check, CircleAlert, Copy, Info } from "lucide-react"
+import { ArrowDown, Check, CircleAlert, Copy, Image as ImageIcon, Info } from "lucide-react"
 import { blocks, formatDuration, formatTokens, type Item, type Transcript as T } from "@/lib/chat"
 import { cn } from "@/lib/utils"
 import { Markdown } from "./Markdown"
@@ -60,7 +60,14 @@ function Row({ item }: { item: Item }) {
     case "user":
       return (
         <div className="flex justify-end">
-          <div className="max-w-[85%] border bg-user px-3.5 py-2.5 text-[length:var(--oah-chat-size,14px)] leading-relaxed whitespace-pre-wrap select-text">{item.text}</div>
+          <div className="max-w-[85%] border bg-user px-3.5 py-2.5 text-[length:var(--oah-chat-size,14px)] leading-relaxed whitespace-pre-wrap select-text">
+            {item.text}
+            {item.images.length ? (
+              <div className="mt-1.5 flex items-center gap-1 text-[11.5px] text-muted-foreground">
+                <ImageIcon className="size-3" /> {item.images.length} image{item.images.length > 1 ? "s" : ""}
+              </div>
+            ) : null}
+          </div>
         </div>
       )
     case "assistant":

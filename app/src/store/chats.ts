@@ -18,7 +18,7 @@ type ChatsStore = {
   refresh(): Promise<void>
   open(chatId: string): Promise<void>
   /** Sends a prompt; with no chat yet, creates one in the current project first. */
-  send(chatId: string | null, text: string, opts: { agent: AgentKind; permission: PermissionMode; cwd?: string }): Promise<void>
+  send(chatId: string | null, text: string, opts: { agent: AgentKind; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] }): Promise<void>
   interrupt(chatId: string): Promise<void>
   answer(chatId: string, requestId: string, decision: Decision): Promise<void>
   remove(chatId: string): Promise<void>
@@ -68,7 +68,8 @@ export const useChats = create<ChatsStore>((set, get) => ({
       }
       const chat = id
       set((s) => ({ transcripts: { ...s.transcripts, [chat]: { ...(s.transcripts[chat] ?? emptyTranscript()), running: true } } }))
-      await ipc.chatSend(chat, { id: crypto.randomUUID(), text, images: [] }, get().permission[chat] ?? opts.permission)
+      const images = (opts.images ?? []).map(({ mime, data }) => ({ mime, data }))
+      await ipc.chatSend(chat, { id: crypto.randomUUID(), text, images }, get().permission[chat] ?? opts.permission)
       get().refresh()
     } catch (e) {
       toast.error(String(e))

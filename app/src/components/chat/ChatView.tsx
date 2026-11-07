@@ -51,7 +51,7 @@ function NewChat({ project }: { project: Project }) {
   const [permission, setPermission] = useState(d.permission)
   const draftCwd = useApp((s) => s.draftCwd)
   const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
-  const send = (text: string) => useChats.getState().send(null, text, { agent, permission, cwd: draftCwd ?? undefined })
+  const send = (text: string, images: { mime: string; data: string }[] = []) => useChats.getState().send(null, text, { agent, permission, cwd: draftCwd ?? undefined, images })
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
@@ -103,7 +103,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
           permission={permission}
           onPermission={(m) => chats.setPermission(meta.id, m)}
           running={transcript.running}
-          onSend={(text) => chats.send(meta.id, text, { agent: meta.agent, permission })}
+          onSend={(text, images) => chats.send(meta.id, text, { agent: meta.agent, permission, images })}
           onStop={() => chats.interrupt(meta.id)}
           placeholder={transcript.running ? "Queue a follow-up…" : "Reply, @ to add files"}
           lockAgent

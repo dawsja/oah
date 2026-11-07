@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ArrowUp, ChevronDown, Paperclip, Square } from "lucide-react"
+import { ArrowUp, ChevronDown, Paperclip, Square, X } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { AgentGlyph } from "@/components/icons"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -16,7 +16,7 @@ export type ComposerProps = {
   running?: boolean
   disabled?: boolean
   placeholder?: string
-  onSend?: (text: string) => void
+  onSend?: (text: string, images: Attachment[]) => void
   onStop?: () => void
   className?: string
   autoFocus?: boolean
@@ -26,10 +26,32 @@ export type ComposerProps = {
 
 const PERMISSIONS: PermissionMode[] = ["ask", "acceptEdits", "plan", "fullAccess"]
 
+/** An image to send with the prompt: its type and base64 bytes. */
+export type Attachment = { mime: string; data: string; name: string }
+
+const MAX_IMAGE = 5 * 1024 * 1024
+
+function readImage(file: File): Promise<Attachment | null> {
+  if (!file.type.startsWith("image/") || file.size > MAX_IMAGE) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    const r = new FileReader()
+    r.onload = () => resolve({ mime: file.type, data: String(r.result).split(",")[1] ?? "", name: file.name || "pasted image" })
+    r.onerror = () => resolve(null)
+    r.readAsDataURL(file)
+  })
+}
+
 /** The prompt box: text, then a toolbar with the agent, model and permission chips. */
 export function Composer(p: ComposerProps) {
   const [text, setText] = useState("")
+  const [images, setImages] = useState<Attachment[]>([])
+  const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const picker = useRef<HTMLInputElement>(null)
+  const addFiles = async (files: Iterable<File>) => {
+    const read = (await Promise.all([...files].map(readImage))).filter((a): a is Attachment => !!a)
+    if (read.length) setImages((cur) => [...cur, ...read].slice(0, 8))
+  }
   // "Add to chat" from the side panel puts `@path ` at the cursor.
   useEffect(() => {
     const onInsert = (e: Event) => {
@@ -44,13 +66,47 @@ export function Composer(p: ComposerProps) {
   }, [text.length])
   const send = () => {
     const t = text.trim()
-    if (!t || p.disabled) return
-    p.onSend?.(t)
+    if ((!t && !images.length) || p.disabled) return
+    p.onSend?.(t || "(see the attached image)", images)
     setText("")
+    setImages([])
   }
 
   return (
-    <div className={cn("border border-input bg-card focus-within:border-ring/70", p.className)}>
+    <div
+      className={cn("border border-input bg-card focus-within:border-ring/70", dragging && "border-primary", p.className)}
+      onDragOver={(e) => {
+        if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) {
+          e.preventDefault()
+          setDragging(true)
+        }
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => {
+        setDragging(false)
+        if (e.dataTransfer.files.length) {
+          e.preventDefault()
+          addFiles(e.dataTransfer.files)
+        }
+      }}
+    >
+      {images.length ? (
+        <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+          {images.map((img, i) => (
+            <div key={i} className="group/img relative size-14 border bg-background">
+              <img src={`data:${img.mime};base64,${img.data}`} alt={img.name} className="size-full object-cover" />
+              <button
+                className="absolute -top-1.5 -right-1.5 hidden size-4 place-items-center bg-foreground text-background group-hover/img:grid"
+                aria-label="Remove image"
+                onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <input ref={picker} type="file" accept="image/*" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
       <textarea
         ref={ref}
         autoFocus={p.autoFocus}
@@ -59,6 +115,13 @@ export function Composer(p: ComposerProps) {
         placeholder={p.placeholder ?? "Ask anything, @ to add files"}
         className="block max-h-72 min-h-[76px] w-full resize-none bg-transparent px-3.5 pt-3 text-[length:var(--oah-chat-size,14px)] leading-relaxed outline-none placeholder:text-faint"
         onChange={(e) => setText(e.target.value)}
+        onPaste={(e) => {
+          const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"))
+          if (files.length) {
+            e.preventDefault()
+            addFiles(files)
+          }
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
@@ -111,7 +174,7 @@ export function Composer(p: ComposerProps) {
         </DropdownMenu>
         <div className="ml-auto flex items-center gap-0.5">
           <Tip content="Attach image">
-            <button className="grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Attach image">
+            <button className="grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Attach image" onClick={() => picker.current?.click()}>
               <Paperclip className="size-3.5" />
             </button>
           </Tip>
@@ -127,7 +190,7 @@ export function Composer(p: ComposerProps) {
               <button
                 className="ml-1 grid size-7 place-items-center bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint"
                 aria-label="Send"
-                disabled={!text.trim() || p.disabled}
+                disabled={(!text.trim() && !images.length) || p.disabled}
                 onClick={send}
               >
                 <ArrowUp className="size-4" />
