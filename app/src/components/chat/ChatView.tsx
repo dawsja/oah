@@ -64,7 +64,7 @@ function NewChat({ project }: { project: Project }) {
               <p className="mt-1 text-[12.5px] text-muted-foreground">
                 {AGENT_LABEL[agent]} in <span className="font-medium text-foreground">{project.name}</span>
                 {worktree ? (
-                  <span className="ml-1 border border-gold/40 px-1 font-mono text-[11px] text-gold">⎇ {worktree.branch}</span>
+                  <span className="rounded-sm ml-1 border border-gold/40 px-1 font-mono text-[11px] text-gold">⎇ {worktree.branch}</span>
                 ) : null}
                 <span className="text-faint"> · {locationLabel(project.location)}</span>
               </p>
@@ -73,7 +73,7 @@ function NewChat({ project }: { project: Project }) {
           <Composer agent={agent} onAgent={setAgent} model={d.model} permission={permission} onPermission={setPermission} onSend={send} autoFocus />
           <div className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
             {["Explain how this project is laid out", "Find and fix a failing test", "Review my uncommitted changes"].map((t) => (
-              <button key={t} className="border bg-card px-3 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => send(t)}>
+              <button key={t} className="rounded-lg border bg-card px-3 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => send(t)}>
                 {t}
               </button>
             ))}
@@ -138,7 +138,7 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
       ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Chat menu">
+          <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Chat menu">
             <MoreHorizontal className="size-4" />
           </button>
         </DropdownMenuTrigger>
@@ -170,8 +170,8 @@ function PlanDock({ items }: { items: PlanItem[] }) {
   const done = items.filter((i) => i.status === "completed").length
   const current = items.find((i) => i.status === "inProgress") ?? items.find((i) => i.status === "pending")
   return (
-    <div className="border bg-card text-[12.5px]">
-      <button className="flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-accent" onClick={() => setOpen(!open)}>
+    <div className="rounded-lg border bg-card text-[12.5px]">
+      <button className="rounded-lg flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-accent" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3.5 text-faint" /> : <ChevronRight className="size-3.5 text-faint" />}
         <span className="font-medium">Plan</span>
         <span className="font-mono text-[11px] text-faint">

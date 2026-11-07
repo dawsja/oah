@@ -53,17 +53,17 @@ export function History({ scope }: { scope: Scope }) {
       <div className="flex h-9 shrink-0 items-center border-b px-3 text-[12px] text-muted-foreground">
         {rows ? `${rows.length} commits` : "History"}
         <Tip content="Reload">
-          <button className="ml-auto grid size-7 place-items-center hover:bg-accent hover:text-foreground" aria-label="Reload history" onClick={load}>
+          <button className="rounded-md ml-auto grid size-7 place-items-center hover:bg-accent hover:text-foreground" aria-label="Reload history" onClick={load}>
             <RefreshCw className="size-3.5" />
           </button>
         </Tip>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {error ? <div className="m-2 border border-dashed p-3 text-[12px] text-muted-foreground">{error}</div> : null}
+        {error ? <div className="rounded-lg m-2 border border-dashed p-3 text-[12px] text-muted-foreground">{error}</div> : null}
         {rows && rows.length === 0 ? <div className="px-3 py-3 text-[12px] text-faint">No commits yet.</div> : null}
         {rows?.map((r) => (
           <div key={r.commit.hash}>
-            <button className={cn("flex w-full items-center pr-2 text-left hover:bg-accent", openHash === r.commit.hash && "bg-accent")} style={{ height: ROW }} onClick={() => setOpenHash(openHash === r.commit.hash ? null : r.commit.hash)}>
+            <button className={cn("mx-1 rounded-md flex w-[calc(100%-0.5rem)] items-center pr-2 text-left hover:bg-accent", openHash === r.commit.hash && "bg-accent")} style={{ height: ROW }} onClick={() => setOpenHash(openHash === r.commit.hash ? null : r.commit.hash)}>
               <Lanes row={r} width={width} />
               <span className="ml-1 flex min-w-0 flex-1 items-center gap-1.5">
                 {r.commit.refs.map((ref) => (
@@ -87,7 +87,7 @@ function RefChip({ name }: { name: string }) {
   const label = name.replace("HEAD -> ", "").replace("tag: ", "")
   const remote = label.includes("/")
   return (
-    <span className={cn("shrink-0 border px-1 font-mono text-[10px] leading-4", head ? "border-primary bg-primary text-primary-foreground" : tag ? "border-green/50 text-green" : remote ? "border-cyan/40 text-cyan" : "text-muted-foreground")}>
+    <span className={cn("rounded-sm shrink-0 border px-1 font-mono text-[10px] leading-4", head ? "border-primary bg-primary text-primary-foreground" : tag ? "border-green/50 text-green" : remote ? "border-cyan/40 text-cyan" : "text-muted-foreground")}>
       {label}
     </span>
   )
@@ -106,7 +106,7 @@ function CommitFiles({ scope, row }: { scope: Scope; row: GraphRow }) {
       </div>
       {files === null ? <div className="px-2 py-1 text-[12px] text-faint">Loading…</div> : null}
       {files?.map((f) => (
-        <button key={f.path} className="flex h-6 w-full items-center gap-2 px-2 text-left text-[12px] hover:bg-accent" onClick={() => open({ kind: "commit", hash: row.commit.hash, path: f.path, subject: row.commit.subject })}>
+        <button key={f.path} className="rounded-md flex h-6 w-full items-center gap-2 px-2 text-left text-[12px] hover:bg-accent" onClick={() => open({ kind: "commit", hash: row.commit.hash, path: f.path, subject: row.commit.subject })}>
           <span className="truncate">{f.path}</span>
           <span className="ml-auto shrink-0 font-mono text-[10.5px]">
             <span className="text-green">+{f.added}</span> <span className="text-red">−{f.removed}</span>

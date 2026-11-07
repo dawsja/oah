@@ -42,7 +42,7 @@ export function WorkGroup({ items, live }: { items: Item[]; live: boolean }) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <button className="group flex h-6 items-center gap-1.5 self-start text-[12.5px] text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)}>
+      <button className="rounded-md group flex h-6 items-center gap-1.5 self-start text-[12.5px] text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         <span className={cn(running && "shimmer")}>{summary}</span>
         {names.length ? <span className="text-faint">· {names.join(", ")}</span> : null}
@@ -102,7 +102,7 @@ export function ToolRow({ item }: { item: ToolItem }) {
           <DiffCard diff={item.diff} defaultOpen />
         </div>
       ) : open && hasOutput ? (
-        <pre className={cn("mt-1 mb-1.5 max-h-64 overflow-auto border bg-card px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap select-text", item.status === "error" ? "text-red" : "text-muted-foreground")}>
+        <pre className={cn("rounded-md mt-1 mb-1.5 max-h-64 overflow-auto border bg-card px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap select-text", item.status === "error" ? "text-red" : "text-muted-foreground")}>
           {item.output}
         </pre>
       ) : null}

@@ -18,7 +18,7 @@ function Pre({ children }: { children?: ReactNode }) {
   const code = children as { props?: { className?: string } } | undefined
   const lang = /language-([\w+-]+)/.exec(code?.props?.className ?? "")?.[1]
   return (
-    <div className="group/code relative mb-3 border bg-card">
+    <div className="overflow-hidden rounded-lg group/code relative mb-3 border bg-card">
       <div className="flex h-7 items-center border-b px-3 font-mono text-[11px] text-faint">
         {lang ?? "text"}
         <button

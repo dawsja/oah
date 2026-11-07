@@ -119,8 +119,8 @@ export function Dictation({ onText }: { onText: (text: string) => void }) {
   return (
     <>
       {phase === "recording" ? (
-        <div className="flex h-7 items-center gap-2 border border-red/40 bg-del/40 px-2 text-[11.5px]">
-          <span className="size-1.5 animate-pulse bg-red" />
+        <div className="rounded-md flex h-7 items-center gap-2 border border-red/40 bg-del/40 px-2 text-[11.5px]">
+          <span className="rounded-full size-1.5 animate-pulse bg-red" />
           <span className="font-mono tabular-nums">
             {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
           </span>
@@ -138,7 +138,7 @@ export function Dictation({ onText }: { onText: (text: string) => void }) {
       ) : null}
       <Tip content={phase === "recording" ? "Stop and transcribe" : `Dictate${settings?.holdKey ? ` (hold ${settings.holdKey})` : ""}`}>
         <button
-          className={cn("grid size-7 place-items-center hover:bg-accent", phase === "recording" ? "bg-red text-white hover:bg-red/90" : "text-muted-foreground hover:text-foreground")}
+          className={cn("rounded-md grid size-7 place-items-center hover:bg-accent", phase === "recording" ? "bg-red text-white hover:bg-red/90" : "text-muted-foreground hover:text-foreground")}
           aria-label={phase === "recording" ? "Stop dictation" : "Dictate"}
           disabled={phase === "working"}
           onClick={() => (phase === "recording" ? stop() : start())}

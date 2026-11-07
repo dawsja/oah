@@ -65,7 +65,7 @@ export function Files({ scope }: { scope: Scope }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
-        <div className="flex h-7 flex-1 items-center gap-1.5 border border-input bg-background px-2 focus-within:border-ring/70">
+        <div className="rounded-md flex h-7 flex-1 items-center gap-1.5 border border-input bg-background px-2 focus-within:border-ring/70">
           {mode === "tree" ? <Search className="size-3.5 text-faint" /> : <TextSearch className="size-3.5 text-faint" />}
           <input
             value={filter}
@@ -75,18 +75,18 @@ export function Files({ scope }: { scope: Scope }) {
           />
         </div>
         <Tip content={mode === "tree" ? "Search in files" : "Back to the tree"}>
-          <button className={cn("grid size-7 place-items-center hover:bg-accent", mode === "search" ? "text-gold" : "text-muted-foreground")} aria-label="Search in files" onClick={() => setMode(mode === "tree" ? "search" : "tree")}>
+          <button className={cn("rounded-md grid size-7 place-items-center hover:bg-accent", mode === "search" ? "text-gold" : "text-muted-foreground")} aria-label="Search in files" onClick={() => setMode(mode === "tree" ? "search" : "tree")}>
             <TextSearch className="size-3.5" />
           </button>
         </Tip>
         <Tip content="Reload">
-          <button className="grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Reload files" onClick={load}>
+          <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Reload files" onClick={load}>
             <RefreshCw className="size-3.5" />
           </button>
         </Tip>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
-        {error ? <div className="m-2 border border-dashed p-3 text-[12px] text-muted-foreground">{error.includes("not a git repository") ? "Files are listed for git repositories." : error}</div> : null}
+        {error ? <div className="rounded-lg m-2 border border-dashed p-3 text-[12px] text-muted-foreground">{error.includes("not a git repository") ? "Files are listed for git repositories." : error}</div> : null}
         {!files && !error ? <div className="px-3 py-2 text-[12px] text-faint">Loading…</div> : null}
         {mode === "search" ? (
           <SearchResults scope={scope} query={filter} />
@@ -106,7 +106,7 @@ function TreeNode({ node, depth, kinds }: { node: Node; depth: number; kinds: Ma
   const changed = [...kinds.keys()].some((k) => k.startsWith(node.path + "/"))
   return (
     <>
-      <button className="flex h-6 w-full items-center gap-1 pr-2 text-left text-[12.5px] hover:bg-accent" style={{ paddingLeft: 8 + depth * 12 }} onClick={() => setOpen(!open)}>
+      <button className="mx-1 rounded-md flex h-6 w-[calc(100%-0.5rem)] items-center gap-1 pr-2 text-left text-[12.5px] hover:bg-accent" style={{ paddingLeft: 8 + depth * 12 }} onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3 text-faint" /> : <ChevronRight className="size-3 text-faint" />}
         <Folder className="size-3.5 text-muted-foreground" />
         <span className={cn("truncate", changed && "text-warn")}>{node.name}</span>
@@ -122,7 +122,7 @@ function FileRow({ path, label, depth, kind, line }: { path: string; label: stri
   const active = viewer?.kind === "file" && viewer.path === path
   return (
     <div
-      className={cn("group flex h-6 cursor-pointer items-center gap-1.5 pr-1 text-[12.5px] hover:bg-accent", active && "row-active")}
+      className={cn("mx-1 rounded-md group flex h-6 cursor-pointer items-center gap-1.5 pr-1 text-[12.5px] hover:bg-accent", active && "row-active")}
       style={{ paddingLeft: 20 + depth * 12 }}
       onClick={() => open({ kind: "file", path, line })}
     >
@@ -130,7 +130,7 @@ function FileRow({ path, label, depth, kind, line }: { path: string; label: stri
       <span className={cn("truncate", kind ? KIND_COLOR[kind] : "text-foreground/90")}>{label}</span>
       <Tip content="Add to chat">
         <button
-          className="ml-auto hidden size-5 shrink-0 place-items-center text-muted-foreground group-hover:grid hover:text-gold"
+          className="rounded-md ml-auto hidden size-5 shrink-0 place-items-center text-muted-foreground group-hover:grid hover:text-gold"
           aria-label="Add to chat"
           onClick={(e) => {
             e.stopPropagation()
@@ -177,10 +177,10 @@ function SearchResults({ scope, query }: { scope: Scope; query: string }) {
           <div className="flex h-6 items-center gap-1.5 px-3 text-[12px] font-medium">
             <File className="size-3.5 text-faint" />
             <span className="truncate">{path}</span>
-            <span className="ml-auto border px-1 font-mono text-[10px] text-muted-foreground">{hs.length}</span>
+            <span className="rounded-sm ml-auto border px-1 font-mono text-[10px] text-muted-foreground">{hs.length}</span>
           </div>
           {hs.map((h) => (
-            <button key={h.line} className="flex w-full items-baseline gap-2 py-0.5 pr-2 pl-8 text-left hover:bg-accent" onClick={() => open({ kind: "file", path, line: h.line })}>
+            <button key={h.line} className="mx-1 rounded-md flex w-[calc(100%-0.5rem)] items-baseline gap-2 py-0.5 pr-2 pl-8 text-left hover:bg-accent" onClick={() => open({ kind: "file", path, line: h.line })}>
               <span className="w-7 shrink-0 text-right font-mono text-[10.5px] text-faint">{h.line}</span>
               <span className="truncate font-mono text-[11.5px] text-muted-foreground">{highlight(h.text, query.trim())}</span>
             </button>
@@ -197,7 +197,7 @@ function highlight(text: string, q: string) {
   return (
     <>
       {text.slice(0, i)}
-      <mark className="bg-primary/30 text-foreground">{text.slice(i, i + q.length)}</mark>
+      <mark className="rounded-sm bg-primary/30 text-foreground">{text.slice(i, i + q.length)}</mark>
       {text.slice(i + q.length)}
     </>
   )

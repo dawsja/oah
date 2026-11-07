@@ -41,7 +41,7 @@ export function Transcript({ transcript, className }: { transcript: T; className
       </div>
       {!stuck ? (
         <button
-          className="absolute bottom-3 left-1/2 flex h-7 -translate-x-1/2 items-center gap-1.5 border bg-popover px-3 text-[12px] text-muted-foreground shadow-lg hover:text-foreground"
+          className="rounded-full absolute bottom-3 left-1/2 flex h-7 -translate-x-1/2 items-center gap-1.5 border bg-popover px-3 text-[12px] text-muted-foreground shadow-lg hover:text-foreground"
           onClick={() => {
             const el = scroller.current
             if (el) el.scrollTop = el.scrollHeight
@@ -60,7 +60,7 @@ function Row({ item }: { item: Item }) {
     case "user":
       return (
         <div className="flex justify-end">
-          <div className="max-w-[85%] border bg-user px-3.5 py-2.5 text-[length:var(--oah-chat-size,14px)] leading-relaxed whitespace-pre-wrap select-text">
+          <div className="rounded-xl max-w-[85%] border bg-user px-3.5 py-2.5 text-[length:var(--oah-chat-size,14px)] leading-relaxed whitespace-pre-wrap select-text">
             {item.text}
             {item.images.length ? (
               <div className="mt-1.5 flex items-center gap-1 text-[11.5px] text-muted-foreground">
@@ -90,7 +90,7 @@ function Row({ item }: { item: Item }) {
       )
     case "notice":
       return (
-        <div className={cn("flex items-start gap-2 border px-3 py-2 text-[12.5px]", item.level === "error" ? "border-red/40 bg-del/40 text-red" : item.level === "warn" ? "border-warn/40 text-warn" : "text-muted-foreground")}>
+        <div className={cn("rounded-lg flex items-start gap-2 border px-3 py-2 text-[12.5px]", item.level === "error" ? "border-red/40 bg-del/40 text-red" : item.level === "warn" ? "border-warn/40 text-warn" : "text-muted-foreground")}>
           {item.level === "info" ? <Info className="mt-0.5 size-3.5 shrink-0" /> : <CircleAlert className="mt-0.5 size-3.5 shrink-0" />}
           <span className="select-text">{item.text}</span>
         </div>
@@ -106,7 +106,7 @@ function AssistantText({ text }: { text: string }) {
     <div className="group/msg relative">
       <Markdown text={text} />
       <button
-        className="mt-1 flex h-6 items-center gap-1 text-[11.5px] text-faint opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
+        className="rounded-md mt-1 flex h-6 items-center gap-1 text-[11.5px] text-faint opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
         onClick={() => {
           navigator.clipboard?.writeText(text)
           setCopied(true)

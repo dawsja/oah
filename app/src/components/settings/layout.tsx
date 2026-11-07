@@ -27,7 +27,7 @@ export function Group({ title, aside, children, className }: { title?: ReactNode
           <div className="ml-auto">{aside}</div>
         </div>
       ) : null}
-      <div className={cn("divide-y border bg-card", className)}>{children}</div>
+      <div className={cn("overflow-hidden rounded-lg divide-y border bg-card", className)}>{children}</div>
     </section>
   )
 }
@@ -45,10 +45,10 @@ export function Row({ label, description, children, className }: { label: ReactN
   )
 }
 
-/** A row of square buttons, one of them pressed. */
+/** A row of joined buttons, one of them pressed. */
 export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: ReactNode }[]; onChange: (v: T) => void }) {
   return (
-    <div className="flex border border-input">
+    <div className="overflow-hidden rounded-md flex border border-input">
       {options.map((o, i) => (
         <button
           key={o.value}
@@ -69,5 +69,5 @@ export function Segmented<T extends string>({ value, options, onChange }: { valu
 /** A square status dot. */
 export function Dot({ tone }: { tone: "ok" | "warn" | "off" | "err" }) {
   const c = { ok: "bg-green", warn: "bg-warn", off: "bg-faint", err: "bg-red" }[tone]
-  return <span className={cn("inline-block size-1.5 shrink-0", c)} />
+  return <span className={cn("inline-block size-1.5 shrink-0 rounded-full", c)} />
 }

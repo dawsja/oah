@@ -29,7 +29,7 @@ export function SettingsPage() {
         {SECTIONS.map((s) => (
           <button
             key={s.id}
-            className={cn("flex h-8 items-center gap-2.5 px-4 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", s.id === section && "row-active")}
+            className={cn("mx-1 rounded-md flex h-8 items-center gap-2.5 px-4 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", s.id === section && "row-active")}
             onClick={() => useApp.setState({ section: s.id })}
           >
             <s.icon className="size-3.5" />
@@ -43,7 +43,7 @@ export function SettingsPage() {
         </div>
       </nav>
       <div className="relative min-w-0 flex-1 overflow-y-auto">
-        <button className="absolute top-3 right-3 grid size-8 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Close settings" onClick={close}>
+        <button className="rounded-md absolute top-3 right-3 grid size-8 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Close settings" onClick={close}>
           <X className="size-4" />
         </button>
         {section === "providers" ? <ProvidersSection /> : null}

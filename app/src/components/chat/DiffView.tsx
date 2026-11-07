@@ -63,7 +63,7 @@ export function DiffCard({ diff, defaultOpen = true }: { diff: FileDiff; default
   const [open, setOpen] = useState(defaultOpen)
   const rel = useRelative()
   return (
-    <div className="border bg-card">
+    <div className="overflow-hidden rounded-lg border bg-card">
       <button className="flex h-8 w-full items-center gap-2 px-3 text-left text-[12px] hover:bg-accent" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3 text-faint" /> : <ChevronRight className="size-3 text-faint" />}
         <FileDiffIcon className="size-3.5 text-muted-foreground" />

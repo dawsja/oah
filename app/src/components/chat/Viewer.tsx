@@ -39,12 +39,12 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
-        <button className="flex h-7 items-center gap-1.5 px-2 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => open(null)}>
+        <button className="rounded-md flex h-7 items-center gap-1.5 px-2 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => open(null)}>
           <ArrowLeft className="size-3.5" /> Chat
         </button>
         <span className="h-4 w-px bg-border" />
         <span className="truncate font-mono text-[12.5px]">{viewer.path}</span>
-        {viewer.kind === "diff" ? <span className="border px-1.5 text-[10.5px] text-muted-foreground">{viewer.untracked ? "new file" : viewer.staged ? "staged" : "working tree"}</span> : null}
+        {viewer.kind === "diff" ? <span className="rounded-sm border px-1.5 text-[10.5px] text-muted-foreground">{viewer.untracked ? "new file" : viewer.staged ? "staged" : "working tree"}</span> : null}
         {viewer.kind === "commit" ? <span className="truncate text-[11.5px] text-faint">{viewer.hash.slice(0, 8)} · {viewer.subject}</span> : null}
         <span className="ml-auto flex items-center gap-1">
           {viewer.kind !== "file" && text ? <DiffStat added={added} removed={removed} /> : null}
@@ -65,7 +65,7 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {error ? <div className="m-4 border border-red/40 bg-del/40 p-3 text-[12.5px] text-red">{error}</div> : null}
+        {error ? <div className="rounded-lg m-4 border border-red/40 bg-del/40 p-3 text-[12.5px] text-red">{error}</div> : null}
         {text === null && !error ? <div className="p-4 text-[12px] text-faint">Loading…</div> : null}
         {text !== null && viewer.kind !== "file" ? text.trim() ? <DiffLines patch={text} className="py-2" /> : <div className="p-4 text-[12px] text-faint">No differences.</div> : null}
         {text !== null && viewer.kind === "file" ? <FileText text={text} line={viewer.line} /> : null}
@@ -76,7 +76,7 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
 
 function ActionButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
-    <button className="flex h-7 items-center gap-1.5 border border-input px-2.5 text-[12px] hover:bg-accent [&_svg]:size-3.5" onClick={onClick}>
+    <button className="rounded-md flex h-7 items-center gap-1.5 border border-input px-2.5 text-[12px] hover:bg-accent [&_svg]:size-3.5" onClick={onClick}>
       {children}
     </button>
   )

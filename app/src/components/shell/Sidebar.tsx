@@ -32,7 +32,7 @@ export function Sidebar() {
     <aside className="flex h-full min-w-0 flex-col border-r bg-sidebar text-sidebar-foreground">
       <div className="p-2">
         <button
-          className="flex h-8 w-full items-center gap-2 border border-input bg-background px-2.5 text-left text-[12.5px] font-medium hover:border-ring/60 hover:bg-accent disabled:opacity-50"
+          className="rounded-md flex h-8 w-full items-center gap-2 border border-input bg-background px-2.5 text-left text-[12.5px] font-medium hover:border-ring/60 hover:bg-accent disabled:opacity-50"
           disabled={!projectId}
           onClick={() => newChat(projectId!, null)}
         >
@@ -45,7 +45,7 @@ export function Sidebar() {
       <div className="flex h-7 items-center px-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
         Projects
         <Tip content="Add project" side="right">
-          <button className="ml-auto grid size-6 place-items-center hover:bg-accent hover:text-foreground" aria-label="Add project" onClick={add}>
+          <button className="rounded-md ml-auto grid size-6 place-items-center hover:bg-accent hover:text-foreground" aria-label="Add project" onClick={add}>
             <FolderPlus className="size-3.5" />
           </button>
         </Tip>
@@ -53,7 +53,7 @@ export function Sidebar() {
 
       <nav className="min-h-0 flex-1 overflow-y-auto pb-2">
         {projects.length === 0 ? (
-          <div className="mx-3 mt-1 border border-dashed p-3 text-[12px] leading-relaxed text-muted-foreground">
+          <div className="rounded-lg mx-3 mt-1 border border-dashed p-3 text-[12px] leading-relaxed text-muted-foreground">
             No projects yet. Add a folder on this computer or on an SSH host to start chatting.
           </div>
         ) : (
@@ -63,7 +63,7 @@ export function Sidebar() {
 
       <div className="border-t p-1">
         <button
-          className={cn("flex h-8 w-full items-center gap-2 px-2.5 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", view === "settings" && "row-active")}
+          className={cn("rounded-md flex h-8 w-full items-center gap-2 px-2.5 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", view === "settings" && "row-active")}
           onClick={() => openSettings()}
         >
           <Settings className="size-3.5" />
@@ -125,7 +125,7 @@ function ProjectGroup({ project }: { project: Project }) {
 
   return (
     <div className="mt-px">
-      <div className={cn("group flex h-8 cursor-pointer items-center gap-1.5 pr-1 pl-2 text-[12.5px] hover:bg-accent", active && "row-active")} onClick={() => (newChat(project.id, null), setOpen(true))}>
+      <div className={cn("mx-1 rounded-md group flex h-8 cursor-pointer items-center gap-1.5 pr-1 pl-2 text-[12.5px] hover:bg-accent", active && "row-active")} onClick={() => (newChat(project.id, null), setOpen(true))}>
         <button
           className="grid size-4 place-items-center text-muted-foreground"
           aria-label={open ? "Collapse" : "Expand"}
@@ -141,13 +141,13 @@ function ProjectGroup({ project }: { project: Project }) {
         {project.location.kind === "ssh" ? <span className="truncate text-[11px] text-faint">{project.location.host}</span> : null}
         <div className="ml-auto flex opacity-0 group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
           <Tip content="New chat" side="top">
-            <button className="grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="New chat" onClick={(e) => (e.stopPropagation(), newChat(project.id, null))}>
+            <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="New chat" onClick={(e) => (e.stopPropagation(), newChat(project.id, null))}>
               <Plus className="size-3.5" />
             </button>
           </Tip>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Project menu" onClick={(e) => e.stopPropagation()}>
+              <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Project menu" onClick={(e) => e.stopPropagation()}>
                 <MoreHorizontal className="size-3.5" />
               </button>
             </DropdownMenuTrigger>
@@ -201,7 +201,8 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
   const draftCwd = useApp((s) => s.draftCwd)
   const main = !tree || tree.main
   const cwd = main ? null : tree.path
-  const active = projectId === project.id && !chatId && (main ? !draftCwd : samePath(draftCwd, cwd))
+  const view = useApp((s) => s.view)
+  const active = view === "chat" && projectId === project.id && !chatId && (main ? !draftCwd : samePath(draftCwd, cwd))
 
   const remove = async () => {
     if (!tree) return
@@ -224,7 +225,7 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
 
   return (
     <>
-      <div className={cn("group/wt flex h-7 cursor-pointer items-center gap-1.5 pr-1 pl-6 text-[12.5px] hover:bg-accent", active && "row-active")} onClick={() => newChat(project.id, cwd)}>
+      <div className={cn("mx-1 rounded-md group/wt flex h-7 cursor-pointer items-center gap-1.5 pr-1 pl-6 text-[12.5px] hover:bg-accent", active && "row-active")} onClick={() => newChat(project.id, cwd)}>
         <button
           className="grid size-4 place-items-center text-faint"
           onClick={(e) => {
@@ -236,17 +237,17 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
         </button>
         <GitBranch className={cn("size-3.5 shrink-0", main ? "text-muted-foreground" : "text-gold")} />
         <span className="truncate font-mono text-[12px]">{tree?.branch ?? "main checkout"}</span>
-        {main ? <span className="border px-1 text-[10px] text-faint">main</span> : null}
+        {main ? <span className="rounded-sm border px-1 text-[10px] text-faint">main</span> : null}
         <div className="ml-auto flex opacity-0 group-hover/wt:opacity-100 has-[[data-state=open]]:opacity-100">
           <Tip content="New chat here" side="top">
-            <button className="grid size-6 place-items-center text-muted-foreground hover:bg-background hover:text-foreground" aria-label="New chat here" onClick={(e) => (e.stopPropagation(), newChat(project.id, cwd))}>
+            <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-background hover:text-foreground" aria-label="New chat here" onClick={(e) => (e.stopPropagation(), newChat(project.id, cwd))}>
               <Plus className="size-3.5" />
             </button>
           </Tip>
           {!main ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="grid size-6 place-items-center text-muted-foreground hover:bg-background hover:text-foreground" aria-label="Worktree menu" onClick={(e) => e.stopPropagation()}>
+                <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-background hover:text-foreground" aria-label="Worktree menu" onClick={(e) => e.stopPropagation()}>
                   <MoreHorizontal className="size-3.5" />
                 </button>
               </DropdownMenuTrigger>
@@ -275,7 +276,7 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
   const active = chatId === meta.id && view === "chat"
   return (
     <div
-      className={cn("group/chat flex h-7 cursor-pointer items-center gap-2 pr-1 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", active && "row-active")}
+      className={cn("mx-1 rounded-md group/chat flex h-7 cursor-pointer items-center gap-2 pr-1 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", active && "row-active")}
       style={{ paddingLeft: indent }}
       onClick={() => {
         useApp.getState().selectProject(meta.projectId)
@@ -283,7 +284,7 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
       }}
     >
       {t?.pending ? (
-        <span className="size-1.5 shrink-0 bg-primary" />
+        <span className="rounded-full size-1.5 shrink-0 bg-primary" />
       ) : t?.running ? (
         <LoaderCircle className="size-3 shrink-0 animate-spin text-gold" />
       ) : (
@@ -292,7 +293,7 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
       <span className="truncate">{meta.title || "New chat"}</span>
       <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint group-hover/chat:hidden">{ago(meta.updatedAt)}</span>
       <button
-        className="hidden size-5 shrink-0 place-items-center text-faint group-hover/chat:grid hover:text-red"
+        className="rounded-md hidden size-5 shrink-0 place-items-center text-faint group-hover/chat:grid hover:text-red"
         aria-label="Delete chat"
         onClick={(e) => {
           e.stopPropagation()

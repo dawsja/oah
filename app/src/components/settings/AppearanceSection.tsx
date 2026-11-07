@@ -25,14 +25,14 @@ export function AppearanceSection() {
           {THEMES.map((t) => (
             <button
               key={t.value}
-              className={cn("border text-left hover:border-ring/60", a.theme === t.value ? "border-primary" : "border-border")}
+              className={cn("overflow-hidden rounded-lg border text-left hover:border-ring/60", a.theme === t.value ? "border-primary" : "border-border")}
               onClick={() => update((s) => void (s.appearance.theme = t.value))}
             >
               <ThemePreview theme={t.value} />
               <div className="flex items-center gap-2 border-t px-3 py-2 text-[12.5px]">
                 <t.icon className="size-3.5 text-muted-foreground" />
                 {t.label}
-                {a.theme === t.value ? <span className="ml-auto size-1.5 bg-primary" /> : null}
+                {a.theme === t.value ? <span className="rounded-full ml-auto size-1.5 bg-primary" /> : null}
               </div>
             </button>
           ))}
@@ -70,7 +70,7 @@ export function AppearanceSection() {
 
 function Stepper({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (v: number) => void }) {
   return (
-    <div className="flex items-center border border-input">
+    <div className="overflow-hidden rounded-md flex items-center border border-input">
       <button className="h-7 w-7 text-muted-foreground hover:bg-accent disabled:opacity-40" disabled={value <= min} onClick={() => onChange(value - 1)} aria-label="Smaller">
         −
       </button>

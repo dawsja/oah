@@ -59,12 +59,12 @@ function ProjectCard({ project }: { project: Project }) {
   return (
     <Group>
       <div className="flex items-center gap-3 px-4 py-3">
-        <div className="grid size-9 place-items-center border bg-background">
+        <div className="rounded-md grid size-9 place-items-center border bg-background">
           <Icon className={remote ? "size-4 text-cyan" : "size-4 text-muted-foreground"} />
         </div>
         <div className="min-w-0 flex-1">
           <input
-            className="w-full bg-transparent text-[14px] font-semibold outline-none focus:bg-muted"
+            className="rounded-sm w-full bg-transparent text-[14px] font-semibold outline-none focus:bg-muted"
             defaultValue={project.name}
             aria-label="Project name"
             onBlur={(e) => edit((p) => void (p.name = e.target.value.trim() || p.name))}

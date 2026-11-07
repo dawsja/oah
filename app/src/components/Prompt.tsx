@@ -39,7 +39,7 @@ export function PromptHost() {
             placeholder={ask.placeholder}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && value.trim() && done(value.trim())}
-            className="h-8 w-full border border-input bg-background px-2.5 font-mono text-[12.5px] outline-none focus:border-ring/70"
+            className="rounded-md h-8 w-full border border-input bg-background px-2.5 font-mono text-[12.5px] outline-none focus:border-ring/70"
           />
         ) : null}
         <DialogFooter>

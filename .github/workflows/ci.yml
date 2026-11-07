@@ -16,8 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - name: Square corners only
-        run: sh scripts/check-sharp.sh
       - name: Install
         working-directory: app
         run: bun install --frozen-lockfile

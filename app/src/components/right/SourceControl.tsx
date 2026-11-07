@@ -11,8 +11,8 @@ import { BranchPicker } from "./BranchPicker"
 export function SourceControl({ scope }: { scope: Scope }) {
   const { status, error, loading } = useStatus(scope)
   if (loading) return <div className="p-4 text-[12px] text-faint">Loading…</div>
-  if (error) return <div className="m-3 border border-red/40 bg-del/40 p-3 text-[12px] text-red">{error}</div>
-  if (!status?.isRepo) return <div className="m-3 border border-dashed p-3 text-[12px] leading-relaxed text-muted-foreground">This folder isn't a git repository.</div>
+  if (error) return <div className="rounded-lg m-3 border border-red/40 bg-del/40 p-3 text-[12px] text-red">{error}</div>
+  if (!status?.isRepo) return <div className="rounded-lg m-3 border border-dashed p-3 text-[12px] leading-relaxed text-muted-foreground">This folder isn't a git repository.</div>
   return <Panel scope={scope} status={status} />
 }
 
@@ -54,7 +54,7 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
         <DropdownMenu>
           <Tip content="Sync">
             <DropdownMenuTrigger asChild>
-              <button className="grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Sync">
+              <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Sync">
                 <RefreshCw className={cn("size-3.5", busy && "animate-spin")} />
               </button>
             </DropdownMenuTrigger>
@@ -89,11 +89,11 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
           }}
           rows={3}
           placeholder={`Message (Ctrl Enter to commit on ${status.branch ?? "HEAD"})`}
-          className="block w-full resize-none border border-input bg-background px-2.5 py-2 text-[12.5px] outline-none placeholder:text-faint focus:border-ring/70"
+          className="rounded-md block w-full resize-none border border-input bg-background px-2.5 py-2 text-[12.5px] outline-none placeholder:text-faint focus:border-ring/70"
         />
         <div className="mt-2 flex">
           <button
-            className="flex h-7 flex-1 items-center justify-center gap-1.5 bg-primary text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint"
+            className="rounded-l-md flex h-7 flex-1 items-center justify-center gap-1.5 bg-primary text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint"
             disabled={!message.trim() || total === 0 || !!busy}
             onClick={() => commit()}
           >
@@ -102,7 +102,7 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="grid h-7 w-7 place-items-center border-l border-primary-foreground/20 bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint" disabled={!!busy} aria-label="More commit actions">
+              <button className="rounded-r-md grid h-7 w-7 place-items-center border-l border-primary-foreground/20 bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint" disabled={!!busy} aria-label="More commit actions">
                 <ChevronDown className="size-3.5" />
               </button>
             </DropdownMenuTrigger>
@@ -140,7 +140,7 @@ function Section({ scope, title, changes, kind }: { scope: Scope; title: string;
           {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
           {title}
         </button>
-        <span className="border px-1 font-mono text-[10px] normal-case">{changes.length}</span>
+        <span className="rounded-sm border px-1 font-mono text-[10px] normal-case">{changes.length}</span>
         <span className="font-mono text-[10.5px] normal-case">
           <span className="text-green">+{added}</span> <span className="text-red">−{removed}</span>
         </span>
@@ -178,7 +178,7 @@ function ChangeRow({ scope, change, staged }: { scope: Scope; change: Change; st
 
   return (
     <div
-      className={cn("group flex h-7 cursor-pointer items-center gap-2 pr-2 pl-6 text-[12.5px] hover:bg-accent", active && "row-active")}
+      className={cn("mx-1 rounded-md group flex h-7 cursor-pointer items-center gap-2 pr-2 pl-6 text-[12.5px] hover:bg-accent", active && "row-active")}
       onClick={() => open({ kind: "diff", path: change.path, staged, untracked })}
     >
       <span className="truncate">{name}</span>
@@ -216,7 +216,7 @@ function RowButton({ label, onClick, children }: { label: string; onClick: () =>
   return (
     <Tip content={label}>
       <button
-        className="grid size-6 place-items-center text-muted-foreground hover:bg-background hover:text-foreground [&_svg]:size-3.5"
+        className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-background hover:text-foreground [&_svg]:size-3.5"
         aria-label={label}
         onClick={(e) => {
           e.stopPropagation()

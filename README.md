@@ -23,7 +23,7 @@ with git, worktrees and pull requests next to the chat. Rust and Tauri; no Elect
 - **Settings.** Providers, Voice, Appearance (dark, light, system), Usage (Claude and Codex plan
   limits, tokens and cost per project), SSH Hosts, Projects.
 
-Every corner is square: `scripts/check-sharp.sh` fails the build on any rounded class.
+Corners are subtle: 2px tags, 4px controls and rows, 6px cards and panels.
 
 ## Layout
 
@@ -37,7 +37,7 @@ crates/
   oah-voice      speech to text (transcribe.cpp; needs CMake to build)
 app/
   src-tauri      the Tauri shell: commands, chat-event / voice-state events
-  src            React + Tailwind (shadcn primitives, radius 0)
+  src            React + Tailwind (shadcn primitives, 6px radius scale)
 ```
 
 ## Develop
@@ -57,7 +57,6 @@ bun run dev:debug        # the app with DevTools on 127.0.0.1:9223, data in ../.
 Checks, as CI runs them:
 
 ```sh
-sh scripts/check-sharp.sh
 (cd app && bun run web:build && bun run test)
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings

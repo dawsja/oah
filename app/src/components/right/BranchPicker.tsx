@@ -40,7 +40,7 @@ export function BranchPicker({ scope, status }: { scope: Scope; status: Status }
       }}
     >
       <PopoverTrigger asChild>
-        <button className="flex h-6 min-w-0 items-center gap-1.5 px-1 font-mono text-[12px] hover:bg-accent">
+        <button className="rounded-md flex h-6 min-w-0 items-center gap-1.5 px-1 font-mono text-[12px] hover:bg-accent">
           <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{status.branch ?? `detached ${status.head ?? ""}`}</span>
           <ChevronDown className="size-3 shrink-0 text-faint" />
@@ -57,7 +57,7 @@ export function BranchPicker({ scope, status }: { scope: Scope; status: Status }
         />
         <div className="max-h-72 overflow-y-auto py-1">
           {query.trim() && !exists ? (
-            <button className="flex h-7 w-full items-center gap-2 px-3 text-left text-[12.5px] hover:bg-accent" onClick={() => go(query.trim(), true)}>
+            <button className="mx-1 rounded-md flex h-7 w-[calc(100%-0.5rem)] items-center gap-2 px-3 text-left text-[12.5px] hover:bg-accent" onClick={() => go(query.trim(), true)}>
               <Plus className="size-3.5 text-gold" /> Create <span className="font-mono">{query.trim()}</span>
             </button>
           ) : null}
@@ -77,7 +77,7 @@ export function BranchPicker({ scope, status }: { scope: Scope; status: Status }
 
 function BranchRow({ b, onPick }: { b: Branch; onPick: () => void }) {
   return (
-    <button className={cn("flex h-7 w-full items-center gap-2 px-3 text-left font-mono text-[12px] hover:bg-accent", b.current && "text-gold")} onClick={onPick} disabled={b.current}>
+    <button className={cn("mx-1 rounded-md flex h-7 w-[calc(100%-0.5rem)] items-center gap-2 px-3 text-left font-mono text-[12px] hover:bg-accent", b.current && "text-gold")} onClick={onPick} disabled={b.current}>
       {b.current ? <Check className="size-3.5" /> : <GitBranch className="size-3.5 text-faint" />}
       <span className="truncate">{b.name}</span>
     </button>

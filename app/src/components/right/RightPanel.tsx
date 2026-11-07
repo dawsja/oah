@@ -42,7 +42,7 @@ export function RightPanel() {
             >
               <t.icon className="size-4" />
               {t.id === "scm" && count > 0 ? (
-                <span className="absolute top-1 right-0.5 min-w-3.5 bg-primary px-0.5 text-center font-mono text-[9px] leading-3.5 text-primary-foreground">{count > 99 ? "99" : count}</span>
+                <span className="rounded-sm absolute top-1 right-0.5 min-w-3.5 bg-primary px-0.5 text-center font-mono text-[9px] leading-3.5 text-primary-foreground">{count > 99 ? "99" : count}</span>
               ) : null}
             </button>
           </Tip>

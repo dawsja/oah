@@ -33,13 +33,13 @@ export function PullRequest({ scope }: { scope: Scope }) {
       <div className="flex h-9 shrink-0 items-center border-b px-3 text-[12px] text-muted-foreground">
         {state?.kind === "open" ? `#${state.pr.number}` : "GitHub"}
         <Tip content="Reload">
-          <button className="ml-auto grid size-7 place-items-center hover:bg-accent hover:text-foreground" aria-label="Reload pull request" onClick={load}>
+          <button className="rounded-md ml-auto grid size-7 place-items-center hover:bg-accent hover:text-foreground" aria-label="Reload pull request" onClick={load}>
             <RefreshCw className="size-3.5" />
           </button>
         </Tip>
       </div>
       {state === null ? <div className="p-3 text-[12px] text-faint">Loading…</div> : null}
-      {state?.kind === "unavailable" ? <div className="m-3 border border-dashed p-3 text-[12px] leading-relaxed text-muted-foreground">{state.reason}</div> : null}
+      {state?.kind === "unavailable" ? <div className="rounded-lg m-3 border border-dashed p-3 text-[12px] leading-relaxed text-muted-foreground">{state.reason}</div> : null}
       {state?.kind === "none" ? <CreateForm scope={scope} branch={state.branch} base={state.base} onCreated={load} /> : null}
       {state?.kind === "open" ? <Open pr={state.pr} /> : null}
     </div>
@@ -65,7 +65,7 @@ function Open({ pr }: { pr: PR }) {
           </button>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
-          <span className={cn("border px-1.5 py-px font-medium uppercase", tone)}>{merged ? "merged" : closed ? "closed" : pr.draft ? "draft" : "open"}</span>
+          <span className={cn("rounded-sm border px-1.5 py-px font-medium uppercase", tone)}>{merged ? "merged" : closed ? "closed" : pr.draft ? "draft" : "open"}</span>
           <span className="font-mono text-muted-foreground">
             {pr.head} → {pr.base}
           </span>
@@ -73,7 +73,7 @@ function Open({ pr }: { pr: PR }) {
             <span className="text-green">+{pr.additions}</span> <span className="text-red">−{pr.deletions}</span>
           </span>
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-px border bg-border text-[11.5px]">
+        <div className="overflow-hidden rounded-md mt-2 grid grid-cols-2 gap-px border bg-border text-[11.5px]">
           <div className="bg-sidebar px-2 py-1.5">
             <div className="text-faint">Review</div>
             <div className={pr.review === "APPROVED" ? "text-green" : pr.review === "CHANGES_REQUESTED" ? "text-red" : "text-muted-foreground"}>{(pr.review || "none").replace(/_/g, " ").toLowerCase()}</div>
@@ -83,7 +83,7 @@ function Open({ pr }: { pr: PR }) {
             <div className={pr.mergeState === "CLEAN" ? "text-green" : pr.mergeState === "DIRTY" ? "text-red" : "text-muted-foreground"}>{(pr.mergeState || "unknown").toLowerCase()}</div>
           </div>
         </div>
-        <button className="mt-2 flex h-7 w-full items-center justify-center gap-1.5 border border-input text-[12px] hover:bg-accent" onClick={() => openUrl(pr.url)}>
+        <button className="rounded-md mt-2 flex h-7 w-full items-center justify-center gap-1.5 border border-input text-[12px] hover:bg-accent" onClick={() => openUrl(pr.url)}>
           <ExternalLink className="size-3.5" /> Open on GitHub
         </button>
       </div>
@@ -95,7 +95,7 @@ function Open({ pr }: { pr: PR }) {
       </div>
       {pr.checks.length === 0 ? <div className="px-3 pb-3 text-[12px] text-faint">No checks on this pull request.</div> : null}
       {pr.checks.map((c, i) => (
-        <button key={`${c.name}-${i}`} className="flex h-7 w-full items-center gap-2 px-3 text-left text-[12.5px] hover:bg-accent disabled:hover:bg-transparent" disabled={!c.url} onClick={() => c.url && openUrl(c.url)}>
+        <button key={`${c.name}-${i}`} className="mx-1 rounded-md flex h-7 w-[calc(100%-0.5rem)] items-center gap-2 px-3 text-left text-[12.5px] hover:bg-accent disabled:hover:bg-transparent" disabled={!c.url} onClick={() => c.url && openUrl(c.url)}>
           <CheckIcon state={c.state} />
           <span className="truncate">{c.name}</span>
           {c.url ? <ExternalLink className="ml-auto size-3 shrink-0 text-faint" /> : null}
@@ -142,18 +142,18 @@ function CreateForm({ scope, branch, base, onCreated }: { scope: Scope; branch: 
       <div className="text-[12px] text-muted-foreground">
         No pull request for <span className="font-mono text-foreground">{branch}</span> yet.
       </div>
-      {onBase ? <div className="border border-warn/40 p-2 text-[11.5px] text-warn">You're on {base}. Make a branch or a worktree first.</div> : null}
-      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="h-8 border border-input bg-background px-2.5 text-[12.5px] outline-none focus:border-ring/70" />
-      <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6} placeholder="Description (markdown)" className="resize-none border border-input bg-background px-2.5 py-2 text-[12.5px] outline-none focus:border-ring/70" />
+      {onBase ? <div className="rounded-md border border-warn/40 p-2 text-[11.5px] text-warn">You're on {base}. Make a branch or a worktree first.</div> : null}
+      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="rounded-md h-8 border border-input bg-background px-2.5 text-[12.5px] outline-none focus:border-ring/70" />
+      <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6} placeholder="Description (markdown)" className="rounded-md resize-none border border-input bg-background px-2.5 py-2 text-[12.5px] outline-none focus:border-ring/70" />
       <div className="flex items-center gap-2 text-[12px]">
         <span className="text-faint">into</span>
-        <input value={target} onChange={(e) => setTarget(e.target.value)} className="h-7 w-32 border border-input bg-background px-2 font-mono text-[12px] outline-none focus:border-ring/70" />
+        <input value={target} onChange={(e) => setTarget(e.target.value)} className="rounded-md h-7 w-32 border border-input bg-background px-2 font-mono text-[12px] outline-none focus:border-ring/70" />
         <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-muted-foreground">
           <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} className="size-3.5 accent-[var(--primary)]" />
           Draft
         </label>
       </div>
-      <button className="flex h-8 items-center justify-center gap-1.5 bg-primary text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint" disabled={!title.trim() || busy || onBase} onClick={create}>
+      <button className="rounded-md flex h-8 items-center justify-center gap-1.5 bg-primary text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint" disabled={!title.trim() || busy || onBase} onClick={create}>
         <GitPullRequest className="size-3.5" /> {busy ? "Opening…" : "Push and open pull request"}
       </button>
     </div>

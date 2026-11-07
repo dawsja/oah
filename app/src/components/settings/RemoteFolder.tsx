@@ -64,10 +64,10 @@ export function RemoteFolderHost() {
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && go(typed)}
-            className="h-8 min-w-0 flex-1 border border-input bg-background px-2.5 font-mono text-[12px] outline-none focus:border-ring/70"
+            className="rounded-md h-8 min-w-0 flex-1 border border-input bg-background px-2.5 font-mono text-[12px] outline-none focus:border-ring/70"
           />
         </div>
-        <div className="h-72 overflow-y-auto border bg-background">
+        <div className="rounded-lg h-72 overflow-y-auto border bg-background">
           {dirs === null ? (
             <div className="flex items-center gap-2 p-3 text-[12px] text-faint">
               <LoaderCircle className="size-3.5 animate-spin" /> Connecting…
@@ -76,7 +76,7 @@ export function RemoteFolderHost() {
           {error ? <div className="p-3 text-[12px] text-red">{error}</div> : null}
           {dirs?.length === 0 && !error ? <div className="p-3 text-[12px] text-faint">No folders here.</div> : null}
           {dirs?.map((d) => (
-            <button key={d} className="flex h-7 w-full items-center gap-2 px-3 text-left text-[12.5px] hover:bg-accent" onDoubleClick={() => go(`${path.replace(/\/$/, "")}/${d}`)} onClick={() => setTyped(`${path.replace(/\/$/, "")}/${d}`)}>
+            <button key={d} className="mx-1 rounded-md flex h-7 w-[calc(100%-0.5rem)] items-center gap-2 px-3 text-left text-[12.5px] hover:bg-accent" onDoubleClick={() => go(`${path.replace(/\/$/, "")}/${d}`)} onClick={() => setTyped(`${path.replace(/\/$/, "")}/${d}`)}>
               <Folder className="size-3.5 text-muted-foreground" />
               <span className={d.startsWith(".") ? "text-faint" : undefined}>{d}</span>
             </button>
