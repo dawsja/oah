@@ -27,9 +27,9 @@ export function ApprovalCard({ request, queued = 0, onAnswer }: { request: Appro
   const plan = request.kind === "plan"
   const Icon = request.kind === "command" ? SquareTerminal : request.kind === "edit" ? FilePen : request.kind === "plan" ? ListChecks : ShieldQuestion
   return (
-    <div className="rounded-lg border border-primary/60 bg-card">
+    <div className="rounded-lg border border-input bg-card">
       <div className="flex items-start gap-2.5 px-3.5 pt-3">
-        <Icon className="mt-0.5 size-4 shrink-0 text-gold" />
+        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2 text-[13px] font-semibold">
             {rel(request.title)}

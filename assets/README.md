@@ -6,11 +6,11 @@ The mark is an open ring (the "o" of oah) with an agent node sitting in the gap.
 
 | Name      | Hex       | Use                                                        |
 |-----------|-----------|------------------------------------------------------------|
-| Gold      | `#F5B800` | The brand color: the node (on dark and light), icon tile, accents |
-| Gold text | `#9A6F00` | Gold text on light backgrounds (the app's light theme)     |
-| Ink       | `#0E0E0F` | Dark background, mark on light/gold                        |
+| Gold      | `#F5B800` | The brand color: the node (on dark and light), icon tile, and the app's one accent |
+| Ink       | `#0E0E0F` | Mark on light/gold                                         |
 | Light     | `#E6EDF3` | Ring and wordmark on dark                                  |
-| Paper     | `#F6F7F9` | Light background                                           |
+| Soft black | `#121214` | The app's dark background (sidebar `#0E0E10`, cards `#19191C`) |
+| Paper     | `#F6F7F9` | The app's light background (sidebar `#EEF0F3`)             |
 
 Wordmark: JetBrains Mono ExtraBold (outlined in the SVGs, no font needed).
 
@@ -25,6 +25,8 @@ Wordmark: JetBrains Mono ExtraBold (outlined in the SVGs, no font needed).
 
 - Use `mark-on-dark` on dark, `mark-on-light` on light, `mark-black` / `mark-white` for one-color.
 - The gold is the same everywhere: logo, app icon, and the app's accents in both themes.
+- In the app, gold marks actions and "you are here" only (primary buttons, the selected row,
+  selected toggles, badges). Text is never gold: code, commands and links use the text colors.
 - Keep clear space around the mark of at least the node's diameter.
 - Don't rotate the mark, close the ring, or move the node out of the gap.
 

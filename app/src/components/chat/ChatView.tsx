@@ -97,11 +97,11 @@ function NewChat({ project }: { project: Project }) {
               <p className="mt-1 text-[12.5px] text-muted-foreground">
                 {agentName(settings, agent)} in <span className="font-medium text-foreground">{project.name}</span>
                 {worktree ? (
-                  <span className="rounded-sm ml-1 border border-gold/40 px-1 font-mono text-[11px] text-gold">⎇ {worktree.branch}</span>
+                  <span className="rounded-sm ml-1 border px-1 font-mono text-[11px] text-muted-foreground">⎇ {worktree.branch}</span>
                 ) : null}
                 <span className="text-faint"> · {locationLabel(project.location)}</span>
                 {starting ? (
-                  <span className="ml-1.5 inline-flex items-center gap-1 text-gold">
+                  <span className="ml-1.5 inline-flex items-center gap-1 text-muted-foreground">
                     <LoaderCircle className="size-3 animate-spin" /> starting {distro}…
                   </span>
                 ) : null}
@@ -197,7 +197,7 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
     <div className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
       <AgentGlyph agent={meta.agent} className="size-3.5" />
       <span className="truncate text-[13px] font-medium">{meta.title || "New chat"}</span>
-      {transcript.running ? <LoaderCircle className="size-3.5 animate-spin text-gold" /> : null}
+      {transcript.running ? <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" /> : null}
       <span className="ml-auto font-mono text-[11px] text-faint">{model}</span>
       {ctx ? (
         <Tip content={`Context: ${formatTokens(ctx.used)} of ${formatTokens(ctx.window)} tokens`} side="bottom">
@@ -262,7 +262,7 @@ function PlanDock({ items }: { items: PlanItem[] }) {
               {it.status === "completed" ? (
                 <Check className="size-3.5 text-green" />
               ) : it.status === "inProgress" ? (
-                <LoaderCircle className="size-3.5 animate-spin text-gold" />
+                <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" />
               ) : (
                 <Circle className="size-3.5 text-faint" />
               )}

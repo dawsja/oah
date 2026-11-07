@@ -47,7 +47,7 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
                 <ArrowDown className="size-3" />
                 {status.behind}
               </span>
-              <span className={cn("flex items-center", status.ahead && "text-gold")}>
+              <span className={cn("flex items-center", status.ahead && "text-foreground")}>
                 <ArrowUp className="size-3" />
                 {status.ahead}
               </span>
@@ -103,7 +103,7 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
         />
           <Tip content={writing ? "Writing…" : nothingStaged ? "Write a message from all changes (cheapest model)" : "Write a message from the staged changes (cheapest model)"}>
             <button
-              className="rounded-md absolute top-1.5 right-1.5 grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-gold disabled:opacity-50"
+              className="rounded-md absolute top-1.5 right-1.5 grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
               aria-label="Write a commit message"
               disabled={writing || total === 0}
               onClick={async () => {
@@ -119,7 +119,7 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
                 }
               }}
             >
-              {writing ? <LoaderCircle className="size-3.5 animate-spin text-gold" /> : <Sparkles className="size-3.5" />}
+              {writing ? <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" /> : <Sparkles className="size-3.5" />}
             </button>
           </Tip>
         </div>
@@ -135,7 +135,15 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="rounded-r-md grid h-7 w-7 place-items-center border-l border-primary-foreground/20 bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint" disabled={!!busy} aria-label="More commit actions">
+              <button
+                className={cn(
+                  "rounded-r-md grid h-7 w-7 place-items-center border-l disabled:bg-muted disabled:text-faint",
+                  // Gold only while the commit button beside it is live.
+                  message.trim() && total > 0 && !busy ? "border-primary-foreground/20 bg-primary text-primary-foreground hover:bg-primary/90" : "border-border bg-muted text-muted-foreground hover:text-foreground",
+                )}
+                disabled={!!busy}
+                aria-label="More commit actions"
+              >
                 <ChevronDown className="size-3.5" />
               </button>
             </DropdownMenuTrigger>

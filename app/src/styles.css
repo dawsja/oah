@@ -1,11 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* T3 Code's two themes, with oah gold (#F5B800) where T3 uses blue.
-   Dark: a true-black canvas, sidebar and chrome; cards, popovers and the composer lift to
-   neutral-950 + 3% white, a user turn to + 8%; white-alpha borders and hovers.
-   Light: T3's zinc scale: a zinc-25 canvas, zinc-50 sidebar, white cards and selected rows,
-   zinc-200 borders. Gold fills keep ink text; gold text on white goes darker (#9A6F00).
+/* oah's "soft black" themes. One accent, oah gold #F5B800, used only for actions and "you are
+   here": primary buttons, the selected row's bar, selected segments and toggles, badges, and the
+   logo. Everything you read stays neutral: inline code, commands, file names and list numbers use
+   the text color, and focus outlines are a soft gray.
+   Dark: lifted off pure black. The chat is #121214, the sidebar a step darker (#0E0E10), cards,
+   menus and the composer a step lighter (#19191C), a user turn #202024; white-alpha borders.
+   Light: cool paper. The chat is #F6F7F9, the sidebar #EEF0F3, cards white; the gold fill keeps
+   ink text.
    Corners are subtle: --radius is 6px, so rounded-sm is 2px (tags), rounded-md 4px (controls,
    rows), rounded-lg 6px (cards, panels, menus). Toggles are round; diff lines, the history graph
    and meters stay square. */
@@ -14,104 +17,102 @@
 :root {
   --radius: 6px;
 
-  --background: #fcfcfc; /* zinc-25 */
-  --foreground: #18181b; /* zinc-900 */
+  --background: #f6f7f9;
+  --foreground: #16181d;
   --card: #ffffff;
-  --card-foreground: #18181b;
+  --card-foreground: #16181d;
   --popover: #ffffff;
-  --popover-foreground: #18181b;
+  --popover-foreground: #16181d;
   --primary: #f5b800; /* oah gold */
-  --primary-foreground: #0e0e0f;
-  --secondary: #fafafa; /* zinc-50 */
-  --secondary-foreground: #27272a; /* zinc-800 */
-  --muted: #fafafa;
-  --muted-foreground: #71717b; /* zinc-500 */
-  --accent: #f4f4f5; /* zinc-100 */
-  --accent-foreground: #18181b;
-  --destructive: #ef4444; /* red-500 */
-  --border: #e4e4e7; /* zinc-200 */
-  --input: #d4d4d8; /* zinc-300 */
-  --ring: #e8a700;
+  --primary-foreground: #16181d;
+  --secondary: #eef0f3;
+  --secondary-foreground: #2a2e37;
+  --muted: #eef0f3;
+  --muted-foreground: #5b6170;
+  --accent: rgb(15 23 42 / 5%);
+  --accent-foreground: #16181d;
+  --destructive: #dc2626;
+  --border: #e1e4e9;
+  --input: #d2d6dd;
+  --ring: #bfc4cd; /* focus: a soft gray, not gold */
 
-  --sidebar: #fafafa; /* zinc-50 */
-  --sidebar-foreground: #18181b;
+  --sidebar: #eef0f3;
+  --sidebar-foreground: #16181d;
   --sidebar-primary: #f5b800;
-  --sidebar-primary-foreground: #0e0e0f;
-  --sidebar-accent: #ffffff; /* selected row: white on zinc-50 */
-  --sidebar-accent-foreground: #18181b;
-  --sidebar-border: #e4e4e7;
-  --sidebar-ring: #e8a700;
+  --sidebar-primary-foreground: #16181d;
+  --sidebar-accent: #ffffff; /* selected row: white on the gray sidebar */
+  --sidebar-accent-foreground: #16181d;
+  --sidebar-border: #e1e4e9;
+  --sidebar-ring: #bfc4cd;
 
-  /* oah accents */
-  --oah-deep: #fafafa;
-  --oah-faint: #a1a1aa; /* zinc-400 */
-  --oah-brand: #18181b;
-  --oah-gold: #9a6f00; /* gold text on white */
-  --oah-cyan: #1d4ed8; /* blue-700, T3's info */
-  --oah-green: #047857; /* emerald-700 */
-  --oah-red: #b91c1c; /* red-700 */
-  --oah-yellow: #b45309; /* amber-700 */
+  --oah-deep: #eef0f3;
+  --oah-faint: #979dab;
+  --oah-brand: #16181d;
+  --oah-gold: #f5b800;
+  --oah-cyan: #1d4ed8;
+  --oah-green: #047857;
+  --oah-red: #b91c1c;
+  --oah-yellow: #b45309; /* warnings (amber), not the accent */
   --oah-orange: #c2410c;
-  --oah-code: #8a6400;
+  --oah-code: #16181d; /* inline code and commands: the text color */
   --oah-add-bg: color-mix(in srgb, #10b981 10%, transparent);
   --oah-del-bg: color-mix(in srgb, #ef4444 9%, transparent);
-  --oah-user: color-mix(in srgb, #e4e4e7 55%, #f4f4f5); /* T3's message surface */
-  --oah-code-bg: color-mix(in srgb, #ffffff 90%, #fcfcfc);
-  --oah-pre-fg: #18181b;
-  --oah-scroll: rgb(0 0 0 / 14%);
-  --oah-scroll-hover: rgb(0 0 0 / 24%);
+  --oah-user: #e9ebef;
+  --oah-code-bg: rgb(15 23 42 / 6%);
+  --oah-pre-fg: #16181d;
+  --oah-scroll: rgb(15 23 42 / 14%);
+  --oah-scroll-hover: rgb(15 23 42 / 24%);
   --oah-selection: rgb(245 184 0 / 30%);
   color-scheme: light;
 }
 
 .dark {
-  --background: #000000;
-  --foreground: #f5f5f5; /* neutral-100 */
-  --card: color-mix(in srgb, #0a0a0a 97%, #ffffff);
-  --card-foreground: #f5f5f5;
-  --popover: color-mix(in srgb, #0a0a0a 97%, #ffffff);
-  --popover-foreground: #f5f5f5;
+  --background: #121214;
+  --foreground: #ececef;
+  --card: #19191c;
+  --card-foreground: #ececef;
+  --popover: #19191c;
+  --popover-foreground: #ececef;
   --primary: #f5b800; /* oah gold */
-  --primary-foreground: #0e0e0f;
-  --secondary: rgb(255 255 255 / 3%);
-  --secondary-foreground: #f5f5f5;
-  --muted: rgb(255 255 255 / 3%);
-  --muted-foreground: #a1a1a1; /* neutral-400 */
-  --accent: rgb(255 255 255 / 4%);
-  --accent-foreground: #f5f5f5;
-  --destructive: color-mix(in srgb, #ef4444 90%, #ffffff);
+  --primary-foreground: #121214;
+  --secondary: rgb(255 255 255 / 4%);
+  --secondary-foreground: #ececef;
+  --muted: rgb(255 255 255 / 4%);
+  --muted-foreground: #9c9ca5;
+  --accent: rgb(255 255 255 / 6%);
+  --accent-foreground: #ececef;
+  --destructive: #f87171;
   --border: rgb(255 255 255 / 8%);
-  --input: rgb(255 255 255 / 11%);
-  --ring: #f5b800;
+  --input: rgb(255 255 255 / 12%);
+  --ring: rgb(255 255 255 / 22%); /* focus: a soft gray, not gold */
 
-  /* T3's sidebar is the canvas: true black, rows lit by white alpha. */
-  --sidebar: #000000;
-  --sidebar-foreground: #f1f3f7;
+  --sidebar: #0e0e10;
+  --sidebar-foreground: #ececef;
   --sidebar-primary: #f5b800;
-  --sidebar-primary-foreground: #0e0e0f;
-  --sidebar-accent: rgb(255 255 255 / 7%);
-  --sidebar-accent-foreground: #f7f9ff;
+  --sidebar-primary-foreground: #121214;
+  --sidebar-accent: rgb(255 255 255 / 6%);
+  --sidebar-accent-foreground: #ececef;
   --sidebar-border: rgb(255 255 255 / 8%);
-  --sidebar-ring: #f5b800;
+  --sidebar-ring: rgb(255 255 255 / 22%);
 
-  --oah-deep: #000000;
-  --oah-faint: #737373; /* neutral-500 */
-  --oah-brand: #e6edf3;
+  --oah-deep: #0e0e10;
+  --oah-faint: #6a6a73;
+  --oah-brand: #ececef;
   --oah-gold: #f5b800;
-  --oah-cyan: #60a5fa; /* blue-400 */
-  --oah-green: #34d399; /* emerald-400 */
-  --oah-red: #f87171; /* red-400 */
-  --oah-yellow: #fbbf24; /* amber-400 */
+  --oah-cyan: #60a5fa;
+  --oah-green: #4ade80;
+  --oah-red: #f87171;
+  --oah-yellow: #fbbf24; /* warnings (amber), not the accent */
   --oah-orange: #fb923c;
-  --oah-code: #ffcf4d;
+  --oah-code: #ececef; /* inline code and commands: the text color */
   --oah-add-bg: color-mix(in srgb, #10b981 14%, transparent);
   --oah-del-bg: color-mix(in srgb, #ef4444 14%, transparent);
-  --oah-user: color-mix(in srgb, #0a0a0a 92%, #ffffff); /* T3's message surface */
-  --oah-code-bg: rgb(255 255 255 / 6%);
-  --oah-pre-fg: #e5e5e5;
-  --oah-scroll: rgb(255 255 255 / 8%);
-  --oah-scroll-hover: rgb(255 255 255 / 12%);
-  --oah-selection: rgb(245 184 0 / 28%);
+  --oah-user: #202024;
+  --oah-code-bg: rgb(255 255 255 / 7%);
+  --oah-pre-fg: #e2e2e6;
+  --oah-scroll: rgb(255 255 255 / 9%);
+  --oah-scroll-hover: rgb(255 255 255 / 14%);
+  --oah-selection: rgb(245 184 0 / 24%);
   color-scheme: dark;
 }
 
@@ -231,7 +232,7 @@
   .md ul { list-style: square; }
   .md ol { list-style: decimal; }
   .md li { margin: 3px 0; }
-  .md li::marker { color: var(--oah-gold); }
+  .md li::marker { color: var(--muted-foreground); }
   .md blockquote { margin: 0 0 10px; padding-left: 12px; border-left: 2px solid var(--border); color: var(--muted-foreground); }
   .md code { font: 0.9em var(--font-mono); color: var(--oah-code); background: var(--oah-code-bg); padding: 1px 5px; border-radius: 3px; }
   .md pre { margin: 0 0 12px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; overflow: auto; }
@@ -241,18 +242,19 @@
   .md th { background: var(--muted); }
   .md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 
-  .hljs-keyword, .hljs-selector-tag, .hljs-built_in { color: #c792ea; }
-  .hljs-string, .hljs-attr-value, .hljs-template-string { color: #c3e88d; }
+  /* Code colors, toned down; no yellow (that's the accent). */
+  .hljs-keyword, .hljs-selector-tag, .hljs-built_in { color: #c4a7e7; }
+  .hljs-string, .hljs-attr-value, .hljs-template-string { color: #a9d6a0; }
   .hljs-comment, .hljs-quote { color: var(--oah-faint); font-style: italic; }
-  .hljs-number, .hljs-literal, .hljs-meta, .hljs-symbol { color: #f78c6c; }
-  .hljs-title, .hljs-title.function_, .hljs-function, .hljs-section, .hljs-name { color: #82aaff; }
-  .hljs-type, .hljs-title.class_ { color: #ffcb6b; }
-  .hljs-attr, .hljs-property, .hljs-attribute { color: #89ddff; }
+  .hljs-number, .hljs-literal, .hljs-meta, .hljs-symbol { color: #f2a97a; }
+  .hljs-title, .hljs-title.function_, .hljs-function, .hljs-section, .hljs-name { color: #8ab4f8; }
+  .hljs-type, .hljs-title.class_ { color: #9fd4c8; }
+  .hljs-attr, .hljs-property, .hljs-attribute { color: #8cc8e0; }
   :root:not(.dark) .hljs-keyword, :root:not(.dark) .hljs-built_in { color: #8250df; }
   :root:not(.dark) .hljs-string { color: #0a6b3d; }
   :root:not(.dark) .hljs-number, :root:not(.dark) .hljs-literal { color: #b54708; }
   :root:not(.dark) .hljs-title, :root:not(.dark) .hljs-function { color: #0550ae; }
-  :root:not(.dark) .hljs-type { color: #953800; }
+  :root:not(.dark) .hljs-type { color: #0f766e; }
   :root:not(.dark) .hljs-attr, :root:not(.dark) .hljs-property { color: #0b7fc4; }
 }
 

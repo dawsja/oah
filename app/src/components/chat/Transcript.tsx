@@ -125,7 +125,7 @@ function PlanCard({ text, decision }: { text: string; decision: Decision }) {
   return (
     <div className="rounded-lg border bg-card">
       <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px]" onClick={() => setOpen(!open)}>
-        <ListChecks className="size-3.5 text-gold" />
+        <ListChecks className="size-3.5 text-muted-foreground" />
         <span className="font-medium">Plan</span>
         <span className="text-faint">{decision === "deny" ? "· kept planning" : "· approved"}</span>
         <ChevronRight className={cn("ml-auto size-3.5 text-faint transition-transform", open && "rotate-90")} />

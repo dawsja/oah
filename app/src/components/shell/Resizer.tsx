@@ -7,7 +7,7 @@ export function Resizer({ width, onWidth, side, min, max }: { width: number; onW
     <div
       role="separator"
       aria-orientation="vertical"
-      className="relative z-10 -mx-[3px] w-[7px] shrink-0 cursor-col-resize hover:bg-primary/40 active:bg-primary/60"
+      className="relative z-10 -mx-[3px] w-[7px] shrink-0 cursor-col-resize hover:bg-ring/50 active:bg-ring"
       onPointerDown={(e) => {
         start.current = { x: e.clientX, w: width }
         e.currentTarget.setPointerCapture(e.pointerId)

@@ -170,7 +170,8 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
       return { ...replace(i, { ...(items[i] as Extract<Item, { kind: "question" }>), answers: e.answers }), questions }
     }
     case "models":
-      return { ...t, models: e.models, model: e.current ?? t.model }
+      // Logs from before effort levels have models without them.
+      return { ...t, models: e.models.map((m) => ({ ...m, efforts: m.efforts ?? [], defaultEffort: m.defaultEffort ?? null })), model: e.current ?? t.model }
     case "commands":
       return { ...t, commands: e.commands }
     case "permissionChanged":

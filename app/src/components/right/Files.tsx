@@ -75,7 +75,7 @@ export function Files({ scope }: { scope: Scope }) {
           />
         </div>
         <Tip content={mode === "tree" ? "Search in files" : "Back to the tree"}>
-          <button className={cn("rounded-md grid size-7 place-items-center hover:bg-accent", mode === "search" ? "text-gold" : "text-muted-foreground")} aria-label="Search in files" onClick={() => setMode(mode === "tree" ? "search" : "tree")}>
+          <button className={cn("rounded-md grid size-7 place-items-center hover:bg-accent", mode === "search" ? "bg-accent text-foreground" : "text-muted-foreground")} aria-label="Search in files" onClick={() => setMode(mode === "tree" ? "search" : "tree")}>
             <TextSearch className="size-3.5" />
           </button>
         </Tip>
@@ -130,7 +130,7 @@ function FileRow({ path, label, depth, kind, line }: { path: string; label: stri
       <span className={cn("truncate", kind ? KIND_COLOR[kind] : "text-foreground/90")}>{label}</span>
       <Tip content="Add to chat">
         <button
-          className="rounded-md ml-auto hidden size-5 shrink-0 place-items-center text-muted-foreground group-hover:grid hover:text-gold"
+          className="rounded-md ml-auto hidden size-5 shrink-0 place-items-center text-muted-foreground group-hover:grid hover:text-foreground"
           aria-label="Add to chat"
           onClick={(e) => {
             e.stopPropagation()

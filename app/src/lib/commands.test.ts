@@ -44,3 +44,14 @@ describe("slash commands", () => {
     expect(ownCommand("/review", true)).toBeNull()
   })
 })
+
+import { emptyTranscript, reduce } from "./chat"
+
+describe("old chat logs", () => {
+  it("replays model lists saved before effort levels", () => {
+    const old = { type: "models", models: [{ id: "haiku", name: "Haiku", description: "" }], current: "haiku" } as unknown as Parameters<typeof reduce>[1]
+    const t = reduce(emptyTranscript(), old)
+    expect(t.models[0].efforts).toEqual([])
+    expect(t.models[0].defaultEffort).toBeNull()
+  })
+})

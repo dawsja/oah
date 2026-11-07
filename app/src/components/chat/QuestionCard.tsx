@@ -71,10 +71,10 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
 
   if (!q) return null
   return (
-    <div className="rounded-lg border border-primary/60 bg-card">
+    <div className="rounded-lg border border-input bg-card">
       <div className="flex items-center gap-2 px-3.5 pt-3 text-[13px] font-semibold">
-        <MessageCircleQuestion className="size-4 text-gold" />
-        {q.header ? <span className="rounded-sm border border-gold/40 px-1 text-[10.5px] font-normal text-gold uppercase">{q.header}</span> : null}
+        <MessageCircleQuestion className="size-4 text-muted-foreground" />
+        {q.header ? <span className="rounded-sm border px-1 text-[10.5px] font-normal text-muted-foreground uppercase">{q.header}</span> : null}
         <span className="min-w-0 flex-1">{q.question}</span>
         {qs.length > 1 ? (
           <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-normal text-muted-foreground" aria-label={`Question ${step + 1} of ${qs.length}`}>
@@ -84,7 +84,7 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
                 aria-label={`Question ${i + 1}`}
                 disabled={i > step && !qs.slice(0, i).every((y) => answers[y.id].length)}
                 onClick={() => setStep(i)}
-                className={cn("size-1.5 rounded-full", i === step ? "bg-primary" : answers[x.id].length ? "bg-gold/50" : "bg-input")}
+                className={cn("size-1.5 rounded-full", i === step ? "bg-primary" : answers[x.id].length ? "bg-foreground/40" : "bg-input")}
               />
             ))}
             <span className="ml-1 font-mono">

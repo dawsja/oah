@@ -240,7 +240,7 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
         >
           {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         </button>
-        <GitBranch className={cn("size-3.5 shrink-0", main ? "text-muted-foreground" : "text-gold")} />
+        <GitBranch className={cn("size-3.5 shrink-0", "text-muted-foreground")} />
         <span className="truncate font-mono text-[12px]">{tree?.branch ?? "main checkout"}</span>
         {main ? <span className="rounded-sm border px-1 text-[10px] text-faint">main</span> : null}
         <div className="ml-auto flex opacity-0 group-hover/wt:opacity-100 has-[[data-state=open]]:opacity-100">
@@ -291,7 +291,7 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
       {waiting(t) ? (
         <span className="rounded-full size-1.5 shrink-0 bg-primary" />
       ) : t?.running ? (
-        <LoaderCircle className="size-3 shrink-0 animate-spin text-gold" />
+        <LoaderCircle className="size-3 shrink-0 animate-spin text-muted-foreground" />
       ) : (
         <AgentGlyph agent={meta.agent} className="size-3 shrink-0 opacity-70" />
       )}

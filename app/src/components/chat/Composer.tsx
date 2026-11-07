@@ -255,7 +255,7 @@ export function Composer(p: ComposerProps) {
                 onMouseEnter={() => setSlash({ query: slashState!.query, index: i })}
                 onClick={() => pickCommand(c, true)}
               >
-                {c.skill ? <Sparkles className="size-3.5 shrink-0 text-faint" /> : <Slash className={cn("size-3.5 shrink-0", c.own ? "text-gold" : "text-faint")} />}
+                {c.skill ? <Sparkles className="size-3.5 shrink-0 text-faint" /> : <Slash className={cn("size-3.5 shrink-0", c.own ? "text-foreground" : "text-faint")} />}
                 <span className="shrink-0 font-mono text-foreground">{c.name}</span>
                 {c.hint ? <span className="max-w-40 shrink-0 truncate font-mono text-[11px] text-faint">{c.hint}</span> : null}
                 <span className="min-w-0 flex-1 truncate text-[11.5px] text-faint">{c.description}</span>
@@ -394,14 +394,14 @@ export function Composer(p: ComposerProps) {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto">
-            <DropdownMenuLabel>Model{p.models?.some((m) => m.efforts.length) ? <span className="ml-1.5 font-normal text-faint">→ for effort</span> : null}</DropdownMenuLabel>
+            <DropdownMenuLabel>Model{p.models?.some((m) => m.efforts?.length) ? <span className="ml-1.5 font-normal text-faint">→ for effort</span> : null}</DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => p.onModel?.("", "")}>
               <span className="w-3.5">{!p.model ? <Check className="size-3.5" /> : null}</span>
               The agent's default
             </DropdownMenuItem>
             {p.models === undefined || p.models.length === 0 ? <div className="px-2 py-1.5 text-[11.5px] text-faint">{p.models === undefined ? "Loading models…" : "The agent didn't list its models."}</div> : null}
             {p.models?.map((m) =>
-              m.efforts.length ? (
+              m.efforts?.length ? (
                 <ModelWithEffort key={m.id} model={m} selected={m.id === p.model} effort={m.id === p.model ? (p.effort ?? "") : ""} onPick={(e) => p.onModel?.(m.id, e)} />
               ) : (
                 <DropdownMenuItem key={m.id} onSelect={() => p.onModel?.(m.id, "")}>
@@ -487,7 +487,7 @@ function ModelWithEffort({ model, selected, effort, onPick }: { model: ModelOpti
       <DropdownMenuSubTrigger className="gap-2">
         <span className="w-3.5">{selected ? <Check className="size-3.5" /> : null}</span>
         <ModelText model={model} />
-        {selected && effort ? <span className="shrink-0 text-[11px] text-gold">{effortLabel(effort)}</span> : null}
+        {selected && effort ? <span className="shrink-0 text-[11px] text-muted-foreground">{effortLabel(effort)}</span> : null}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-48">
         <DropdownMenuLabel className="text-[11px] font-normal text-faint">{model.name} · effort</DropdownMenuLabel>
@@ -514,7 +514,7 @@ function EffortBars({ level, of }: { level: number; of: number }) {
   return (
     <span className="flex h-3 items-end gap-px" aria-hidden>
       {Array.from({ length: of }, (_, i) => (
-        <span key={i} className={cn("w-[3px]", i <= level ? "bg-gold" : "bg-muted")} style={{ height: `${4 + (8 * (i + 1)) / of}px` }} />
+        <span key={i} className={cn("w-[3px]", i <= level ? "bg-foreground/70" : "bg-muted")} style={{ height: `${4 + (8 * (i + 1)) / of}px` }} />
       ))}
     </span>
   )

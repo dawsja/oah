@@ -198,7 +198,7 @@ function DistroRow({ distro, onChange }: { distro: Distro; onChange: () => void 
             if (a.signedIn) return <div className="mt-1 truncate text-[10.5px] text-green">{a.label ?? "Signed in"}</div>
             return (
               <button
-                className="mt-1 text-[10.5px] text-gold hover:underline"
+                className="mt-1 text-[10.5px] text-foreground underline underline-offset-2"
                 onClick={() => ipc.providerLogin(kind, location).then(() => setTimeout(test, 5000), (e) => setCheck({ ok: false, error: String(e) } as HostCheck))}
               >
                 Sign in…

@@ -34,7 +34,7 @@ export function UpdateButton() {
   if (s.kind !== "ready") return null
   return (
     <Tip content={<span className="whitespace-pre-line">{`oah ${s.version}${s.notes ? `\n\n${s.notes}` : ""}`}</span>} side="bottom">
-      <button className="mr-1 flex h-7 items-center gap-1.5 rounded-md border border-primary/50 px-2 text-[11.5px] text-gold hover:bg-accent" onClick={() => void updater.restart()}>
+      <button className="mr-1 flex h-7 items-center gap-1.5 rounded-md bg-primary px-2 text-[11.5px] font-medium text-primary-foreground hover:bg-primary/90" onClick={() => void updater.restart()}>
         <ArrowUpCircle className="size-3.5" />
         {s.installed ? "Restart to finish update" : "Restart to update"}
       </button>
