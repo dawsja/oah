@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use oah_agents::driver::{self, Driver, Prompt, StartOptions};
-use oah_agents::event::{ChatEvent, Decision};
+use oah_agents::event::{ChatEvent, Decision, NoticeLevel};
 use oah_core::chats::{now_ms, title_from, ChatMeta, ChatStore};
 use oah_core::settings::{AgentKind, PermissionMode, Settings};
 use serde::Serialize;
@@ -177,6 +177,45 @@ impl Chats {
             Some(d) => d.set_permission(mode),
             None => Ok(()),
         }
+    }
+
+    /// `/compact`: the agent's own way when it has one, else `/compact` as a message.
+    pub fn compact(
+        &self,
+        app: &AppHandle,
+        settings: &Settings,
+        chat_id: &str,
+        instructions: &str,
+        permission: Option<PermissionMode>,
+    ) -> Result<(), String> {
+        {
+            let mut live = self.live.lock().unwrap();
+            if !live.contains_key(chat_id) {
+                let driver = self.start(app, settings, chat_id, permission)?;
+                live.insert(chat_id.to_string(), driver);
+            }
+            if live.get_mut(chat_id).unwrap().compact(instructions)? {
+                return Ok(());
+            }
+        }
+        let text = format!("/compact {}", instructions.trim()).trim_end().to_string();
+        self.send(app, settings, chat_id, Prompt { id: format!("compact-{}", now_ms()), text, images: vec![] }, permission)
+    }
+
+    /// `/clear`: the agent starts a new session with the next message. The chat keeps what was
+    /// said, with a line marking where the agent's memory starts again.
+    pub fn clear(&self, app: &AppHandle, chat_id: &str) -> Result<(), String> {
+        self.close(chat_id);
+        let mut meta = self.store.get(chat_id).map_err(|e| e.to_string())?;
+        meta.agent_session_id = None;
+        self.store.save(&meta).map_err(|e| e.to_string())?;
+        let event = ChatEvent::Notice {
+            level: NoticeLevel::Info,
+            text: "Context cleared. The agent starts fresh from the next message; it no longer sees what's above.".into(),
+        };
+        self.store.append(chat_id, &event).map_err(|e| e.to_string())?;
+        let _ = app.emit("chat-event", Envelope { chat_id, event: &event });
+        Ok(())
     }
 
     /// Ends the chat's agent (it starts again, resumed, on the next message).

@@ -134,6 +134,7 @@ async fn provider_probe(kind: AgentKind, binary: String) -> Probe {
         path: None,
         version: None,
         error: Some(e.to_string()),
+        outdated: None,
     })
 }
 
@@ -158,13 +159,16 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind) -> CmdResu
     .map_err(err)
 }
 
-/// The models an agent offers, for a chat that hasn't started (run where `project_id` is).
+#[derive(serde::Serialize)]
+struct Catalog {
+    models: Vec<oah_agents::event::ModelOption>,
+    commands: Vec<oah_agents::event::SlashCommand>,
+}
+
+/// The models and slash commands an agent offers, for a chat that hasn't started (run where
+/// `project_id` is). A chat's own agent keeps both up to date once it runs.
 #[tauri::command]
-async fn provider_models(
-    state: State<'_, AppState>,
-    kind: AgentKind,
-    project_id: Option<String>,
-) -> CmdResult<Vec<oah_agents::event::ModelOption>> {
+async fn provider_catalog(state: State<'_, AppState>, kind: AgentKind, project_id: Option<String>) -> CmdResult<Catalog> {
     let (binary, location, cwd) = {
         let s = state.settings.lock().unwrap();
         let p = project_id.and_then(|id| s.projects.iter().find(|p| p.id == id).cloned());
@@ -173,14 +177,21 @@ async fn provider_models(
         (s.providers.get(kind).binary.clone(), location, cwd)
     };
     tauri::async_runtime::spawn_blocking(move || match kind {
-        AgentKind::Claude => oah_agents::claude::list_models(&binary, &location, &cwd),
+        AgentKind::Claude => oah_agents::claude::catalog(&binary, &location, &cwd).map(|(models, commands)| Catalog { models, commands }),
         AgentKind::Codex => {
             let prog = if binary.trim().is_empty() { "codex".to_string() } else { binary };
-            account::codex_once(&prog, &location, "model/list", serde_json::json!({"limit": 100, "includeHidden": false}))
-                .map(|v| oah_agents::codex::parse_models(&v))
+            let models = account::codex_once(&prog, &location, "model/list", serde_json::json!({"limit": 100, "includeHidden": false}))
+                .map(|v| oah_agents::codex::parse_models(&v))?;
+            let commands = account::codex_once(&prog, &location, "skills/list", serde_json::json!({"cwds": [cwd]}))
+                .map(|v| oah_agents::codex::parse_skills(&v))
+                .unwrap_or_default();
+            Ok(Catalog { models, commands })
         }
-        AgentKind::Opencode => oah_agents::acp::opencode_models(&binary, &location, &cwd),
-        AgentKind::Acp => Ok(vec![]),
+        AgentKind::Opencode => Ok(Catalog {
+            models: oah_agents::acp::opencode_models(&binary, &location, &cwd)?,
+            commands: oah_agents::acp::opencode_commands(),
+        }),
+        AgentKind::Acp => Ok(Catalog { models: vec![], commands: vec![] }),
     })
     .await
     .map_err(err)?
@@ -240,6 +251,24 @@ async fn chat_send(app: AppHandle, chat_id: String, prompt: Prompt, permission: 
     })
     .await
     .map_err(err)?
+}
+
+/// `/compact [instructions]`.
+#[tauri::command]
+async fn chat_compact(app: AppHandle, chat_id: String, instructions: String, permission: Option<PermissionMode>) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let settings = state.settings.lock().unwrap().clone();
+        state.chats.compact(&app, &settings, &chat_id, &instructions, permission)
+    })
+    .await
+    .map_err(err)?
+}
+
+/// `/clear`: a fresh agent session from the next message.
+#[tauri::command]
+fn chat_clear(app: AppHandle, state: State<AppState>, chat_id: String) -> CmdResult<()> {
+    state.chats.clear(&app, &chat_id)
 }
 
 #[tauri::command]
@@ -337,13 +366,15 @@ pub fn run() {
             provider_account,
             provider_limits,
             provider_login,
-            provider_models,
+            provider_catalog,
             chat_list,
             chat_running,
             chat_create,
             chat_events,
             chat_send,
             chat_interrupt,
+            chat_compact,
+            chat_clear,
             chat_answer,
             chat_set_permission,
             chat_answer_question,

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react"
 import { create } from "zustand"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
-type Ask = { title: string; description?: string; value?: string; placeholder?: string; confirm?: string; danger?: boolean; input?: boolean; resolve: (v: string | null) => void }
+type Ask = { title: string; description?: string; value?: string; placeholder?: string; confirm?: string; danger?: boolean; input?: boolean; mono?: boolean; resolve: (v: string | null) => void }
 
 const useAsk = create<{ ask: Ask | null }>(() => ({ ask: null }))
 
@@ -39,7 +40,7 @@ export function PromptHost() {
             placeholder={ask.placeholder}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && value.trim() && done(value.trim())}
-            className="rounded-md h-8 w-full border border-input bg-background px-2.5 font-mono text-[12.5px] outline-none focus:border-ring/70"
+            className={cn("rounded-md h-8 w-full border border-input bg-background px-2.5 text-[12.5px] outline-none focus:border-ring/70", ask.mono && "font-mono")}
           />
         ) : null}
         <DialogFooter>

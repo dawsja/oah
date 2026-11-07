@@ -24,6 +24,10 @@ type ChatsStore = {
     text: string,
     opts: { agent: AgentKind; acpId?: string | null; model?: string; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] },
   ): Promise<void>
+  /** `/compact`: the agent summarizes the conversation so far. */
+  compact(chatId: string, instructions: string, permission: PermissionMode): Promise<void>
+  /** `/clear`: the agent starts a fresh session from the next message. */
+  clear(chatId: string): Promise<void>
   interrupt(chatId: string): Promise<void>
   answer(chatId: string, requestId: string, decision: Decision): Promise<void>
   answerQuestion(chatId: string, requestId: string, answers: Record<string, string[]>): Promise<void>
@@ -70,7 +74,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
         if (!app.projectId) return
         const meta = await ipc.chatCreate(app.projectId, opts.agent, opts.acpId ?? null, opts.model ?? null, opts.cwd ?? null)
         id = meta.id
-        set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: emptyTranscript() } }))
+        set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: emptyTranscript() }, permission: { ...s.permission, [meta.id]: opts.permission } }))
         useApp.setState({ chatId: meta.id })
       }
       const chat = id
@@ -79,9 +83,24 @@ export const useChats = create<ChatsStore>((set, get) => ({
       await ipc.chatSend(chat, { id: crypto.randomUUID(), text, images }, get().permission[chat] ?? opts.permission)
       get().refresh()
     } catch (e) {
-      toast.error(String(e))
-      if (id) apply(id, { type: "error", message: String(e) })
+      const msg = String(e)
+      // Not signed in: the CLI's sign-in is one click away.
+      const login = msg.includes("isn't signed in") && (opts.agent === "opencode" || opts.agent === "claude" || opts.agent === "codex") ? opts.agent : null
+      toast.error(msg, login ? { action: { label: "Sign in", onClick: () => void ipc.providerLogin(login).catch((err) => toast.error(String(err))) } } : undefined)
+      if (id) apply(id, { type: "error", message: msg })
     }
+  },
+
+  async compact(chatId, instructions, permission) {
+    await ipc.chatCompact(chatId, instructions, get().permission[chatId] ?? permission).catch((e) => {
+      toast.error(String(e))
+      apply(chatId, { type: "error", message: String(e) })
+    })
+  },
+
+  async clear(chatId) {
+    await ipc.chatClear(chatId).catch((e) => toast.error(String(e)))
+    get().refresh()
   },
 
   async interrupt(chatId) {
@@ -126,6 +145,7 @@ let queue: [string, ChatEvent][] = []
 let scheduled = false
 function apply(chatId: string, event: ChatEvent) {
   notify(event, useChats.getState().metas.find((m) => m.id === chatId))
+  if (event.type === "permissionChanged") useChats.setState((s) => ({ permission: { ...s.permission, [chatId]: event.mode } }))
   queue.push([chatId, event])
   if (scheduled) return
   scheduled = true

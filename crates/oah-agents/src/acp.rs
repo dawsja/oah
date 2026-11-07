@@ -100,6 +100,12 @@ impl AcpDriver {
             // OpenCode 1.x can't answer its question tool over ACP; 2.x uses form elicitation.
             env.push(EnvVar { key: "OPENCODE_CLIENT".into(), value: "acp".into(), in_keychain: false });
             env.push(EnvVar { key: "OPENCODE_ENABLE_QUESTION_TOOL".into(), value: "false".into(), in_keychain: false });
+            // OpenCode lets edits and commands through unless its config says "ask". Ask for both,
+            // and oah answers what its mode allows (Accept edits, Full access) by itself, so the
+            // mode can change mid-chat. Your own OPENCODE_PERMISSION wins.
+            if !env.iter().any(|e| e.key == "OPENCODE_PERMISSION") {
+                env.push(EnvVar { key: "OPENCODE_PERMISSION".into(), value: r#"{"edit":"ask","bash":"ask"}"#.into(), in_keychain: false });
+            }
         }
         let mut cmd = oah_transport::command(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &env })?;
         let mut child = cmd.spawn().map_err(|e| format!("couldn't start {program}: {e}"))?;
@@ -157,13 +163,12 @@ impl AcpDriver {
         if init["protocolVersion"].as_u64().is_some_and(|v| v != PROTOCOL) {
             return Err(format!("{name} speaks ACP version {}, oah speaks {PROTOCOL}", init["protocolVersion"]));
         }
+        if let Some(msg) = init["agentInfo"]["version"].as_str().and_then(|v| crate::probe::outdated(opts.kind, v)) {
+            return Err(msg);
+        }
         let caps = &init["agentCapabilities"];
-        let auth_hint = if opencode {
-            "Sign in with `opencode auth login` (Settings → Providers → OpenCode → Sign in)."
-        } else {
-            "Sign in with the agent's own command first."
-        };
-
+        let auth_methods = init["authMethods"].as_array().cloned().unwrap_or_default();
+        let not_signed_in = || sign_in_message(&name, opencode, &auth_methods);
         // Reopen the chat's session if we can; otherwise start a new one.
         let mut session = None;
         if let Some(id) = &opts.resume {
@@ -188,15 +193,25 @@ impl AcpDriver {
                 }),
             }
         }
+        let new_session = || d.rpc.call("session/new", json!({"cwd": opts.cwd, "mcpServers": []}), Duration::from_secs(120));
         let session = match session {
             Some(s) => s,
-            None => d.rpc.call("session/new", json!({"cwd": opts.cwd, "mcpServers": []}), Duration::from_secs(120)).map_err(|e| {
-                if e.contains("-32000") || e.to_lowercase().contains("auth") {
-                    format!("{name} isn't signed in. {auth_hint}")
-                } else {
-                    e
+            None => match new_session() {
+                Ok(s) => s,
+                // Agents that can sign in by themselves (a cached token, a key in the
+                // environment) do it on `authenticate`; try what it offers once, then again.
+                Err(e) if is_auth_error(&e) => {
+                    let signed_in = auth_methods
+                        .iter()
+                        .filter_map(|m| m["id"].as_str())
+                        .any(|id| d.rpc.call("authenticate", json!({"methodId": id}), Duration::from_secs(120)).is_ok());
+                    match signed_in.then(new_session) {
+                        Some(Ok(s)) => s,
+                        _ => return Err(not_signed_in()),
+                    }
                 }
-            })?,
+                Err(e) => return Err(e),
+            },
         };
         let session_id = session["sessionId"].as_str().ok_or_else(|| format!("{name} didn't start a session"))?.to_string();
         d.state.lock().unwrap().session_id = Some(session_id.clone());
@@ -454,7 +469,8 @@ impl Translator {
             return;
         }
         if method == "session/update" {
-            if self.state.lock().unwrap().loading {
+            // A reopened session replays its history as updates; the chat already has it.
+            if self.state.lock().unwrap().loading && p["update"]["sessionUpdate"] != "available_commands_update" {
                 return;
             }
             self.update(&p["update"]);
@@ -510,6 +526,7 @@ impl Translator {
                     self.emit(ChatEvent::Models { models, current });
                 }
             }
+            "available_commands_update" => self.emit(ChatEvent::Commands { commands: acp_commands(&u["availableCommands"]) }),
             "notice" => {
                 if let Some(t) = u["message"].as_str().or(u["text"].as_str()) {
                     self.emit(ChatEvent::Notice { level: NoticeLevel::Info, text: t.into() });
@@ -570,16 +587,17 @@ impl Translator {
 
     fn permission(&mut self, rpc_id: &Value, p: &Value) {
         let options: Vec<Value> = p["options"].as_array().cloned().unwrap_or_default();
-        let auto = self.state.lock().unwrap().permission == PermissionMode::FullAccess;
-        if auto {
-            // Full access answers allow-once itself (never allow-always).
-            let _ = self.rpc.reply(rpc_id, permission_outcome(&options, Decision::Allow));
-            return;
-        }
         let tc = &p["toolCall"];
         let id = tc["toolCallId"].as_str().map(String::from);
         let known = id.as_ref().and_then(|i| self.state.lock().unwrap().tools.get(i).cloned());
         let kind = tc["kind"].as_str().map(tool_kind).or(known.as_ref().map(|k| k.kind)).unwrap_or(ToolKind::Other);
+        // Full access answers everything, Accept edits answers edits: allow once, never always.
+        let mode = self.state.lock().unwrap().permission;
+        let edit = matches!(kind, ToolKind::Edit | ToolKind::Write);
+        if mode == PermissionMode::FullAccess || (mode == PermissionMode::AcceptEdits && edit) {
+            let _ = self.rpc.reply(rpc_id, permission_outcome(&options, Decision::Allow));
+            return;
+        }
         let title = tc["title"]
             .as_str()
             .filter(|t| !t.is_empty())
@@ -650,6 +668,59 @@ pub fn parse_opencode_models(out: &str) -> Vec<ModelOption> {
 }
 
 // ---- Helpers ---------------------------------------------------------------------------------
+
+/// "Authentication required" (-32000), or the provider's 401 passed through.
+fn is_auth_error(e: &str) -> bool {
+    let e = e.to_lowercase();
+    e.contains("auth") || e.contains("401") || e.contains("sign in") || e.contains("log in") || e.contains("login")
+}
+
+/// What to do when the agent isn't signed in: its own instructions (`authMethods[].description`)
+/// and, for OpenCode, where oah's Sign in button is.
+fn sign_in_message(name: &str, opencode: bool, methods: &[Value]) -> String {
+    if opencode {
+        return format!("{name} isn't signed in. Sign in with `opencode auth login` (Settings → Providers → OpenCode → Sign in).");
+    }
+    let how: Vec<String> = methods
+        .iter()
+        .filter_map(|m| m["description"].as_str().or(m["name"].as_str()).map(|t| t.trim().trim_end_matches('.').to_string()))
+        .filter(|t| !t.is_empty())
+        .collect();
+    if how.is_empty() {
+        format!("{name} isn't signed in. Sign in with the agent's own command first.")
+    } else {
+        format!("{name} isn't signed in. {}.", how.join(", or "))
+    }
+}
+
+/// OpenCode's commands before its first `available_commands_update` (a chat that hasn't started).
+/// Its skills come once a chat runs.
+pub fn opencode_commands() -> Vec<SlashCommand> {
+    let c = |name: &str, description: &str, hint: &str| SlashCommand {
+        name: name.into(),
+        description: description.into(),
+        hint: hint.into(),
+        skill: false,
+    };
+    vec![c("init", "Guided AGENTS.md setup", ""), c("review", "Review changes, uncommitted by default", "commit|branch|pr")]
+}
+
+/// `availableCommands: [{name, description, input: {hint}}]`.
+fn acp_commands(v: &Value) -> Vec<SlashCommand> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            Some(SlashCommand {
+                name: c["name"].as_str()?.trim_start_matches('/').to_string(),
+                description: c["description"].as_str().unwrap_or("").into(),
+                hint: c["input"]["hint"].as_str().unwrap_or("").into(),
+                skill: false,
+            })
+        })
+        .filter(|c| !c.name.is_empty())
+        .collect()
+}
 
 fn tool_kind(k: &str) -> ToolKind {
     match k {
@@ -892,6 +963,39 @@ mod tests {
     }
 
     #[test]
+    fn explains_how_to_sign_in() {
+        assert!(is_auth_error("Authentication required: no auth method id provided"));
+        assert!(is_auth_error("provider returned 401"));
+        assert!(!is_auth_error("model not found"));
+        let m = [json!({"id": "oauth", "name": "Log in with Google", "description": "Run `gemini` and pick Login with Google."})];
+        assert_eq!(sign_in_message("Gemini", false, &m), "Gemini isn't signed in. Run `gemini` and pick Login with Google.");
+        assert!(sign_in_message("OpenCode", true, &[]).contains("opencode auth login"));
+        assert!(sign_in_message("X", false, &[]).contains("own command"));
+    }
+
+    #[test]
+    fn reads_available_commands() {
+        let (ev, state) = run(
+            &[upd(json!({"sessionUpdate": "available_commands_update", "availableCommands": [
+                {"name": "init", "description": "create/update AGENTS.md"},
+                {"name": "review", "description": "review changes", "input": {"hint": "commit|branch|pr"}}
+            ]}))],
+            PermissionMode::Ask,
+        );
+        let ChatEvent::Commands { commands } = &ev[0] else { panic!("{ev:?}") };
+        assert_eq!(commands.len(), 2);
+        assert_eq!((commands[1].name.as_str(), commands[1].hint.as_str()), ("review", "commit|branch|pr"));
+        // While a reopened session replays, history is skipped but commands still arrive.
+        state.lock().unwrap().loading = true;
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let o = out.clone();
+        let mut tr = Translator { sink: Arc::new(move |e| o.lock().unwrap().push(e)), state, rpc: Rpc::new(None, "OpenCode") };
+        tr.handle(&upd(json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "old"}})));
+        tr.handle(&upd(json!({"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "init", "description": ""}]})));
+        assert!(matches!(&out.lock().unwrap()[..], [ChatEvent::Commands { .. }]));
+    }
+
+    #[test]
     fn translates_updates() {
         let (ev, _) = run(
             &[
@@ -951,8 +1055,15 @@ mod tests {
         assert_eq!(permission_outcome(&options, Decision::AllowAlways)["outcome"]["optionId"], "always");
         assert_eq!(permission_outcome(&options, Decision::Deny)["outcome"]["optionId"], "reject");
         assert_eq!(permission_outcome(&[], Decision::Allow)["outcome"]["outcome"], "cancelled");
-        let (ev, _) = run(&[req], PermissionMode::FullAccess);
+        let (ev, _) = run(std::slice::from_ref(&req), PermissionMode::FullAccess);
         assert!(ev.is_empty(), "full access answers by itself");
+        // Accept edits answers edits by itself, and still asks before a command.
+        let (ev, _) = run(std::slice::from_ref(&req), PermissionMode::AcceptEdits);
+        assert!(matches!(&ev[..], [ChatEvent::Approval { .. }]));
+        let mut edit = req.clone();
+        edit["params"]["toolCall"]["kind"] = json!("edit");
+        let (ev, _) = run(&[edit], PermissionMode::AcceptEdits);
+        assert!(ev.is_empty(), "accept edits answers edits");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowDown, Check, CircleAlert, Copy, Image as ImageIcon, Info } from "lucide-react"
-import { blocks, formatDuration, formatTokens, type Item, type Transcript as T } from "@/lib/chat"
+import { ArrowDown, Check, ChevronRight, CircleAlert, Copy, Image as ImageIcon, Info, ListChecks } from "lucide-react"
+import { blocks, formatDuration, formatTokens, type Decision, type Item, type Transcript as T } from "@/lib/chat"
 import { cn } from "@/lib/utils"
 import { Markdown } from "./Markdown"
 import { WorkGroup } from "./Work"
@@ -93,6 +93,7 @@ function Row({ item }: { item: Item }) {
     case "assistant":
       return <AssistantText text={item.text} />
     case "approval":
+      if (item.decision && item.request.kind === "plan" && item.request.detail) return <PlanCard text={item.request.detail} decision={item.decision} />
       return item.decision ? (
         <div className="flex items-center gap-2 text-[12px] text-faint">
           <span className={cn("size-1.5", item.decision === "deny" ? "bg-red" : "bg-green")} />
@@ -118,6 +119,22 @@ function Row({ item }: { item: Item }) {
     default:
       return null
   }
+}
+
+/** A plan the agent asked to start on, kept in the chat once answered. */
+function PlanCard({ text, decision }: { text: string; decision: Decision }) {
+  const [open, setOpen] = useState(decision !== "deny")
+  return (
+    <div className="rounded-lg border bg-card">
+      <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px]" onClick={() => setOpen(!open)}>
+        <ListChecks className="size-3.5 text-gold" />
+        <span className="font-medium">Plan</span>
+        <span className="text-faint">{decision === "deny" ? "· kept planning" : "· approved"}</span>
+        <ChevronRight className={cn("ml-auto size-3.5 text-faint transition-transform", open && "rotate-90")} />
+      </button>
+      {open ? <Markdown text={text} className="border-t px-3.5 py-2.5" /> : null}
+    </div>
+  )
 }
 
 function AssistantText({ text }: { text: string }) {

@@ -1,7 +1,7 @@
 // Chat events (crates/oah-agents/src/event.rs) and the transcript they fold into. `reduce` is
 // pure: live events and a reopened chat's log go through the same path.
 
-import type { AgentKind } from "./types"
+import type { AgentKind, PermissionMode } from "./types"
 
 export type ToolKind = "read" | "edit" | "write" | "bash" | "search" | "web" | "task" | "other"
 export type ToolCall = { kind: ToolKind; name: string; title: string; input: unknown; path: string | null }
@@ -10,7 +10,7 @@ export type Decision = "allow" | "allowAlways" | "deny"
 export type ApprovalRequest = {
   requestId: string
   itemId: string | null
-  kind: "command" | "edit" | "other"
+  kind: "command" | "edit" | "plan" | "other"
   title: string
   detail: string | null
   diff: FileDiff | null
@@ -21,6 +21,8 @@ export type QuestionOption = { label: string; description: string }
 export type Question = { id: string; header: string; question: string; options: QuestionOption[]; multi: boolean; other: boolean; secret: boolean }
 export type QuestionRequest = { requestId: string; questions: Question[] }
 export type ModelOption = { id: string; name: string; description: string }
+/** `skill`: a Codex skill, mentioned as `$name` instead of run as `/name`. */
+export type SlashCommand = { name: string; description: string; hint: string; skill: boolean }
 export type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
 
 export type ChatEvent =
@@ -38,6 +40,8 @@ export type ChatEvent =
   | { type: "question"; request: QuestionRequest }
   | { type: "questionResolved"; requestId: string; answers: Record<string, string[]> }
   | { type: "models"; models: ModelOption[]; current: string | null }
+  | { type: "commands"; commands: SlashCommand[] }
+  | { type: "permissionChanged"; mode: PermissionMode }
   | { type: "plan"; items: PlanItem[] }
   | { type: "turnFinished"; turnId: string; usage: Usage | null; costUsd: number | null; durationMs: number | null; interrupted: boolean }
   | { type: "context"; usedTokens: number; windowTokens: number }
@@ -86,9 +90,11 @@ export type Transcript = {
   questions: QuestionRequest[]
   /** What the agent offers; empty until it says. */
   models: ModelOption[]
+  /** The agent's slash commands, as it last listed them. */
+  commands: SlashCommand[]
 }
 
-export const emptyTranscript = (): Transcript => ({ items: [], running: false, plan: [], context: null, model: null, cwd: null, approvals: [], questions: [], models: [] })
+export const emptyTranscript = (): Transcript => ({ items: [], running: false, plan: [], context: null, model: null, cwd: null, approvals: [], questions: [], models: [], commands: [] })
 
 /** Something is waiting for the user. */
 export const waiting = (t: Transcript | undefined) => !!t && (t.approvals.length > 0 || t.questions.length > 0)
@@ -156,6 +162,10 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
     }
     case "models":
       return { ...t, models: e.models, model: e.current ?? t.model }
+    case "commands":
+      return { ...t, commands: e.commands }
+    case "permissionChanged":
+      return t
     case "plan":
       return { ...t, plan: e.items }
     case "turnFinished": {
@@ -195,7 +205,8 @@ export function blocks(items: Item[]): Block[] {
   const out: Block[] = []
   for (const it of items) {
     // Allowed requests need no row (the tool row shows what ran); waiting ones are docked.
-    if (it.kind === "approval" && it.decision !== "deny") continue
+    // Allowed approvals fold away (the tool row shows what ran); a plan stays, approved or not.
+    if (it.kind === "approval" && it.decision !== "deny" && it.request.kind !== "plan") continue
     if (it.kind === "question" && !it.answers) continue
     const work = it.kind === "reasoning" || it.kind === "tool"
     const last = out[out.length - 1]

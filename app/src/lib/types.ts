@@ -74,7 +74,7 @@ export function locationLabel(l: Location): string {
   return l.kind === "local" ? "This computer" : l.host
 }
 
-export type Probe = { found: boolean; path: string | null; version: string | null; error: string | null }
+export type Probe = { found: boolean; path: string | null; version: string | null; error: string | null; outdated: string | null }
 
 export type Account = { signedIn: boolean; label: string | null; plan: string | null; error: string | null }
 export type LimitWindow = { label: string; usedPercent: number; resetsAt: number | null }

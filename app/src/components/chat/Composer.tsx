@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { ArrowUp, Check, ChevronDown, File, Paperclip, Square, X } from "lucide-react"
+import { ArrowUp, Check, ChevronDown, File, Paperclip, Slash, Sparkles, Square, X } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { AgentGlyph } from "@/components/icons"
 import { promptText } from "@/components/Prompt"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { agentKey, agentName, parseAgentKey, type AgentRef } from "@/lib/agents"
-import type { ModelOption } from "@/lib/chat"
+import type { ModelOption, SlashCommand } from "@/lib/chat"
+import { filterCommands, menuCommands, ownCommand, slashQuery, type MenuCommand, type OwnCommand } from "@/lib/commands"
 import { fuzzyPaths, mention, mentionAt } from "@/lib/fuzzy"
 import { git } from "@/lib/git"
 import { PERMISSION_LABEL, type PermissionMode } from "@/lib/types"
@@ -24,8 +25,13 @@ export type ComposerProps = {
   /** The agent's models; empty while unknown. */
   models?: ModelOption[]
   onModel?: (id: string) => void
-  /** Called when the model menu opens, to load the list. */
+  /** Called when the model menu or the / menu opens, to load the agent's lists. */
   onModelsOpen?: () => void
+  /** The agent's slash commands (the / menu adds oah's own). */
+  commands?: SlashCommand[]
+  /** `/clear` and `/compact`, in a chat that has started. */
+  onClear?: () => void
+  onCompact?: (instructions: string) => void
   permission: PermissionMode
   onPermission?: (p: PermissionMode) => void
   running?: boolean
@@ -89,6 +95,62 @@ export function Composer(p: ComposerProps) {
       el?.setSelectionRange(menu.start + insert.length, menu.start + insert.length)
     })
   }
+  const inChat = !!p.onClear
+  const [slashState, setSlash] = useState<{ query: string; index: number } | null>(null)
+  // Esc closes the / menu until the prompt changes.
+  const [slashDismissed, setSlashDismissed] = useState<string | null>(null)
+  const updateSlash = (value: string, caret: number) => {
+    const q = slashQuery(value, caret)
+    if (q === null || slashDismissed === value) return setSlash(null)
+    if (q === "") p.onModelsOpen?.()
+    setSlash({ query: q, index: 0 })
+  }
+  // Worked out on each render, so the list fills in when the agent's commands arrive.
+  const slashItems = slashState ? filterCommands(menuCommands(p.agent.kind, p.commands ?? [], inChat), slashState.query).slice(0, 60) : []
+  const slash = slashState && slashItems.length ? { items: slashItems, index: Math.min(slashState.index, slashItems.length - 1) } : null
+  const [modelOpen, setModelOpen] = useState(false)
+  const runOwn = (own: OwnCommand, args: string) => {
+    if (own === "model") {
+      if (!args) {
+        p.onModelsOpen?.()
+        setModelOpen(true)
+        return
+      }
+      const a = args.toLowerCase()
+      const m =
+        p.models?.find((x) => x.id.toLowerCase() === a || x.name.toLowerCase() === a) ??
+        p.models?.find((x) => x.id.toLowerCase().includes(a) || x.name.toLowerCase().includes(a))
+      p.onModel?.(m?.id ?? args)
+      toast.success(`Model: ${m?.name ?? args}`)
+    } else if (own === "plan") {
+      p.onPermission?.("plan")
+      toast.success("Plan mode: the agent proposes a plan before changing anything")
+    } else if (own === "clear") p.onClear?.()
+    else if (own === "compact") p.onCompact?.(args)
+  }
+  /** Enter runs a command that needs nothing more; Tab (or a command that takes arguments)
+   *  puts `/name ` in the prompt to finish. */
+  const pickCommand = (c: MenuCommand, run: boolean) => {
+    const el = ref.current
+    setSlash(null)
+    if (run && c.own) {
+      setText("")
+      runOwn(c.own, "")
+      return
+    }
+    if (run && !c.skill && !c.hint) {
+      setText("")
+      p.onSend?.(`/${c.name}`, [])
+      return
+    }
+    // Codex skills are mentioned with $ in the message; they don't run by themselves.
+    const insert = c.skill && p.agent.kind === "codex" ? `$${c.name} ` : `/${c.name} `
+    setText(insert)
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(insert.length, insert.length)
+    })
+  }
   const [text, setText] = useState("")
   const [images, setImages] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
@@ -117,6 +179,12 @@ export function Composer(p: ComposerProps) {
   const send = () => {
     const t = text.trim()
     if ((!t && !images.length) || p.disabled) return
+    const own = images.length ? null : ownCommand(t, inChat)
+    if (own) {
+      runOwn(own.own, own.args)
+      setText("")
+      return
+    }
     p.onSend?.(t || "(see the attached image)", images)
     setText("")
     setImages([])
@@ -156,6 +224,29 @@ export function Composer(p: ComposerProps) {
           ))}
         </div>
       ) : null}
+      {slash ? (
+        <div className="relative">
+          <div className="absolute bottom-0 left-2 z-20 mb-1 max-h-80 w-[min(36rem,calc(100%-1rem))] overflow-y-auto rounded-lg border bg-popover p-1 shadow-xl" onMouseDown={(e) => e.preventDefault()} role="listbox" aria-label="Commands">
+            {slash.items.map((c, i) => (
+              <button
+                key={`${c.skill ? "$" : "/"}${c.name}`}
+                ref={i === slash.index ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
+                role="option"
+                aria-selected={i === slash.index}
+                className={cn("flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px]", i === slash.index ? "bg-accent text-foreground" : "text-muted-foreground")}
+                onMouseEnter={() => setSlash({ query: slashState!.query, index: i })}
+                onClick={() => pickCommand(c, true)}
+              >
+                {c.skill ? <Sparkles className="size-3.5 shrink-0 text-faint" /> : <Slash className={cn("size-3.5 shrink-0", c.own ? "text-gold" : "text-faint")} />}
+                <span className="shrink-0 font-mono text-foreground">{c.name}</span>
+                {c.hint ? <span className="max-w-40 shrink-0 truncate font-mono text-[11px] text-faint">{c.hint}</span> : null}
+                <span className="min-w-0 flex-1 truncate text-[11.5px] text-faint">{c.description}</span>
+                {c.skill ? <span className="shrink-0 rounded-sm border px-1 text-[10px] text-faint">skill</span> : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {menu ? (
         <div className="relative">
           <div className="absolute bottom-0 left-2 z-20 mb-1 max-h-72 w-[min(32rem,calc(100%-1rem))] overflow-y-auto rounded-lg border bg-popover p-1 shadow-xl" onMouseDown={(e) => e.preventDefault()}>
@@ -178,13 +269,20 @@ export function Composer(p: ComposerProps) {
         autoFocus={p.autoFocus}
         value={text}
         rows={3}
-        placeholder={p.placeholder ?? "Ask anything, @ to add files"}
+        placeholder={p.placeholder ?? "Ask anything, @ to add files, / for commands"}
         className="block max-h-72 min-h-[76px] w-full resize-none bg-transparent px-3.5 pt-3 text-[length:var(--oah-chat-size,14px)] leading-relaxed outline-none placeholder:text-faint"
         onChange={(e) => {
           setText(e.target.value)
-          updateMenu(e.target.value, e.target.selectionStart ?? e.target.value.length)
+          const caret = e.target.selectionStart ?? e.target.value.length
+          updateMenu(e.target.value, caret)
+          updateSlash(e.target.value, caret)
         }}
-        onBlur={() => setTimeout(() => setMenu(null), 150)}
+        onBlur={() =>
+          setTimeout(() => {
+            setMenu(null)
+            setSlash(null)
+          }, 150)
+        }
         onPaste={(e) => {
           const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"))
           if (files.length) {
@@ -193,6 +291,28 @@ export function Composer(p: ComposerProps) {
           }
         }}
         onKeyDown={(e) => {
+          // An approval or question card above took this key.
+          if (e.defaultPrevented) return
+          if (slash && !e.nativeEvent.isComposing) {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault()
+              const d = e.key === "ArrowDown" ? 1 : -1
+              setSlash({ query: slashState!.query, index: (slash.index + d + slash.items.length) % slash.items.length })
+              return
+            }
+            if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+              e.preventDefault()
+              pickCommand(slash.items[slash.index], e.key === "Enter")
+              return
+            }
+            if (e.key === "Escape") {
+              e.preventDefault()
+              e.stopPropagation()
+              setSlash(null)
+              setSlashDismissed(text)
+              return
+            }
+          }
           if (menu && !e.nativeEvent.isComposing) {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               e.preventDefault()
@@ -241,7 +361,13 @@ export function Composer(p: ComposerProps) {
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <DropdownMenu onOpenChange={(o) => o && p.onModelsOpen?.()}>
+        <DropdownMenu
+          open={modelOpen}
+          onOpenChange={(o) => {
+            setModelOpen(o)
+            if (o) p.onModelsOpen?.()
+          }}
+        >
           <DropdownMenuTrigger asChild disabled={!p.onModel}>
             <button className="rounded-md flex h-7 max-w-56 items-center gap-1 px-2 font-mono text-[11.5px] text-muted-foreground hover:bg-accent disabled:hover:bg-transparent">
               <span className="truncate">{p.models?.find((m) => m.id === p.model)?.name ?? (p.model || "default model")}</span>
@@ -267,7 +393,7 @@ export function Composer(p: ComposerProps) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={async () => {
-                const id = await promptText({ title: "Use a model", description: "Any model id the agent accepts.", value: p.model, placeholder: "model id", confirm: "Use" })
+                const id = await promptText({ title: "Use a model", description: "Any model id the agent accepts.", value: p.model, placeholder: "model id", mono: true, confirm: "Use" })
                 if (id) p.onModel?.(id)
               }}
             >

@@ -2,8 +2,11 @@
 // browser) a small in-memory stand-in answers instead, so the UI can be developed and looked at
 // without the shell.
 
-import type { ChatEvent, ChatMeta, Decision, ModelOption } from "./chat"
+import type { ChatEvent, ChatMeta, Decision, ModelOption, SlashCommand } from "./chat"
 import type { Account, AgentKind, AppInfo, HostCheck, Limits, Location, PermissionMode, Probe, Project, Settings } from "./types"
+
+/** An agent's models and slash commands, for a chat that hasn't started. */
+export type Catalog = { models: ModelOption[]; commands: SlashCommand[] }
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
@@ -33,10 +36,12 @@ export const ipc = {
   chatRunning: () => call<string[]>("chat_running"),
   chatCreate: (projectId: string, agent: AgentKind | null, acpAgent: string | null, model: string | null, cwd: string | null) =>
     call<ChatMeta>("chat_create", { projectId, agent, acpAgent, model, cwd }),
-  providerModels: (kind: AgentKind, projectId: string | null) => call<ModelOption[]>("provider_models", { kind, projectId }),
+  providerCatalog: (kind: AgentKind, projectId: string | null) => call<Catalog>("provider_catalog", { kind, projectId }),
   chatEvents: (chatId: string) => call<ChatEvent[]>("chat_events", { chatId }),
   chatSend: (chatId: string, prompt: { id: string; text: string; images: { mime: string; data: string }[] }, permission: PermissionMode | null) =>
     call<void>("chat_send", { chatId, prompt, permission }),
+  chatCompact: (chatId: string, instructions: string, permission: PermissionMode | null) => call<void>("chat_compact", { chatId, instructions, permission }),
+  chatClear: (chatId: string) => call<void>("chat_clear", { chatId }),
   chatInterrupt: (chatId: string) => call<void>("chat_interrupt", { chatId }),
   chatAnswer: (chatId: string, requestId: string, decision: Decision) => call<void>("chat_answer", { chatId, requestId, decision }),
   chatSetPermission: (chatId: string, mode: PermissionMode) => call<void>("chat_set_permission", { chatId, mode }),

@@ -134,11 +134,14 @@ impl CodexDriver {
         let cwd = thread["environments"][0]["cwd"].as_str().map(String::from).or(Some(opts.cwd.clone()));
         let current = result["model"].as_str().map(String::from).or(opts.model.clone());
         (d.sink)(ChatEvent::Started { session_id: Some(thread_id), model: current.clone(), cwd });
-        // The model picker: Codex's own list.
-        let (rpc, sink) = (d.rpc.clone(), d.sink.clone());
+        // The model picker and the skills for the / menu: Codex's own lists.
+        let (rpc, sink, folder) = (d.rpc.clone(), d.sink.clone(), opts.cwd.clone());
         thread::spawn(move || {
             if let Ok(list) = rpc.call("model/list", json!({"limit": 100, "includeHidden": false}), Duration::from_secs(30)) {
                 sink(ChatEvent::Models { models: parse_models(&list), current });
+            }
+            if let Ok(list) = rpc.call("skills/list", json!({"cwds": [folder]}), Duration::from_secs(30)) {
+                sink(ChatEvent::Commands { commands: parse_skills(&list) });
             }
         });
         Ok(d)
@@ -227,6 +230,20 @@ impl Driver for CodexDriver {
         // Applied with the next turn/start.
         self.permission = mode;
         Ok(())
+    }
+
+    fn compact(&mut self, instructions: &str) -> DriverResult<bool> {
+        if !instructions.trim().is_empty() {
+            return Err("Codex's /compact doesn't take instructions".into());
+        }
+        let thread_id = self.thread_id()?;
+        let (rpc, sink) = (self.rpc.clone(), self.sink.clone());
+        thread::spawn(move || {
+            if let Err(e) = rpc.call("thread/compact/start", json!({"threadId": thread_id}), Duration::from_secs(60)) {
+                sink(ChatEvent::Error { message: format!("Couldn't compact: {e}") });
+            }
+        });
+        Ok(true)
     }
 
     fn stop(&mut self) {
@@ -371,6 +388,9 @@ impl Translator {
         let id = s(&item["id"]);
         match item["type"].as_str().unwrap_or("") {
             "agentMessage" if done => self.emit(ChatEvent::Text { item_id: id, text: s(&item["text"]) }),
+            "contextCompaction" if done => {
+                self.emit(ChatEvent::Notice { level: NoticeLevel::Info, text: "Compacted the conversation so far.".into() })
+            }
             "reasoning" if done => {
                 let parts: Vec<String> = item["summary"]
                     .as_array()
@@ -502,6 +522,28 @@ impl Translator {
 }
 
 /// `model/list` → the picker's options (hidden models left out).
+/// `skills/list` → the / menu's skills: `{data: [{cwd, skills: [{name, description,
+/// shortDescription, interface: {shortDescription}, enabled}]}]}`, turned-off ones left out.
+pub fn parse_skills(v: &Value) -> Vec<SlashCommand> {
+    let mut seen = std::collections::HashSet::new();
+    v["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|e| e["skills"].as_array().into_iter().flatten())
+        .filter(|k| k["enabled"].as_bool() != Some(false))
+        .filter_map(|k| {
+            let name = k["name"].as_str()?.to_string();
+            let description = [&k["interface"]["shortDescription"], &k["shortDescription"], &k["description"]]
+                .into_iter()
+                .find_map(|d| d.as_str().filter(|d| !d.trim().is_empty()))
+                .unwrap_or("")
+                .to_string();
+            seen.insert(name.clone()).then_some(SlashCommand { name, description, hint: String::new(), skill: true })
+        })
+        .collect()
+}
+
 pub fn parse_models(v: &Value) -> Vec<ModelOption> {
     v["data"]
         .as_array()

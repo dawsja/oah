@@ -11,9 +11,12 @@ with git, worktrees and pull requests next to the chat. Rust and Tauri; no Elect
 
 - **Chat.** Streaming answers, folded tool runs, file diffs, approvals (allow, always allow,
   deny; queued when several arrive), questions the agent asks (options, multi-select, typed
-  answers), the agent's plan, context and token use per turn, image attachments, a model picker
-  with each agent's own models, `@` file mentions. Messages sent mid-turn are steered in (Codex)
-  or queued (Claude, ACP). Chats are saved and resume the agent's own session.
+  answers, one question at a time with number keys), plans to approve or send back, context and
+  token use per turn, image attachments, a model picker with each agent's own models, `@` file
+  mentions, and a `/` menu: oah's `/model`, `/plan`, `/compact` and `/clear`, then the agent's own
+  commands and skills. "Always allow" lasts for the chat's session; it never writes the agent's
+  settings files. Messages sent mid-turn are steered in (Codex) or queued (Claude, ACP). Chats
+  are saved and resume the agent's own session.
 - **Projects and worktrees.** Each project lists its worktrees and the chats in each one. A new
   worktree is a branch in its own folder, so several chats can work on one repo at once.
 - **Side panel.** Files (tree, filter, search in files, add to chat), Source Control (stage,

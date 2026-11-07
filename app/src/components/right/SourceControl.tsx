@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, CloudDownload, FileDiff, Minus, Plus, RefreshCw, Undo2 } from "lucide-react"
+import { confirmAction } from "@/components/Prompt"
 import { Tip } from "@/components/Tip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { git, KIND_COLOR, KIND_LETTER, type Change, type Scope, type Status } from "@/lib/git"
@@ -151,7 +152,11 @@ function Section({ scope, title, changes, kind }: { scope: Scope; title: string;
             </RowButton>
           ) : (
             <>
-              <RowButton label="Discard all" onClick={() => confirm(`Discard all ${changes.length} changes? This can't be undone.`) && run(scope, "Discarding…", () => git.discard(scope, tracked, untracked))}>
+              <RowButton label="Discard all" onClick={() =>
+                  void confirmAction({ title: `Discard all ${changes.length} changes?`, description: "This can't be undone.", confirm: "Discard", danger: true }).then(
+                    (ok) => void (ok && run(scope, "Discarding…", () => git.discard(scope, tracked, untracked))),
+                  )
+                }>
                 <Undo2 />
               </RowButton>
               <RowButton label="Stage all" onClick={() => run(scope, "Staging…", () => git.stage(scope, paths))}>
@@ -193,7 +198,11 @@ function ChangeRow({ scope, change, staged }: { scope: Scope; change: Change; st
           </RowButton>
         ) : (
           <>
-            <RowButton label="Discard" onClick={() => confirm(`Discard changes to ${change.path}?`) && run(scope, "Discarding…", () => git.discard(scope, untracked ? [] : [change.path], untracked ? [change.path] : []))}>
+            <RowButton label="Discard" onClick={() =>
+                void confirmAction({ title: `Discard changes to ${name}?`, description: untracked ? "The file will be deleted. This can't be undone." : "This can't be undone.", confirm: "Discard", danger: true }).then(
+                  (ok) => void (ok && run(scope, "Discarding…", () => git.discard(scope, untracked ? [] : [change.path], untracked ? [change.path] : []))),
+                )
+              }>
               <Undo2 />
             </RowButton>
             <RowButton label="Stage" onClick={() => run(scope, "Staging…", () => git.stage(scope, [change.path]))}>

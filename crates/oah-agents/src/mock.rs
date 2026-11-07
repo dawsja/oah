@@ -1,6 +1,7 @@
 //! A scripted agent for building and screenshotting the UI without a real CLI
 //! (`OAH_MOCK_AGENT=1`). Each prompt plays one turn: thinking, streamed markdown, a read, an
-//! edit that asks first, a command, a plan, and usage.
+//! edit that asks first, a command, a plan, and usage. A prompt with "plan" in it asks to start
+//! on a plan instead, and one with "ask" asks three questions.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
@@ -13,11 +14,15 @@ use serde_json::json;
 use crate::driver::{Driver, DriverResult, Prompt, Sink, StartOptions};
 use crate::event::*;
 
+/// Answers by question id.
+type Answers = std::collections::BTreeMap<String, Vec<String>>;
+
 pub struct MockDriver {
     sink: Sink,
     turn: u32,
     interrupted: Arc<AtomicBool>,
     answers: Arc<Mutex<Option<Sender<Decision>>>>,
+    replies: Arc<Mutex<Option<Sender<Answers>>>>,
 }
 
 impl MockDriver {
@@ -27,7 +32,26 @@ impl MockDriver {
             model: Some(opts.model.unwrap_or_else(|| "mock-model".into())),
             cwd: Some(opts.cwd),
         });
-        MockDriver { sink, turn: 0, interrupted: Arc::new(AtomicBool::new(false)), answers: Arc::new(Mutex::new(None)) }
+        let c = |name: &str, description: &str, hint: &str| SlashCommand {
+            name: name.into(),
+            description: description.into(),
+            hint: hint.into(),
+            skill: false,
+        };
+        sink(ChatEvent::Commands {
+            commands: vec![
+                c("init", "Write an AGENTS.md for this project", ""),
+                c("review", "Review the uncommitted changes", "[branch]"),
+                c("deploy", "Build and ship the current branch", "<environment>"),
+            ],
+        });
+        MockDriver {
+            sink,
+            turn: 0,
+            interrupted: Arc::new(AtomicBool::new(false)),
+            answers: Arc::new(Mutex::new(None)),
+            replies: Arc::new(Mutex::new(None)),
+        }
     }
 }
 
@@ -41,7 +65,16 @@ impl Driver for MockDriver {
         let (tx, rx) = channel();
         *self.answers.lock().unwrap() = Some(tx);
         sink(ChatEvent::UserMessage { id: prompt.id, text: prompt.text.clone(), images: vec![] });
-        thread::spawn(move || play(n, &prompt.text, sink, stop, rx));
+        let lower = prompt.text.to_lowercase();
+        if lower.contains("plan") {
+            thread::spawn(move || play_plan(n, sink, rx));
+        } else if lower.contains("ask") {
+            let (qtx, qrx) = channel();
+            *self.replies.lock().unwrap() = Some(qtx);
+            thread::spawn(move || play_questions(n, sink, qrx));
+        } else {
+            thread::spawn(move || play(n, &prompt.text, sink, stop, rx));
+        }
         Ok(())
     }
 
@@ -58,9 +91,103 @@ impl Driver for MockDriver {
         Ok(())
     }
 
+    fn answer_question(&mut self, request_id: &str, answers: std::collections::BTreeMap<String, Vec<String>>) -> DriverResult<()> {
+        (self.sink)(ChatEvent::QuestionResolved { request_id: request_id.into(), answers: answers.clone() });
+        if let Some(tx) = self.replies.lock().unwrap().as_ref() {
+            let _ = tx.send(answers);
+        }
+        Ok(())
+    }
+
     fn stop(&mut self) {
         self.interrupted.store(true, Ordering::SeqCst);
     }
+}
+
+const PLAN: &str = "## Save settings safely
+
+1. **Read before write.** `Settings::save` loads the file again and merges the in-memory changes on top.
+2. **Atomic write.** Write to `settings.json.tmp`, then rename over the real file.
+3. **Tests.** A round-trip test and one that edits the file between load and save.
+
+Files: `crates/oah-core/src/settings.rs`, `crates/oah-core/tests/settings.rs`.";
+
+fn play_plan(n: u32, sink: Sink, answers: Receiver<Decision>) {
+    let turn = format!("t{n}");
+    sink(ChatEvent::TurnStarted { turn_id: turn.clone() });
+    sink(ChatEvent::Text { item_id: format!("{turn}-a"), text: "I looked at how settings are saved. Here's what I'd do.".into() });
+    thread::sleep(Duration::from_millis(300));
+    sink(ChatEvent::Approval {
+        request: ApprovalRequest {
+            request_id: format!("{turn}-plan"),
+            item_id: None,
+            kind: ApprovalKind::Plan,
+            title: "Leave plan mode and start on this plan?".into(),
+            detail: Some(PLAN.into()),
+            diff: None,
+            can_remember: false,
+        },
+    });
+    let approved = answers.recv().map(|d| d != Decision::Deny).unwrap_or(false);
+    if approved {
+        sink(ChatEvent::PermissionChanged { mode: oah_core::settings::PermissionMode::Ask });
+    }
+    let text = if approved { "Starting on step 1." } else { "OK, I'll keep planning. What should change?" };
+    sink(ChatEvent::Text { item_id: format!("{turn}-b"), text: text.into() });
+    sink(ChatEvent::TurnFinished { turn_id: turn, usage: None, cost_usd: None, duration_ms: Some(2_100), interrupted: false });
+}
+
+fn play_questions(n: u32, sink: Sink, replies: Receiver<Answers>) {
+    let turn = format!("t{n}");
+    sink(ChatEvent::TurnStarted { turn_id: turn.clone() });
+    let o = |label: &str, description: &str| QuestionOption { label: label.into(), description: description.into() };
+    sink(ChatEvent::Question {
+        request: QuestionRequest {
+            request_id: format!("{turn}-q"),
+            questions: vec![
+                Question {
+                    id: "q0".into(),
+                    header: "Database".into(),
+                    question: "Which database should the cache use?".into(),
+                    options: vec![
+                        o("SQLite", "One file next to the app"),
+                        o("Postgres", "The team's shared server"),
+                        o("None", "Keep it in memory"),
+                    ],
+                    multi: false,
+                    other: true,
+                    secret: false,
+                },
+                Question {
+                    id: "q1".into(),
+                    header: "Tests".into(),
+                    question: "Which tests should I add?".into(),
+                    options: vec![
+                        o("Unit", "Fast, per function"),
+                        o("Integration", "Against a real database"),
+                        o("End to end", "Through the UI"),
+                    ],
+                    multi: true,
+                    other: false,
+                    secret: false,
+                },
+                Question {
+                    id: "q2".into(),
+                    header: "Name".into(),
+                    question: "What should the module be called?".into(),
+                    options: vec![],
+                    multi: false,
+                    other: true,
+                    secret: false,
+                },
+            ],
+        },
+    });
+    let got = replies.recv().unwrap_or_default();
+    let said: Vec<String> = got.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!("{k}: {}", v.join(", "))).collect();
+    let text = if said.is_empty() { "No answers; I'll wait.".to_string() } else { format!("Got it ({}).", said.join("; ")) };
+    sink(ChatEvent::Text { item_id: format!("{turn}-a"), text });
+    sink(ChatEvent::TurnFinished { turn_id: turn, usage: None, cost_usd: None, duration_ms: Some(900), interrupted: false });
 }
 
 const ANSWER: &str = "Here's what I found in **`src/settings.rs`**: the loader reads the file once at startup and \

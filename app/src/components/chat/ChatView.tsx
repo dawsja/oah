@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react"
 import { Check, ChevronDown, ChevronRight, Circle, FolderPlus, LoaderCircle, MoreHorizontal, Server, Trash2 } from "lucide-react"
 import { AgentGlyph, Mark } from "@/components/icons"
+import { promptText } from "@/components/Prompt"
 import { Tip } from "@/components/Tip"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { agentChoices, agentKey, agentName, providerFor, type AgentRef } from "@/lib/agents"
-import { emptyTranscript, formatTokens, type ChatMeta, type ModelOption, type PlanItem, type Transcript as T } from "@/lib/chat"
-import { ipc, pickFolder } from "@/lib/ipc"
+import { emptyTranscript, formatTokens, type ChatMeta, type ModelOption, type SlashCommand, type PlanItem, type Transcript as T } from "@/lib/chat"
+import { ipc, pickFolder, type Catalog } from "@/lib/ipc"
 import { locationLabel, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
@@ -46,18 +47,23 @@ function useAgentDefaults(project: Project, agent: AgentRef) {
   return { model: project.defaultModel || provider?.defaultModel || "", permission: provider?.permissionMode ?? "ask" }
 }
 
-/** Each agent's models, asked once per project (and kept for the session). */
-const modelCache = new Map<string, Promise<ModelOption[]>>()
-function useModels(agent: AgentRef, projectId: string, live: ModelOption[] = []) {
-  const [models, setModels] = useState<ModelOption[] | undefined>(live.length ? live : undefined)
+/** Each agent's models and slash commands, asked once per project (and kept for the session). */
+const catalogCache = new Map<string, Promise<Catalog>>()
+/** The commands a running chat of each agent last listed, so a new chat has them at once. */
+const seenCommands = new Map<string, SlashCommand[]>()
+function useCatalog(agent: AgentRef, projectId: string, live: { models: ModelOption[]; commands: SlashCommand[] } = { models: [], commands: [] }) {
   const key = `${agentKey(agent)}|${projectId}`
-  useEffect(() => setModels(live.length ? live : undefined), [key, live.length])
+  const [fetched, setFetched] = useState<Catalog | undefined>(undefined)
+  useEffect(() => setFetched(undefined), [key])
+  if (live.commands.length) seenCommands.set(key, live.commands)
   const load = () => {
-    if (live.length || agent.kind === "acp") return setModels(live)
-    if (!modelCache.has(key)) modelCache.set(key, ipc.providerModels(agent.kind, projectId).catch(() => []))
-    modelCache.get(key)!.then(setModels)
+    if (agent.kind === "acp") return setFetched({ models: [], commands: [] })
+    if (!catalogCache.has(key)) catalogCache.set(key, ipc.providerCatalog(agent.kind, projectId).catch(() => ({ models: [], commands: [] })))
+    catalogCache.get(key)!.then(setFetched)
   }
-  return { models, load }
+  const models = live.models.length ? live.models : fetched?.models
+  const commands = live.commands.length ? live.commands : (seenCommands.get(key) ?? fetched?.commands ?? [])
+  return { models, commands, load }
 }
 
 function NewChat({ project }: { project: Project }) {
@@ -68,7 +74,7 @@ function NewChat({ project }: { project: Project }) {
   const d = useAgentDefaults(project, agent)
   const [permission, setPermission] = useState(d.permission)
   const [model, setModel] = useState<string | null>(null)
-  const { models, load } = useModels(agent, project.id)
+  const { models, commands, load } = useCatalog(agent, project.id)
   const draftCwd = useApp((s) => s.draftCwd)
   const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
   const send = (text: string, images: { mime: string; data: string }[] = []) =>
@@ -102,6 +108,7 @@ function NewChat({ project }: { project: Project }) {
             models={models}
             onModel={setModel}
             onModelsOpen={load}
+            commands={commands}
             permission={permission}
             onPermission={setPermission}
             onSend={send}
@@ -123,7 +130,7 @@ function NewChat({ project }: { project: Project }) {
 function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatMeta; transcript: T }) {
   const agent: AgentRef = { kind: meta.agent, acpId: meta.acpAgent }
   const d = useAgentDefaults(project, agent)
-  const { models, load } = useModels(agent, project.id, transcript.models)
+  const { models, commands, load } = useCatalog(agent, project.id, transcript)
   const permission = useChats((s) => s.permission[meta.id]) ?? d.permission
   const chats = useChats.getState()
 
@@ -145,12 +152,15 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
           models={models}
           onModel={(id) => chats.setModel(meta.id, id)}
           onModelsOpen={load}
+          commands={commands}
+          onClear={() => chats.clear(meta.id)}
+          onCompact={(instructions) => chats.compact(meta.id, instructions, permission)}
           permission={permission}
           onPermission={(m) => chats.setPermission(meta.id, m)}
           running={transcript.running}
           onSend={(text, images) => chats.send(meta.id, text, { agent: meta.agent, acpId: meta.acpAgent, permission, images })}
           onStop={() => chats.interrupt(meta.id)}
-          placeholder={transcript.running ? "Queue a follow-up…" : "Reply, @ to add files"}
+          placeholder={transcript.running ? "Queue a follow-up…" : "Reply, @ to add files, / for commands"}
           lockAgent
           autoFocus
         />
@@ -190,8 +200,9 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
         <DropdownMenuContent align="end" className="w-48">
           <DropdownMenuItem
             onSelect={() => {
-              const t = window.prompt("Rename chat", meta.title)
-              if (t) useChats.getState().rename(meta.id, t)
+              void promptText({ title: "Rename chat", value: meta.title, confirm: "Rename" }).then((t) => {
+                if (t) void useChats.getState().rename(meta.id, t)
+              })
             }}
           >
             Rename

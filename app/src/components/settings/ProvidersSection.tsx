@@ -57,7 +57,7 @@ export function ProvidersSection() {
 function AcpAgents({ agents }: { agents: AcpAgent[] }) {
   const update = useApp((s) => s.update)
   const add = async (preset?: (typeof PRESETS)[number]) => {
-    const command = preset?.command ?? (await promptText({ title: "Add an ACP agent", description: "The command that starts it in ACP mode, with its arguments.", placeholder: "my-agent --acp", confirm: "Next" }))
+    const command = preset?.command ?? (await promptText({ title: "Add an ACP agent", description: "The command that starts it in ACP mode, with its arguments.", placeholder: "my-agent --acp", mono: true, confirm: "Next" }))
     if (!command) return
     const words = preset ? [preset.command, ...preset.args] : command.split(/\s+/)
     const name = preset?.name ?? (await promptText({ title: "Name it", value: words[0], confirm: "Add agent" }))
@@ -134,7 +134,8 @@ function ProviderCard({ target, provider }: { target: Target; provider: Provider
     <span className="text-faint">Checking…</span>
   ) : probe.found && probe.version ? (
     <>
-      <Dot tone="ok" /> v{probe.version}
+      <Dot tone={probe.outdated ? "warn" : "ok"} /> v{probe.version}
+      {probe.outdated ? <span className="text-warn">· too old</span> : null}
     </>
   ) : probe.found ? (
     <>
@@ -178,6 +179,7 @@ function ProviderCard({ target, provider }: { target: Target; provider: Provider
           </Button>
         ) : null}
       </div>
+      {probe?.outdated ? <div className="border-t border-warn/30 bg-warn/10 px-4 py-2.5 text-[12px] text-warn">{probe.outdated}</div> : null}
       {!probe?.found && probe && INSTALL[kind] ? <div className="bg-del/40 px-4 py-2.5 font-mono text-[12px] text-muted-foreground">Install: {INSTALL[kind]}</div> : null}
       {acp ? null : <SignIn kind={kind} installed={!!probe?.found} />}
       <Row label="Default model" description="Empty uses the CLI's own default.">

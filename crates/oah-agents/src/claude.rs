@@ -51,6 +51,10 @@ struct State {
     message_id: String,
     blocks: HashMap<u64, &'static str>,
     alive: bool,
+    /// Pending approvals that are ExitPlanMode (approving one leaves plan mode).
+    plans: HashSet<String>,
+    /// The mode to go back to when a plan is approved: the last one that wasn't plan.
+    after_plan: PermissionMode,
 }
 
 pub fn permission_mode_flag(mode: PermissionMode) -> &'static str {
@@ -95,7 +99,8 @@ impl ClaudeDriver {
         let stderr = child.stderr.take().ok_or("no stderr")?;
         let stdin = Arc::new(Mutex::new(child.stdin.take()));
         let child = Arc::new(Mutex::new(Some(child)));
-        let state = Arc::new(Mutex::new(State { alive: true, ..Default::default() }));
+        let after_plan = if opts.permission == PermissionMode::Plan { PermissionMode::Ask } else { opts.permission };
+        let state = Arc::new(Mutex::new(State { alive: true, after_plan, ..Default::default() }));
 
         let tail = Arc::new(Mutex::new(String::new()));
         {
@@ -185,16 +190,22 @@ impl Driver for ClaudeDriver {
     }
 
     fn answer(&mut self, request_id: &str, decision: Decision) -> DriverResult<()> {
-        let (input, suggestions) = self.state.lock().unwrap().pending.remove(request_id).ok_or("that question was already answered")?;
-        let response = match decision {
-            Decision::Allow => json!({"behavior": "allow", "updatedInput": input}),
-            Decision::AllowAlways => json!({"behavior": "allow", "updatedInput": input, "updatedPermissions": suggestions}),
-            Decision::Deny => {
-                json!({"behavior": "deny", "message": "The user declined this. Don't try it again; ask what they want instead."})
-            }
+        let (input, suggestions, plan, after_plan) = {
+            let mut s = self.state.lock().unwrap();
+            let (input, suggestions) = s.pending.remove(request_id).ok_or("that question was already answered")?;
+            (input, suggestions, s.plans.remove(request_id), s.after_plan)
         };
+        let response = approval_response(input, &suggestions, plan, decision);
         (self.sink)(ChatEvent::ApprovalResolved { request_id: request_id.into(), decision });
-        self.write(&json!({"type": "control_response", "response": {"subtype": "success", "request_id": request_id, "response": response}}))
+        self.write(
+            &json!({"type": "control_response", "response": {"subtype": "success", "request_id": request_id, "response": response}}),
+        )?;
+        if plan && decision != Decision::Deny {
+            // Claude stays in plan mode after ExitPlanMode is allowed; put back the earlier mode.
+            self.set_permission(after_plan)?;
+            (self.sink)(ChatEvent::PermissionChanged { mode: after_plan });
+        }
+        Ok(())
     }
 
     fn answer_question(&mut self, request_id: &str, answers: std::collections::BTreeMap<String, Vec<String>>) -> DriverResult<()> {
@@ -210,6 +221,9 @@ impl Driver for ClaudeDriver {
     }
 
     fn set_permission(&mut self, mode: PermissionMode) -> DriverResult<()> {
+        if mode != PermissionMode::Plan {
+            self.state.lock().unwrap().after_plan = mode;
+        }
         self.write(&json!({"type": "control_request", "request_id": format!("oah-mode-{}", self.turn), "request": {"subtype": "set_permission_mode", "mode": permission_mode_flag(mode)}}))
     }
 
@@ -256,10 +270,19 @@ impl Translator {
                 });
                 self.state.lock().unwrap().model = v["model"].as_str().map(String::from);
             }
+            "system" if v["subtype"] == "commands_changed" && v["commands"].is_array() => {
+                self.emit(ChatEvent::Commands { commands: parse_commands(v) });
+            }
             "stream_event" => self.stream_event(&v["event"]),
             "assistant" => self.assistant(v),
             "user" => self.tool_results(v),
             "control_request" => self.control_request(v),
+            "control_response" if v["response"]["request_id"] == "oah-init" => {
+                let commands = parse_commands(&v["response"]["response"]);
+                if !commands.is_empty() {
+                    self.emit(ChatEvent::Commands { commands });
+                }
+            }
             "control_response" if v["response"]["request_id"] == "oah-models" => {
                 let models = parse_models(&v["response"]["response"]);
                 if !models.is_empty() {
@@ -407,12 +430,16 @@ impl Translator {
         }
         if name == "ExitPlanMode" {
             let plan = input["plan"].as_str().map(String::from);
-            self.state.lock().unwrap().pending.insert(request_id.clone(), (input, req["permission_suggestions"].clone()));
+            {
+                let mut st = self.state.lock().unwrap();
+                st.pending.insert(request_id.clone(), (input, req["permission_suggestions"].clone()));
+                st.plans.insert(request_id.clone());
+            }
             self.emit(ChatEvent::Approval {
                 request: ApprovalRequest {
                     request_id,
                     item_id: req["tool_use_id"].as_str().map(String::from),
-                    kind: ApprovalKind::Other,
+                    kind: ApprovalKind::Plan,
                     title: "Leave plan mode and start on this plan?".into(),
                     detail: plan,
                     diff: None,
@@ -533,8 +560,60 @@ pub fn parse_models(r: &Value) -> Vec<ModelOption> {
         .collect()
 }
 
-/// Claude Code's models, from a short-lived `claude -p` (for a chat that hasn't started).
-pub fn list_models(binary: &str, location: &oah_core::settings::Location, cwd: &str) -> DriverResult<Vec<ModelOption>> {
+/// The `can_use_tool` answer. "Always" keeps Claude's suggested rules for this session only (they
+/// would otherwise land in the project's or the user's settings for good); a plan is approved or
+/// sent back for more planning.
+pub fn approval_response(input: Value, suggestions: &Value, plan: bool, decision: Decision) -> Value {
+    match decision {
+        Decision::Deny if plan => {
+            json!({"behavior": "deny", "message": "The user asked you to keep planning. Revise the plan and call ExitPlanMode again."})
+        }
+        Decision::Deny => json!({"behavior": "deny", "message": "The user declined this. Don't try it again; ask what they want instead."}),
+        Decision::AllowAlways if !plan && suggestions.as_array().is_some_and(|a| !a.is_empty()) => {
+            let session: Vec<Value> = suggestions
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|s| {
+                    let mut s = s.clone();
+                    s["destination"] = json!("session");
+                    s
+                })
+                .collect();
+            json!({"behavior": "allow", "updatedInput": input, "updatedPermissions": session})
+        }
+        _ => json!({"behavior": "allow", "updatedInput": input}),
+    }
+}
+
+/// Commands that only work in Claude Code's terminal UI (its `terminal_slash_commands`, and a
+/// few more that act on that UI).
+const TERMINAL_ONLY: &[&str] = &["doctor", "color", "focus", "reload-plugins", "heapdump"];
+
+/// `initialize`'s answer: `{commands: [{name, description, argumentHint, aliases, builtin}]}`.
+/// Internal (`__`), removed and renamed commands are left out, and so are terminal-only ones.
+pub fn parse_commands(r: &Value) -> Vec<SlashCommand> {
+    let mut out = Vec::new();
+    for c in r["commands"].as_array().into_iter().flatten() {
+        let Some(name) = c["name"].as_str().map(|n| n.trim_start_matches('/')) else { continue };
+        let description = c["description"].as_str().unwrap_or("");
+        let gone = description.starts_with("(removed)") || description.starts_with("Renamed to");
+        if name.is_empty() || name.starts_with("__") || gone || TERMINAL_ONLY.contains(&name) {
+            continue;
+        }
+        let hint = c["argumentHint"].as_str().unwrap_or("").to_string();
+        out.push(SlashCommand { name: name.into(), description: description.into(), hint: hint.clone(), skill: false });
+        // `/review` is `/code-review`'s alias: offered under both names.
+        for alias in c["aliases"].as_array().into_iter().flatten().filter_map(|a| a.as_str()) {
+            out.push(SlashCommand { name: alias.into(), description: format!("Same as /{name}"), hint: hint.clone(), skill: false });
+        }
+    }
+    out
+}
+
+/// Claude Code's models and slash commands, from a short-lived `claude -p` (for a chat that
+/// hasn't started).
+pub fn catalog(binary: &str, location: &oah_core::settings::Location, cwd: &str) -> DriverResult<(Vec<ModelOption>, Vec<SlashCommand>)> {
     let program = if binary.trim().is_empty() { AgentKind::Claude.default_binary().to_string() } else { binary.to_string() };
     let args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"].map(String::from).to_vec();
     let mut child =
@@ -543,10 +622,17 @@ pub fn list_models(binary: &str, location: &oah_core::settings::Location, cwd: &
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
+        let mut commands = Vec::new();
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                if v["type"] == "control_response" && v["response"]["request_id"] == "m" {
-                    let _ = tx.send(parse_models(&v["response"]["response"]));
+                if v["type"] != "control_response" {
+                    continue;
+                }
+                let r = &v["response"]["response"];
+                if v["response"]["request_id"] == "i" {
+                    commands = parse_commands(r);
+                } else if v["response"]["request_id"] == "m" {
+                    let _ = tx.send((parse_models(r), commands));
                     return;
                 }
             }
@@ -685,6 +771,37 @@ mod tests {
         }
         let v = out.lock().unwrap().clone();
         v
+    }
+
+    #[test]
+    fn always_allow_stays_in_this_session() {
+        let input = json!({"command": "ls"});
+        let sugg = json!([{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "ls"}], "behavior": "allow", "destination": "localSettings"}]);
+        let r = approval_response(input.clone(), &sugg, false, Decision::AllowAlways);
+        assert_eq!(r["updatedPermissions"][0]["destination"], "session");
+        assert_eq!(r["updatedPermissions"][0]["rules"][0]["ruleContent"], "ls");
+        assert!(approval_response(input.clone(), &sugg, false, Decision::Allow).get("updatedPermissions").is_none());
+        // A plan never saves rules; turning it down asks for more planning.
+        assert!(approval_response(input.clone(), &sugg, true, Decision::AllowAlways).get("updatedPermissions").is_none());
+        assert!(approval_response(input, &sugg, true, Decision::Deny)["message"].as_str().unwrap().contains("keep planning"));
+    }
+
+    #[test]
+    fn reads_commands_from_initialize() {
+        let r = json!({"commands": [
+            {"name": "compact", "description": "Free up context", "argumentHint": "<instructions>", "builtin": true},
+            {"name": "color", "description": "Set the prompt bar color", "argumentHint": "", "builtin": true},
+            {"name": "__remote-workflow", "description": "internal", "argumentHint": ""},
+            {"name": "agents", "description": "(removed) Ask Claude", "argumentHint": ""},
+            {"name": "deploy", "description": "Ship it", "argumentHint": ""},
+            {"name": "code-review", "description": "Review the diff", "argumentHint": "[pr]", "aliases": ["review"]}
+        ]});
+        let c = parse_commands(&r);
+        assert_eq!(c.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["compact", "deploy", "code-review", "review"]);
+        assert_eq!(c[3].hint, "[pr]");
+        assert_eq!(c[0].hint, "<instructions>");
+        let ev = run(&[json!({"type": "control_response", "response": {"subtype": "success", "request_id": "oah-init", "response": r}})]);
+        assert!(matches!(&ev[..], [ChatEvent::Commands { commands }] if commands.len() == 4));
     }
 
     #[test]

@@ -67,6 +67,11 @@ pub trait Driver: Send {
     fn set_model(&mut self, _model: &str) -> DriverResult<()> {
         Ok(())
     }
+    /// `/compact`: summarizes the conversation so far, when the agent has a way to (Codex's
+    /// `thread/compact/start`). `false`: it takes `/compact` as a message instead.
+    fn compact(&mut self, _instructions: &str) -> DriverResult<bool> {
+        Ok(false)
+    }
     /// Ends the CLI process.
     fn stop(&mut self);
 }

@@ -72,6 +72,14 @@ pub enum ChatEvent {
         models: Vec<ModelOption>,
         current: Option<String>,
     },
+    /// The agent switched permission mode itself (out of plan mode once a plan is approved).
+    PermissionChanged {
+        mode: oah_core::settings::PermissionMode,
+    },
+    /// The slash commands this agent offers (replaced whole).
+    Commands {
+        commands: Vec<SlashCommand>,
+    },
     /// The agent's plan / todo list, replaced whole.
     Plan {
         items: Vec<PlanItem>,
@@ -177,6 +185,8 @@ impl FileDiff {
 pub enum ApprovalKind {
     Command,
     Edit,
+    /// Leave plan mode and start on the plan in `detail` (Markdown).
+    Plan,
     Other,
 }
 
@@ -223,6 +233,19 @@ pub struct Question {
 pub struct QuestionOption {
     pub label: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommand {
+    /// Without the slash: `compact`, `review`.
+    pub name: String,
+    pub description: String,
+    /// What goes after the name, e.g. `<instructions>`.
+    pub hint: String,
+    /// A Codex skill: mentioned as `$name` in a message, not run as `/name`.
+    #[serde(default)]
+    pub skill: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
