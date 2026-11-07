@@ -42,7 +42,11 @@ pub struct Limits {
 }
 
 fn program(kind: AgentKind, binary: &str) -> String {
-    if binary.trim().is_empty() { kind.default_binary().into() } else { binary.trim().into() }
+    if binary.trim().is_empty() {
+        kind.default_binary().into()
+    } else {
+        binary.trim().into()
+    }
 }
 
 /// Sign-in state from the CLI itself.
@@ -58,7 +62,10 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
         Err(e) => return Account { error: Some(e), ..Default::default() },
     };
     match kind {
-        AgentKind::Claude => parse_claude_status(&out.stdout).unwrap_or_else(|| Account { error: Some(first_line(&out.stderr).unwrap_or("couldn't read `claude auth status`").into()), ..Default::default() }),
+        AgentKind::Claude => parse_claude_status(&out.stdout).unwrap_or_else(|| Account {
+            error: Some(first_line(&out.stderr).unwrap_or("couldn't read `claude auth status`").into()),
+            ..Default::default()
+        }),
         AgentKind::Codex => parse_codex_status(&format!("{}\n{}", out.stdout, out.stderr)),
     }
 }
@@ -84,7 +91,12 @@ pub fn parse_codex_status(text: &str) -> Account {
         let how = line.split(" using ").nth(1).map(|s| s.trim().to_string());
         Account { signed_in: true, label: how, plan: None, error: None }
     } else {
-        Account { signed_in: false, label: None, plan: None, error: (!line.is_empty() && !lower.contains("not logged in")).then(|| line.to_string()) }
+        Account {
+            signed_in: false,
+            label: None,
+            plan: None,
+            error: (!line.is_empty() && !lower.contains("not logged in")).then(|| line.to_string()),
+        }
     }
 }
 
@@ -111,7 +123,9 @@ pub fn claude_limits() -> Limits {
             Ok(v) => Limits { windows: parse_claude_usage(&v), error: None },
             Err(e) => Limits { windows: vec![], error: Some(format!("unexpected answer: {e}")) },
         },
-        Err(ureq::Error::StatusCode(401)) => Limits { windows: vec![], error: Some("Claude's sign-in expired. Run Claude Code once to refresh it.".into()) },
+        Err(ureq::Error::StatusCode(401)) => {
+            Limits { windows: vec![], error: Some("Claude's sign-in expired. Run Claude Code once to refresh it.".into()) }
+        }
         Err(e) => Limits { windows: vec![], error: Some(format!("couldn't load Claude limits: {e}")) },
     }
 }
@@ -126,7 +140,9 @@ pub fn parse_claude_usage(v: &Value) -> Vec<LimitWindow> {
     };
     push("Current session (5 hours)", &v["five_hour"]);
     push("This week, all models", &v["seven_day"]);
-    for (k, label) in [("seven_day_opus", "This week, Opus"), ("seven_day_sonnet", "This week, Sonnet"), ("seven_day_fable", "This week, Fable")] {
+    for (k, label) in
+        [("seven_day_opus", "This week, Opus"), ("seven_day_sonnet", "This week, Sonnet"), ("seven_day_fable", "This week, Fable")]
+    {
         push(label, &v[k]);
     }
     for l in v["limits"].as_array().into_iter().flatten() {
@@ -168,7 +184,8 @@ fn iso_ms(s: &str) -> Option<u64> {
     let ss = t.next().and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
     let sign = if offset.starts_with('-') { -1 } else { 1 };
     let mut o = offset[1..].split(':');
-    let off = sign * (o.next().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0) * 60 + o.next().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0));
+    let off =
+        sign * (o.next().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0) * 60 + o.next().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0));
     // Days from the civil date (Howard Hinnant's algorithm).
     let y2 = if m <= 2 { y - 1 } else { y };
     let era = y2.div_euclid(400);
@@ -192,7 +209,9 @@ pub fn codex_limits(binary: &str) -> Limits {
 fn codex_rate_limits(prog: &str) -> Result<Value, String> {
     let loc = Location::Local;
     let home = oah_core::paths::home_dir().to_string_lossy().into_owned();
-    let mut child = oah_transport::command(&Spec { location: &loc, cwd: &home, program: prog, args: vec!["app-server".into()], env: &[] })?.spawn().map_err(|e| e.to_string())?;
+    let mut child = oah_transport::command(&Spec { location: &loc, cwd: &home, program: prog, args: vec!["app-server".into()], env: &[] })?
+        .spawn()
+        .map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let (tx, rx) = std::sync::mpsc::channel();
@@ -206,7 +225,9 @@ fn codex_rate_limits(prog: &str) -> Result<Value, String> {
         }
     });
     let mut send = |v: Value| writeln!(stdin, "{v}").map_err(|e| e.to_string());
-    send(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"clientInfo": {"name": "oah", "title": "oah", "version": env!("CARGO_PKG_VERSION")}, "capabilities": null}}))?;
+    send(
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"clientInfo": {"name": "oah", "title": "oah", "version": env!("CARGO_PKG_VERSION")}, "capabilities": null}}),
+    )?;
     let result = (|| {
         rx.recv_timeout(Duration::from_secs(20)).map_err(|_| "Codex didn't start".to_string())?;
         send(json!({"jsonrpc": "2.0", "method": "initialized"}))?;
@@ -256,7 +277,11 @@ pub fn open_login(kind: AgentKind, binary: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        std::process::Command::new("cmd").raw_arg(format!("/c start \"Sign in\" cmd /k {line}")).spawn().map(|_| ()).map_err(|e| e.to_string())
+        std::process::Command::new("cmd")
+            .raw_arg(format!("/c start \"Sign in\" cmd /k {line}"))
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     #[cfg(not(windows))]
     {
@@ -292,11 +317,15 @@ mod tests {
 
     #[test]
     fn reads_limits() {
-        let w = parse_claude_usage(&json!({"five_hour":{"utilization":12.0,"resets_at":"2026-11-07T05:00:00+00:00"},"seven_day":{"utilization":47.0,"resets_at":1794301200}}));
+        let w = parse_claude_usage(
+            &json!({"five_hour":{"utilization":12.0,"resets_at":"2026-11-07T05:00:00+00:00"},"seven_day":{"utilization":47.0,"resets_at":1794301200}}),
+        );
         assert_eq!(w.len(), 2);
         assert_eq!(w[0].resets_at, Some(1_794_027_600_000));
         assert_eq!(w[1].resets_at, Some(1_794_301_200_000));
-        let c = parse_codex_limits(&json!({"rateLimits":{"primary":{"usedPercent":45,"windowDurationMins":10080,"resetsAt":1794410242},"secondary":null}}));
+        let c = parse_codex_limits(
+            &json!({"rateLimits":{"primary":{"usedPercent":45,"windowDurationMins":10080,"resetsAt":1794410242},"secondary":null}}),
+        );
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].label, "Weekly window");
     }

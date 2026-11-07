@@ -34,7 +34,14 @@ pub fn parse_worktrees(out: &str) -> Vec<Worktree> {
                 if let Some(w) = cur.take() {
                     list.push(w);
                 }
-                cur = Some(Worktree { path: v.into(), branch: None, head: String::new(), main: list.is_empty(), locked: false, prunable: false });
+                cur = Some(Worktree {
+                    path: v.into(),
+                    branch: None,
+                    head: String::new(),
+                    main: list.is_empty(),
+                    locked: false,
+                    prunable: false,
+                });
             }
             "HEAD" => cur.iter_mut().for_each(|w| w.head = v.chars().take(12).collect()),
             "branch" => cur.iter_mut().for_each(|w| w.branch = Some(v.trim_start_matches("refs/heads/").into())),

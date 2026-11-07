@@ -195,15 +195,13 @@ pub struct SshHost {
 /// Where a project's folder is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Location {
+    #[default]
     Local,
-    Ssh { host: String },
-}
-
-impl Default for Location {
-    fn default() -> Self {
-        Location::Local
-    }
+    Ssh {
+        host: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -223,6 +221,7 @@ pub struct Project {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+#[derive(Default)]
 pub struct ProjectGit {
     /// New worktrees branch from this; empty is the remote's default branch.
     pub base_branch: String,
@@ -230,12 +229,6 @@ pub struct ProjectGit {
     pub worktree_dir: String,
     /// Removing a worktree also deletes its branch.
     pub delete_branch_on_remove: bool,
-}
-
-impl Default for ProjectGit {
-    fn default() -> Self {
-        ProjectGit { base_branch: String::new(), worktree_dir: String::new(), delete_branch_on_remove: false }
-    }
 }
 
 impl Project {

@@ -36,7 +36,14 @@ impl Chats {
     }
 
     /// Sends `prompt`, starting the chat's agent first if it isn't running.
-    pub fn send(&self, app: &AppHandle, settings: &Settings, chat_id: &str, prompt: Prompt, permission: Option<PermissionMode>) -> Result<(), String> {
+    pub fn send(
+        &self,
+        app: &AppHandle,
+        settings: &Settings,
+        chat_id: &str,
+        prompt: Prompt,
+        permission: Option<PermissionMode>,
+    ) -> Result<(), String> {
         let mut live = self.live.lock().unwrap();
         if !live.contains_key(chat_id) {
             let driver = self.start(app, settings, chat_id, permission)?;
@@ -65,14 +72,23 @@ impl Chats {
         }
     }
 
-    fn start(&self, app: &AppHandle, settings: &Settings, chat_id: &str, permission: Option<PermissionMode>) -> Result<Box<dyn Driver>, String> {
+    fn start(
+        &self,
+        app: &AppHandle,
+        settings: &Settings,
+        chat_id: &str,
+        permission: Option<PermissionMode>,
+    ) -> Result<Box<dyn Driver>, String> {
         let meta = self.store.get(chat_id).map_err(|e| e.to_string())?;
         let project = settings.projects.iter().find(|p| p.id == meta.project_id).ok_or("this chat's project was removed")?;
         let provider = settings.providers.get(meta.agent);
         if !provider.enabled {
             return Err(format!("{:?} is turned off in Settings → Providers", meta.agent));
         }
-        let model = Some(meta.model.clone()).filter(|m| !m.is_empty()).or_else(|| Some(project.default_model.clone()).filter(|m| !m.is_empty())).or_else(|| Some(provider.default_model.clone()).filter(|m| !m.is_empty()));
+        let model = Some(meta.model.clone())
+            .filter(|m| !m.is_empty())
+            .or_else(|| Some(project.default_model.clone()).filter(|m| !m.is_empty()))
+            .or_else(|| Some(provider.default_model.clone()).filter(|m| !m.is_empty()));
         let opts = StartOptions {
             kind: meta.agent,
             cwd: if meta.cwd.is_empty() { project.path.clone() } else { meta.cwd.clone() },

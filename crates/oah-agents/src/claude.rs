@@ -115,7 +115,7 @@ impl ClaudeDriver {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 // 127: the shell couldn't find the program (on an SSH host, usually not installed).
                 let message = if code == Some(127) {
-                    Some(format!("Claude Code isn't installed there, or isn't on that machine's PATH."))
+                    Some("Claude Code isn't installed there, or isn't on that machine's PATH.".to_string())
                 } else {
                     Some(tail.lock().unwrap().clone()).filter(|m| !m.is_empty())
                 };
@@ -151,7 +151,11 @@ impl Driver for ClaudeDriver {
         for img in &prompt.images {
             content.push(json!({"type": "image", "source": {"type": "base64", "media_type": img.mime, "data": img.data}}));
         }
-        (self.sink)(ChatEvent::UserMessage { id: prompt.id.clone(), text: prompt.text.clone(), images: prompt.images.iter().map(|i| i.mime.clone()).collect() });
+        (self.sink)(ChatEvent::UserMessage {
+            id: prompt.id.clone(),
+            text: prompt.text.clone(),
+            images: prompt.images.iter().map(|i| i.mime.clone()).collect(),
+        });
         let started = {
             let mut s = self.state.lock().unwrap();
             if s.turn_id.is_none() {
@@ -176,7 +180,9 @@ impl Driver for ClaudeDriver {
         let response = match decision {
             Decision::Allow => json!({"behavior": "allow", "updatedInput": input}),
             Decision::AllowAlways => json!({"behavior": "allow", "updatedInput": input, "updatedPermissions": suggestions}),
-            Decision::Deny => json!({"behavior": "deny", "message": "The user declined this. Don't try it again; ask what they want instead."}),
+            Decision::Deny => {
+                json!({"behavior": "deny", "message": "The user declined this. Don't try it again; ask what they want instead."})
+            }
         };
         (self.sink)(ChatEvent::ApprovalResolved { request_id: request_id.into(), decision });
         self.write(&json!({"type": "control_response", "response": {"subtype": "success", "request_id": request_id, "response": response}}))
@@ -234,7 +240,10 @@ impl Translator {
             "rate_limit_event" => {
                 let info = &v["rate_limit_info"];
                 if info["status"].as_str().is_some_and(|s| s != "allowed" && s != "allowed_warning") {
-                    self.emit(ChatEvent::Notice { level: NoticeLevel::Warn, text: "You've hit a Claude usage limit; requests will fail until it resets.".into() });
+                    self.emit(ChatEvent::Notice {
+                        level: NoticeLevel::Warn,
+                        text: "You've hit a Claude usage limit; requests will fail until it resets.".into(),
+                    });
                 }
             }
             _ => {}
@@ -340,7 +349,12 @@ impl Translator {
         let call = tool_call(name, &input);
         let (kind, title, detail, diff) = match call.kind {
             ToolKind::Bash => (ApprovalKind::Command, "Run a command".to_string(), input["command"].as_str().map(String::from), None),
-            ToolKind::Edit | ToolKind::Write => (ApprovalKind::Edit, format!("{} {}", if call.kind == ToolKind::Write { "Write" } else { "Edit" }, call.title), None, proposed_diff(name, &input)),
+            ToolKind::Edit | ToolKind::Write => (
+                ApprovalKind::Edit,
+                format!("{} {}", if call.kind == ToolKind::Write { "Write" } else { "Edit" }, call.title),
+                None,
+                proposed_diff(name, &input),
+            ),
             _ => (ApprovalKind::Other, format!("Use {name}"), Some(call.title.clone()).filter(|t| !t.is_empty()), None),
         };
         let detail = detail.or_else(|| req["decision_reason"].as_str().map(String::from));
@@ -348,7 +362,15 @@ impl Translator {
         let can_remember = suggestions.as_array().is_some_and(|a| !a.is_empty());
         self.state.lock().unwrap().pending.insert(request_id.clone(), (input, suggestions));
         self.emit(ChatEvent::Approval {
-            request: ApprovalRequest { request_id, item_id: req["tool_use_id"].as_str().map(String::from), kind, title, detail, diff, can_remember },
+            request: ApprovalRequest {
+                request_id,
+                item_id: req["tool_use_id"].as_str().map(String::from),
+                kind,
+                title,
+                detail,
+                diff,
+                can_remember,
+            },
         });
     }
 
@@ -369,12 +391,17 @@ impl Translator {
             cache_write_tokens: u["cache_creation_input_tokens"].as_u64().unwrap_or(0),
         };
         if v["is_error"].as_bool() == Some(true) {
-            let msg = v["result"].as_str().filter(|r| !r.is_empty()).map(String::from).unwrap_or_else(|| format!("Claude Code stopped: {}", v["subtype"].as_str().unwrap_or("error")));
+            let msg = v["result"]
+                .as_str()
+                .filter(|r| !r.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| format!("Claude Code stopped: {}", v["subtype"].as_str().unwrap_or("error")));
             if v["subtype"] != "error_during_execution" {
                 self.emit(ChatEvent::Error { message: msg });
             }
         }
-        let interrupted = v["subtype"] == "error_during_execution" || v["terminal_reason"].as_str().is_some_and(|r| r.contains("interrupt"));
+        let interrupted =
+            v["subtype"] == "error_during_execution" || v["terminal_reason"].as_str().is_some_and(|r| r.contains("interrupt"));
         self.emit(ChatEvent::TurnFinished {
             turn_id: turn_id.unwrap_or_else(|| "turn".into()),
             usage: Some(usage),
@@ -384,7 +411,10 @@ impl Translator {
         });
         // Context fill: the last request's prompt size against the model's window.
         if let Some(last) = u["iterations"].as_array().and_then(|a| a.last()) {
-            let used = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"].iter().map(|k| last[*k].as_u64().unwrap_or(0)).sum::<u64>();
+            let used = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]
+                .iter()
+                .map(|k| last[*k].as_u64().unwrap_or(0))
+                .sum::<u64>();
             let window = v["modelUsage"].as_object().and_then(|m| m.values().find_map(|x| x["contextWindow"].as_u64())).unwrap_or(200_000);
             if used > 0 {
                 self.emit(ChatEvent::Context { used_tokens: used, window_tokens: window });
@@ -515,7 +545,9 @@ mod tests {
         assert!(matches!(&ev[0], ChatEvent::Started { session_id: Some(s), .. } if s == "s1"));
         assert!(matches!(&ev[1], ChatEvent::TextDelta { item_id, text } if item_id == "m1:0" && text == "Hi"));
         assert!(!ev.iter().any(|e| matches!(e, ChatEvent::Text { .. })), "streamed text isn't sent twice");
-        assert!(matches!(&ev[2], ChatEvent::ToolStarted { item_id, tool } if item_id == "tu1" && tool.kind == ToolKind::Edit && tool.title == "a.txt"));
+        assert!(
+            matches!(&ev[2], ChatEvent::ToolStarted { item_id, tool } if item_id == "tu1" && tool.kind == ToolKind::Edit && tool.title == "a.txt")
+        );
         match &ev[3] {
             ChatEvent::Approval { request } => {
                 assert_eq!(request.kind, ApprovalKind::Edit);
@@ -541,7 +573,9 @@ mod tests {
         assert_eq!(tool_call("Bash", &json!({"command":"ls -la"})).title, "ls -la");
         assert_eq!(tool_call("Grep", &json!({"pattern":"fn main"})).kind, ToolKind::Search);
         assert_eq!(tool_call("mcp__x__y", &json!({})).title, "mcp__x__y");
-        let ev = run(&[json!({"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"t","name":"TodoWrite","input":{"todos":[{"content":"a","status":"completed"},{"content":"b","status":"in_progress"}]}}]}})]);
+        let ev = run(&[
+            json!({"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"t","name":"TodoWrite","input":{"todos":[{"content":"a","status":"completed"},{"content":"b","status":"in_progress"}]}}]}}),
+        ]);
         assert!(matches!(&ev[0], ChatEvent::Plan { items } if items.len() == 2 && items[1].status == PlanStatus::InProgress));
     }
 }

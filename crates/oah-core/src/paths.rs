@@ -56,8 +56,7 @@ pub(crate) mod tests {
     #[test]
     fn resolves_the_data_folder() {
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
-        let saved: Vec<_> =
-            ["OAH_HOME", "XDG_CONFIG_HOME", "HOME"].iter().map(|k| (*k, std::env::var_os(k))).collect();
+        let saved: Vec<_> = ["OAH_HOME", "XDG_CONFIG_HOME", "HOME"].iter().map(|k| (*k, std::env::var_os(k))).collect();
 
         std::env::set_var("HOME", "/home/u");
         std::env::remove_var("OAH_HOME");

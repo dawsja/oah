@@ -25,11 +25,17 @@ const SHA256: &str = "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2
 #[serde(tag = "state", rename_all = "lowercase")]
 pub enum VoiceState {
     Off,
-    Downloading { percent: u64 },
+    Downloading {
+        percent: u64,
+    },
     Ready,
-    Error { error: String },
+    Error {
+        error: String,
+    },
     /// This processor can't run the engine.
-    Unsupported { error: String },
+    Unsupported {
+        error: String,
+    },
 }
 
 /// Why this computer can't run speech to text, if it can't: the engine is built for an x86
@@ -48,7 +54,10 @@ pub fn unsupported() -> Option<String> {
         .map(|(name, _)| name)
         .collect();
         if !missing.is_empty() {
-            return Some(format!("This computer's processor can't run speech to text: it doesn't have {} (processors from about 2013 on do).", missing.join(", ")));
+            return Some(format!(
+                "This computer's processor can't run speech to text: it doesn't have {} (processors from about 2013 on do).",
+                missing.join(", ")
+            ));
         }
     }
     None
@@ -140,10 +149,10 @@ pub fn remove() -> Result<(), String> {
 
 /// Samples from the composer: little-endian f32 bytes.
 pub fn samples(bytes: &[u8]) -> Result<Vec<f32>, String> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err("the recording isn't f32 samples".into());
     }
-    Ok(bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+    Ok(bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
 }
 
 #[cfg(test)]

@@ -40,13 +40,21 @@ pub struct PullRequest {
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum PrState {
     /// `gh` isn't installed or isn't signed in.
-    Unavailable { reason: String },
+    Unavailable {
+        reason: String,
+    },
     /// No pull request for this branch yet.
-    None { branch: String, base: String },
-    Open { pr: PullRequest },
+    None {
+        branch: String,
+        base: String,
+    },
+    Open {
+        pr: PullRequest,
+    },
 }
 
-const FIELDS: &str = "number,title,state,isDraft,url,baseRefName,headRefName,additions,deletions,reviewDecision,mergeStateStatus,statusCheckRollup";
+const FIELDS: &str =
+    "number,title,state,isDraft,url,baseRefName,headRefName,additions,deletions,reviewDecision,mergeStateStatus,statusCheckRollup";
 
 fn gh(repo: &Repo, args: &[&str], limit: Duration) -> Result<crate::Output, String> {
     repo.exec("gh", args, None, limit)
@@ -56,7 +64,9 @@ fn gh(repo: &Repo, args: &[&str], limit: Duration) -> Result<crate::Output, Stri
 pub fn pr_state(repo: &Repo) -> PrState {
     let out = match gh(repo, &["pr", "view", "--json", FIELDS], Duration::from_secs(30)) {
         Ok(o) => o,
-        Err(e) if e.contains("isn't installed") => return PrState::Unavailable { reason: "Install the GitHub CLI (gh) to work with pull requests.".into() },
+        Err(e) if e.contains("isn't installed") => {
+            return PrState::Unavailable { reason: "Install the GitHub CLI (gh) to work with pull requests.".into() }
+        }
         Err(e) => return PrState::Unavailable { reason: e },
     };
     if out.ok() {

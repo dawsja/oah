@@ -66,7 +66,10 @@ pub fn parse_check(out: &str) -> HostCheck {
     let mut c = HostCheck { ok: true, ..Default::default() };
     for line in out.lines() {
         let f: Vec<&str> = line.split('\t').collect();
-        let tool = || Tool { path: f.get(1).filter(|p| !p.is_empty()).map(|p| p.to_string()), version: f.get(2).filter(|v| !v.is_empty()).map(|v| v.to_string()) };
+        let tool = || Tool {
+            path: f.get(1).filter(|p| !p.is_empty()).map(|p| p.to_string()),
+            version: f.get(2).filter(|v| !v.is_empty()).map(|v| v.to_string()),
+        };
         match f[0] {
             "home" => c.home = f.get(1).map(|s| s.to_string()),
             "os" => c.os = f.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string()),
@@ -82,7 +85,7 @@ pub fn parse_check(out: &str) -> HostCheck {
 
 /// ssh's own complaint, made short: the last line that says something.
 pub fn ssh_error(stderr: &str) -> String {
-    let line = stderr.lines().map(str::trim).filter(|l| !l.is_empty()).last().unwrap_or("ssh failed");
+    let line = stderr.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("ssh failed");
     if line.contains("Permission denied") {
         format!("{line}. oah logs in with keys only: add your key with ssh-copy-id first.")
     } else {

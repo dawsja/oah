@@ -105,7 +105,13 @@ fn play(n: u32, text: &str, sink: Sink, stop: Arc<AtomicBool>, answers: Receiver
     });
     sink(ChatEvent::ToolStarted {
         item_id: id("read"),
-        tool: ToolCall { kind: ToolKind::Read, name: "Read".into(), title: "crates/oah-core/src/settings.rs".into(), input: json!({"file_path": "crates/oah-core/src/settings.rs"}), path: Some("crates/oah-core/src/settings.rs".into()) },
+        tool: ToolCall {
+            kind: ToolKind::Read,
+            name: "Read".into(),
+            title: "crates/oah-core/src/settings.rs".into(),
+            input: json!({"file_path": "crates/oah-core/src/settings.rs"}),
+            path: Some("crates/oah-core/src/settings.rs".into()),
+        },
     });
     if pause(500) {
         return finish(true);
@@ -113,7 +119,13 @@ fn play(n: u32, text: &str, sink: Sink, stop: Arc<AtomicBool>, answers: Receiver
     sink(ChatEvent::ToolFinished { item_id: id("read"), ok: true, output: "312 lines".into(), diff: None });
     sink(ChatEvent::ToolStarted {
         item_id: id("grep"),
-        tool: ToolCall { kind: ToolKind::Search, name: "Grep".into(), title: "fn save".into(), input: json!({"pattern": "fn save"}), path: None },
+        tool: ToolCall {
+            kind: ToolKind::Search,
+            name: "Grep".into(),
+            title: "fn save".into(),
+            input: json!({"pattern": "fn save"}),
+            path: None,
+        },
     });
     if pause(350) {
         return finish(true);
@@ -126,7 +138,13 @@ fn play(n: u32, text: &str, sink: Sink, stop: Arc<AtomicBool>, answers: Receiver
     );
     sink(ChatEvent::ToolStarted {
         item_id: id("edit"),
-        tool: ToolCall { kind: ToolKind::Edit, name: "Edit".into(), title: "crates/oah-core/src/settings.rs".into(), input: json!({}), path: Some(diff.path.clone()) },
+        tool: ToolCall {
+            kind: ToolKind::Edit,
+            name: "Edit".into(),
+            title: "crates/oah-core/src/settings.rs".into(),
+            input: json!({}),
+            path: Some(diff.path.clone()),
+        },
     });
     let request_id = id("approve");
     sink(ChatEvent::Approval {
@@ -155,7 +173,13 @@ fn play(n: u32, text: &str, sink: Sink, stop: Arc<AtomicBool>, answers: Receiver
     sink(ChatEvent::ToolFinished { item_id: id("edit"), ok: true, output: String::new(), diff: Some(diff) });
     sink(ChatEvent::ToolStarted {
         item_id: id("bash"),
-        tool: ToolCall { kind: ToolKind::Bash, name: "Bash".into(), title: "cargo test -p oah-core".into(), input: json!({"command": "cargo test -p oah-core"}), path: None },
+        tool: ToolCall {
+            kind: ToolKind::Bash,
+            name: "Bash".into(),
+            title: "cargo test -p oah-core".into(),
+            input: json!({"command": "cargo test -p oah-core"}),
+            path: None,
+        },
     });
     if pause(900) {
         return finish(true);

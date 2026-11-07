@@ -8,29 +8,83 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ChatEvent {
     /// The CLI is up. `session_id` is the CLI's own id, used to resume the conversation later.
-    Started { session_id: Option<String>, model: Option<String>, cwd: Option<String> },
+    Started {
+        session_id: Option<String>,
+        model: Option<String>,
+        cwd: Option<String>,
+    },
     /// What the user sent (echoed so the transcript and the log hold it).
-    UserMessage { id: String, text: String, images: Vec<String> },
-    TurnStarted { turn_id: String },
+    UserMessage {
+        id: String,
+        text: String,
+        images: Vec<String>,
+    },
+    TurnStarted {
+        turn_id: String,
+    },
     /// Streaming assistant text for `item_id`, appended.
-    TextDelta { item_id: String, text: String },
+    TextDelta {
+        item_id: String,
+        text: String,
+    },
     /// The whole assistant text for `item_id` (replaces what streamed).
-    Text { item_id: String, text: String },
-    ReasoningDelta { item_id: String, text: String },
-    Reasoning { item_id: String, text: String },
-    ToolStarted { item_id: String, tool: ToolCall },
-    ToolFinished { item_id: String, ok: bool, output: String, diff: Option<FileDiff> },
+    Text {
+        item_id: String,
+        text: String,
+    },
+    ReasoningDelta {
+        item_id: String,
+        text: String,
+    },
+    Reasoning {
+        item_id: String,
+        text: String,
+    },
+    ToolStarted {
+        item_id: String,
+        tool: ToolCall,
+    },
+    ToolFinished {
+        item_id: String,
+        ok: bool,
+        output: String,
+        diff: Option<FileDiff>,
+    },
     /// The agent asks before doing something.
-    Approval { request: ApprovalRequest },
-    ApprovalResolved { request_id: String, decision: Decision },
+    Approval {
+        request: ApprovalRequest,
+    },
+    ApprovalResolved {
+        request_id: String,
+        decision: Decision,
+    },
     /// The agent's plan / todo list, replaced whole.
-    Plan { items: Vec<PlanItem> },
-    TurnFinished { turn_id: String, usage: Option<Usage>, cost_usd: Option<f64>, duration_ms: Option<u64>, interrupted: bool },
+    Plan {
+        items: Vec<PlanItem>,
+    },
+    TurnFinished {
+        turn_id: String,
+        usage: Option<Usage>,
+        cost_usd: Option<f64>,
+        duration_ms: Option<u64>,
+        interrupted: bool,
+    },
     /// Context window fill after a turn, when the CLI reports it.
-    Context { used_tokens: u64, window_tokens: u64 },
-    Notice { level: NoticeLevel, text: String },
-    Error { message: String },
-    Exited { code: Option<i32>, message: Option<String> },
+    Context {
+        used_tokens: u64,
+        window_tokens: u64,
+    },
+    Notice {
+        level: NoticeLevel,
+        text: String,
+    },
+    Error {
+        message: String,
+    },
+    Exited {
+        code: Option<i32>,
+        message: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

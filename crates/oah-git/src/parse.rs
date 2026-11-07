@@ -105,7 +105,9 @@ pub fn parse_status(out: &str) -> Status {
                 let path = rec.splitn(11, ' ').nth(10).unwrap_or("").to_string();
                 st.conflicted.push(Change { path, orig_path: None, kind: ChangeKind::Conflicted, added: 0, removed: 0 });
             }
-            '?' => st.untracked.push(Change { path: rec[2..].to_string(), orig_path: None, kind: ChangeKind::Untracked, added: 0, removed: 0 }),
+            '?' => {
+                st.untracked.push(Change { path: rec[2..].to_string(), orig_path: None, kind: ChangeKind::Untracked, added: 0, removed: 0 })
+            }
             _ => {}
         }
     }
@@ -153,11 +155,8 @@ pub fn parse_branches(out: &str) -> Vec<Branch> {
             let head = f.next().unwrap_or("");
             let upstream = f.next().filter(|u| !u.is_empty()).map(String::from);
             let updated = f.next().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
-            let (name, remote) = if let Some(n) = refname.strip_prefix("refs/heads/") {
-                (n, false)
-            } else {
-                (refname.strip_prefix("refs/remotes/")?, true)
-            };
+            let (name, remote) =
+                if let Some(n) = refname.strip_prefix("refs/heads/") { (n, false) } else { (refname.strip_prefix("refs/remotes/")?, true) };
             if remote && name.ends_with("/HEAD") {
                 return None;
             }

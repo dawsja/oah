@@ -103,11 +103,21 @@ pub fn policy(mode: PermissionMode) -> (&'static str, &'static str) {
 impl CodexDriver {
     pub fn start(opts: StartOptions, sink: Sink) -> DriverResult<CodexDriver> {
         let program = if opts.binary.trim().is_empty() { AgentKind::Codex.default_binary().to_string() } else { opts.binary.clone() };
-        let mut cmd = oah_transport::command(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args: vec!["app-server".into()], env: &opts.env })?;
+        let mut cmd = oah_transport::command(&Spec {
+            location: &opts.location,
+            cwd: &opts.cwd,
+            program: &program,
+            args: vec!["app-server".into()],
+            env: &opts.env,
+        })?;
         let mut child = cmd.spawn().map_err(|e| format!("couldn't start Codex: {e}"))?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let stderr = child.stderr.take().ok_or("no stderr")?;
-        let rpc = Rpc { stdin: Arc::new(Mutex::new(child.stdin.take())), next: Arc::new(Mutex::new(0)), replies: Arc::new(Mutex::new(HashMap::new())) };
+        let rpc = Rpc {
+            stdin: Arc::new(Mutex::new(child.stdin.take())),
+            next: Arc::new(Mutex::new(0)),
+            replies: Arc::new(Mutex::new(HashMap::new())),
+        };
         let child = Arc::new(Mutex::new(Some(child)));
         let state = Arc::new(Mutex::new(State { alive: true, ..Default::default() }));
 
@@ -141,7 +151,7 @@ impl CodexDriver {
                 }
                 // 127: the shell couldn't find the program (on an SSH host, usually not installed).
                 let message = if code == Some(127) {
-                    Some(format!("Codex isn't installed there, or isn't on that machine's PATH."))
+                    Some("Codex isn't installed there, or isn't on that machine's PATH.".to_string())
                 } else {
                     Some(tail.lock().unwrap().clone()).filter(|m| !m.is_empty())
                 };
@@ -150,7 +160,11 @@ impl CodexDriver {
         }
 
         let d = CodexDriver { rpc, child, state, sink, permission: opts.permission, model: opts.model.clone() };
-        d.rpc.call("initialize", json!({"clientInfo": {"name": "oah", "title": "oah", "version": env!("CARGO_PKG_VERSION")}, "capabilities": null}), Duration::from_secs(30))?;
+        d.rpc.call(
+            "initialize",
+            json!({"clientInfo": {"name": "oah", "title": "oah", "version": env!("CARGO_PKG_VERSION")}, "capabilities": null}),
+            Duration::from_secs(30),
+        )?;
         d.rpc.notify("initialized")?;
         let (approval, sandbox) = policy(opts.permission);
         let mut params = json!({"cwd": opts.cwd, "approvalPolicy": approval, "sandbox": sandbox});
@@ -169,7 +183,11 @@ impl CodexDriver {
         let thread_id = thread["id"].as_str().ok_or("Codex didn't start a thread")?.to_string();
         d.state.lock().unwrap().thread_id = Some(thread_id.clone());
         let cwd = thread["environments"][0]["cwd"].as_str().map(String::from).or(Some(opts.cwd.clone()));
-        (d.sink)(ChatEvent::Started { session_id: Some(thread_id), model: result["model"].as_str().map(String::from).or(opts.model.clone()), cwd });
+        (d.sink)(ChatEvent::Started {
+            session_id: Some(thread_id),
+            model: result["model"].as_str().map(String::from).or(opts.model.clone()),
+            cwd,
+        });
         Ok(d)
     }
 
@@ -189,7 +207,11 @@ impl Driver for CodexDriver {
         for img in &prompt.images {
             input.push(json!({"type": "image", "url": format!("data:{};base64,{}", img.mime, img.data)}));
         }
-        (self.sink)(ChatEvent::UserMessage { id: prompt.id, text: prompt.text, images: prompt.images.iter().map(|i| i.mime.clone()).collect() });
+        (self.sink)(ChatEvent::UserMessage {
+            id: prompt.id,
+            text: prompt.text,
+            images: prompt.images.iter().map(|i| i.mime.clone()).collect(),
+        });
         let (approval, _) = policy(self.permission);
         let mut params = json!({"threadId": thread_id, "input": input, "approvalPolicy": approval});
         if let Some(m) = &self.model {
@@ -282,9 +304,14 @@ impl Translator {
         // A request from Codex (it has an id): an approval, or something we can't answer.
         if let Some(id) = v.get("id") {
             match method {
-                "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" | "execCommandApproval" | "applyPatchApproval" => self.approval(id, method, p),
+                "item/commandExecution/requestApproval"
+                | "item/fileChange/requestApproval"
+                | "execCommandApproval"
+                | "applyPatchApproval" => self.approval(id, method, p),
                 _ => {
-                    let _ = self.rpc.write(&json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "oah doesn't support this request"}}));
+                    let _ = self.rpc.write(
+                        &json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "oah doesn't support this request"}}),
+                    );
                 }
             }
             return;
@@ -298,7 +325,9 @@ impl Translator {
             "item/started" => self.item(&p["item"], false),
             "item/completed" => self.item(&p["item"], true),
             "item/agentMessage/delta" => self.emit(ChatEvent::TextDelta { item_id: s(&p["itemId"]), text: s(&p["delta"]) }),
-            "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => self.emit(ChatEvent::ReasoningDelta { item_id: s(&p["itemId"]), text: s(&p["delta"]) }),
+            "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
+                self.emit(ChatEvent::ReasoningDelta { item_id: s(&p["itemId"]), text: s(&p["delta"]) })
+            }
             "turn/plan/updated" => self.emit(ChatEvent::Plan {
                 items: p["plan"]
                     .as_array()
@@ -319,7 +348,12 @@ impl Translator {
                 let last = &u["last"];
                 let input = last["inputTokens"].as_u64().unwrap_or(0);
                 let cached = last["cachedInputTokens"].as_u64().unwrap_or(0);
-                let usage = Usage { input_tokens: input.saturating_sub(cached), output_tokens: last["outputTokens"].as_u64().unwrap_or(0), cache_read_tokens: cached, cache_write_tokens: last["cacheWriteInputTokens"].as_u64().unwrap_or(0) };
+                let usage = Usage {
+                    input_tokens: input.saturating_sub(cached),
+                    output_tokens: last["outputTokens"].as_u64().unwrap_or(0),
+                    cache_read_tokens: cached,
+                    cache_write_tokens: last["cacheWriteInputTokens"].as_u64().unwrap_or(0),
+                };
                 {
                     let mut st = self.state.lock().unwrap();
                     let acc = st.usage.get_or_insert_with(Usage::default);
@@ -345,7 +379,13 @@ impl Translator {
                     let msg = turn["error"]["message"].as_str().unwrap_or("The turn failed.").to_string();
                     self.emit(ChatEvent::Error { message: msg });
                 }
-                self.emit(ChatEvent::TurnFinished { turn_id, usage, cost_usd: None, duration_ms: turn["durationMs"].as_u64(), interrupted: status == "interrupted" });
+                self.emit(ChatEvent::TurnFinished {
+                    turn_id,
+                    usage,
+                    cost_usd: None,
+                    duration_ms: turn["durationMs"].as_u64(),
+                    interrupted: status == "interrupted",
+                });
             }
             "error" => {
                 if p["willRetry"].as_bool() != Some(true) {
@@ -353,10 +393,8 @@ impl Translator {
                     self.emit(ChatEvent::Error { message: msg });
                 }
             }
-            "account/rateLimits/updated" => {
-                if p["rateLimits"]["rateLimitReachedType"].is_string() {
-                    self.emit(ChatEvent::Notice { level: NoticeLevel::Warn, text: "You've hit a Codex usage limit.".into() });
-                }
+            "account/rateLimits/updated" if p["rateLimits"]["rateLimitReachedType"].is_string() => {
+                self.emit(ChatEvent::Notice { level: NoticeLevel::Warn, text: "You've hit a Codex usage limit.".into() });
             }
             _ => {}
         }
@@ -367,7 +405,13 @@ impl Translator {
         match item["type"].as_str().unwrap_or("") {
             "agentMessage" if done => self.emit(ChatEvent::Text { item_id: id, text: s(&item["text"]) }),
             "reasoning" if done => {
-                let parts: Vec<String> = item["summary"].as_array().or(item["content"].as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+                let parts: Vec<String> = item["summary"]
+                    .as_array()
+                    .or(item["content"].as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect();
                 if !parts.is_empty() {
                     self.emit(ChatEvent::Reasoning { item_id: id, text: parts.join("\n\n") });
                 }
@@ -376,20 +420,33 @@ impl Translator {
                 let command = s(&item["command"]);
                 if !done {
                     let kind = command_kind(item);
-                    self.emit(ChatEvent::ToolStarted { item_id: id, tool: ToolCall { kind, name: "shell".into(), title: strip_shell(&command), input: json!({"command": command}), path: None } });
+                    self.emit(ChatEvent::ToolStarted {
+                        item_id: id,
+                        tool: ToolCall {
+                            kind,
+                            name: "shell".into(),
+                            title: strip_shell(&command),
+                            input: json!({"command": command}),
+                            path: None,
+                        },
+                    });
                 } else {
                     let ok = item["status"] == "completed" && item["exitCode"].as_i64().unwrap_or(0) == 0;
                     self.emit(ChatEvent::ToolFinished { item_id: id, ok, output: clip(s(&item["aggregatedOutput"])), diff: None });
                 }
             }
             "fileChange" => {
-                let diffs: Vec<FileDiff> = item["changes"].as_array().into_iter().flatten().map(|c| FileDiff::from_patch(s(&c["path"]), s(&c["diff"]))).collect();
+                let diffs: Vec<FileDiff> =
+                    item["changes"].as_array().into_iter().flatten().map(|c| FileDiff::from_patch(s(&c["path"]), s(&c["diff"]))).collect();
                 if !done {
                     let title = diffs.iter().map(|d| d.path.clone()).collect::<Vec<_>>().join(", ");
                     let path = diffs.first().map(|d| d.path.clone());
                     let kind = if item["changes"][0]["kind"]["type"] == "add" { ToolKind::Write } else { ToolKind::Edit };
                     self.state.lock().unwrap().changes.insert(id.clone(), diffs);
-                    self.emit(ChatEvent::ToolStarted { item_id: id, tool: ToolCall { kind, name: "apply_patch".into(), title, input: item["changes"].clone(), path } });
+                    self.emit(ChatEvent::ToolStarted {
+                        item_id: id,
+                        tool: ToolCall { kind, name: "apply_patch".into(), title, input: item["changes"].clone(), path },
+                    });
                 } else {
                     let ok = item["status"] == "completed";
                     self.emit(ChatEvent::ToolFinished { item_id: id, ok, output: String::new(), diff: merge(diffs) });
@@ -399,7 +456,10 @@ impl Translator {
                 let name = item["tool"].as_str().or(item["name"].as_str()).unwrap_or("tool").to_string();
                 if !done {
                     let title = format!("{}{}", item["server"].as_str().map(|s| format!("{s} · ")).unwrap_or_default(), name);
-                    self.emit(ChatEvent::ToolStarted { item_id: id, tool: ToolCall { kind: ToolKind::Other, name, title, input: item["arguments"].clone(), path: None } });
+                    self.emit(ChatEvent::ToolStarted {
+                        item_id: id,
+                        tool: ToolCall { kind: ToolKind::Other, name, title, input: item["arguments"].clone(), path: None },
+                    });
                 } else {
                     let ok = item["status"] != "failed" && item["error"].is_null();
                     let output = if ok { clip(item["result"].to_string()) } else { s(&item["error"]["message"]) };
@@ -408,7 +468,16 @@ impl Translator {
             }
             "webSearch" => {
                 if !done {
-                    self.emit(ChatEvent::ToolStarted { item_id: id, tool: ToolCall { kind: ToolKind::Web, name: "web_search".into(), title: s(&item["query"]), input: item.clone(), path: None } });
+                    self.emit(ChatEvent::ToolStarted {
+                        item_id: id,
+                        tool: ToolCall {
+                            kind: ToolKind::Web,
+                            name: "web_search".into(),
+                            title: s(&item["query"]),
+                            input: item.clone(),
+                            path: None,
+                        },
+                    });
                 } else {
                     self.emit(ChatEvent::ToolFinished { item_id: id, ok: true, output: String::new(), diff: None });
                 }
@@ -421,7 +490,10 @@ impl Translator {
         let item_id = p["itemId"].as_str().or(p["callId"].as_str()).map(String::from);
         let request_id = format!("cx-{}", rpc_id);
         let (kind, title, detail, diff) = if method.contains("ommand") {
-            let cmd = p["command"].as_str().map(strip_shell).or_else(|| p["command"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(" ")));
+            let cmd = p["command"]
+                .as_str()
+                .map(strip_shell)
+                .or_else(|| p["command"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(" ")));
             (ApprovalKind::Command, "Run a command".to_string(), cmd.or_else(|| p["reason"].as_str().map(String::from)), None)
         } else {
             let diffs = item_id.as_ref().and_then(|i| self.state.lock().unwrap().changes.get(i).cloned()).unwrap_or_default();
@@ -471,7 +543,11 @@ pub fn strip_shell(cmd: &str) -> String {
     for marker in [" -Command ", " -lc ", " -c "] {
         if let Some((_, rest)) = cmd.split_once(marker) {
             let rest = rest.trim();
-            let unq = rest.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')).or_else(|| rest.strip_prefix('"').and_then(|r| r.strip_suffix('"'))).unwrap_or(rest);
+            let unq = rest
+                .strip_prefix('\'')
+                .and_then(|r| r.strip_suffix('\''))
+                .or_else(|| rest.strip_prefix('"').and_then(|r| r.strip_suffix('"')))
+                .unwrap_or(rest);
             return unq.replace("'\\''", "'");
         }
     }
@@ -522,7 +598,9 @@ mod tests {
         assert!(matches!(&ev[0], ChatEvent::TurnStarted { turn_id } if turn_id == "T1"));
         assert!(matches!(&ev[1], ChatEvent::TextDelta { item_id, .. } if item_id == "m1"));
         assert!(matches!(&ev[2], ChatEvent::Text { text, .. } if text == "I'll edit it."));
-        assert!(matches!(&ev[3], ChatEvent::ToolStarted { tool, .. } if tool.kind == ToolKind::Read && tool.title == "Get-Content -LiteralPath a.txt"));
+        assert!(
+            matches!(&ev[3], ChatEvent::ToolStarted { tool, .. } if tool.kind == ToolKind::Read && tool.title == "Get-Content -LiteralPath a.txt")
+        );
         assert!(matches!(&ev[4], ChatEvent::ToolFinished { ok: true, .. }));
         assert!(matches!(&ev[5], ChatEvent::ToolStarted { tool, .. } if tool.kind == ToolKind::Edit && tool.title == "a.txt"));
         match &ev[6] {

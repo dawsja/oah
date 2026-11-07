@@ -112,7 +112,7 @@ impl ChatStore {
             .filter_map(|e| std::fs::read_to_string(e.path().join("meta.json")).ok())
             .filter_map(|t| serde_json::from_str(&t).ok())
             .collect();
-        out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        out.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
         out
     }
 

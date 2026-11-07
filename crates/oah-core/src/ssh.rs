@@ -57,7 +57,13 @@ fn collect(ssh_dir: &std::path::Path, file: &std::path::Path, hosts: &mut Vec<St
         if name.contains('*') {
             let prefix = name.split('*').next().unwrap_or("").to_string();
             if let Some(parent) = inc.parent() {
-                let mut files: Vec<_> = std::fs::read_dir(parent).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_file() && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix))).collect();
+                let mut files: Vec<_> = std::fs::read_dir(parent)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file() && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix)))
+                    .collect();
                 files.sort();
                 for f in files {
                     collect(ssh_dir, &f, hosts, depth + 1);
@@ -109,17 +115,30 @@ mod tests {
 
     #[test]
     fn follows_includes() {
-        assert_eq!(includes("# x
+        assert_eq!(
+            includes(
+                "# x
 Include gond/config
   include a b # c
-Host x"), ["gond/config", "a", "b"]);
+Host x"
+            ),
+            ["gond/config", "a", "b"]
+        );
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
-        std::fs::write(dir.path().join("config"), "Include sub/*
+        std::fs::write(
+            dir.path().join("config"),
+            "Include sub/*
 Host top
-").unwrap();
-        std::fs::write(dir.path().join("sub").join("one"), "Host ditto
-").unwrap();
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("sub").join("one"),
+            "Host ditto
+",
+        )
+        .unwrap();
         let mut hosts = Vec::new();
         collect(dir.path(), &dir.path().join("config"), &mut hosts, 0);
         assert_eq!(hosts, ["top", "ditto"]);

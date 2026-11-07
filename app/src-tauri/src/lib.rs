@@ -111,9 +111,12 @@ async fn ssh_list_dir(host: String, path: String) -> CmdResult<oah_transport::re
 /// Whether an agent CLI is installed, where, and which version. Runs off the UI thread.
 #[tauri::command]
 async fn provider_probe(kind: AgentKind, binary: String) -> Probe {
-    tauri::async_runtime::spawn_blocking(move || probe::probe(kind, &binary))
-        .await
-        .unwrap_or_else(|e| Probe { found: false, path: None, version: None, error: Some(e.to_string()) })
+    tauri::async_runtime::spawn_blocking(move || probe::probe(kind, &binary)).await.unwrap_or_else(|e| Probe {
+        found: false,
+        path: None,
+        version: None,
+        error: Some(e.to_string()),
+    })
 }
 
 /// Who the agent's CLI is signed in as (on this computer, or `host`).
@@ -157,7 +160,13 @@ fn chat_running(state: State<AppState>) -> Vec<String> {
 
 /// A new, empty chat in `project_id` (its agent starts with the first message).
 #[tauri::command]
-fn chat_create(state: State<AppState>, project_id: String, agent: Option<AgentKind>, model: Option<String>, cwd: Option<String>) -> CmdResult<ChatMeta> {
+fn chat_create(
+    state: State<AppState>,
+    project_id: String,
+    agent: Option<AgentKind>,
+    model: Option<String>,
+    cwd: Option<String>,
+) -> CmdResult<ChatMeta> {
     let s = state.settings.lock().unwrap().clone();
     let project = s.projects.iter().find(|p| p.id == project_id).ok_or("no such project")?;
     let agent = agent.or(project.default_agent).unwrap_or(s.providers.default_agent);
@@ -225,7 +234,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .manage(AppState { settings: Mutex::new(settings), chats: chats::Chats::new(ChatStore::new(paths::chats_dir())), voice: voice::Voice::default() })
+        .manage(AppState {
+            settings: Mutex::new(settings),
+            chats: chats::Chats::new(ChatStore::new(paths::chats_dir())),
+            voice: voice::Voice::default(),
+        })
         .setup(|app| {
             // Voice state (and with it the microphone answer) before the page asks.
             let _ = voice::voice_state(app.handle().clone());

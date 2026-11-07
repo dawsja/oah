@@ -59,7 +59,10 @@ pub fn voice_state(app: AppHandle) -> VoiceState {
 /// switch and mic-in-use indicator still apply. (From Gond Code.)
 #[cfg(windows)]
 pub fn answer_microphone<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
-    use webview2_com::Microsoft::Web::WebView2::Win32::{COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW, COREWEBVIEW2_PERMISSION_STATE_DENY};
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+        COREWEBVIEW2_PERMISSION_STATE_DENY,
+    };
     let _ = window.with_webview(|wv| unsafe {
         let Ok(core) = wv.controller().CoreWebView2() else { return };
         let handler = webview2_com::PermissionRequestedEventHandler::create(Box::new(|_, args| {
@@ -67,7 +70,11 @@ pub fn answer_microphone<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
             let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
             args.PermissionKind(&mut kind)?;
             if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
-                args.SetState(if ON.load(Ordering::SeqCst) { COREWEBVIEW2_PERMISSION_STATE_ALLOW } else { COREWEBVIEW2_PERMISSION_STATE_DENY })?;
+                args.SetState(if ON.load(Ordering::SeqCst) {
+                    COREWEBVIEW2_PERMISSION_STATE_ALLOW
+                } else {
+                    COREWEBVIEW2_PERMISSION_STATE_DENY
+                })?;
             }
             Ok(())
         }));

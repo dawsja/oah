@@ -102,7 +102,8 @@ mod tests {
     #[cfg(unix)]
     fn the_remote_line_survives_a_shell() {
         let loc = Location::Ssh { host: "x".into() };
-        let spec = Spec { location: &loc, cwd: "/", program: "printf", args: vec!["%s|".into(), "a b".into(), "it's $HOME".into()], env: &[] };
+        let spec =
+            Spec { location: &loc, cwd: "/", program: "printf", args: vec!["%s|".into(), "a b".into(), "it's $HOME".into()], env: &[] };
         let out = Command::new("sh").arg("-c").arg(remote_line(&spec)).output().unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout), "a b|it's $HOME|");
     }

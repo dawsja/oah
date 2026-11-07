@@ -14,7 +14,12 @@ fn repo(app: &AppHandle, project_id: &str, cwd: Option<String>) -> CmdResult<Rep
 }
 
 /// Runs `f` on a blocking thread with the project's repo.
-async fn with<T: Send + 'static>(app: AppHandle, project_id: String, cwd: Option<String>, f: impl FnOnce(&Repo) -> Result<T, String> + Send + 'static) -> CmdResult<T> {
+async fn with<T: Send + 'static>(
+    app: AppHandle,
+    project_id: String,
+    cwd: Option<String>,
+    f: impl FnOnce(&Repo) -> Result<T, String> + Send + 'static,
+) -> CmdResult<T> {
     let r = repo(&app, &project_id, cwd)?;
     tauri::async_runtime::spawn_blocking(move || f(&r)).await.map_err(err)?
 }
@@ -25,7 +30,14 @@ pub async fn git_status(app: AppHandle, project_id: String, cwd: Option<String>)
 }
 
 #[tauri::command]
-pub async fn git_diff(app: AppHandle, project_id: String, cwd: Option<String>, path: String, staged: bool, untracked: bool) -> CmdResult<String> {
+pub async fn git_diff(
+    app: AppHandle,
+    project_id: String,
+    cwd: Option<String>,
+    path: String,
+    staged: bool,
+    untracked: bool,
+) -> CmdResult<String> {
     with(app, project_id, cwd, move |r| git::diff(r, &path, staged, untracked)).await
 }
 
@@ -40,12 +52,25 @@ pub async fn git_unstage(app: AppHandle, project_id: String, cwd: Option<String>
 }
 
 #[tauri::command]
-pub async fn git_discard(app: AppHandle, project_id: String, cwd: Option<String>, tracked: Vec<String>, untracked: Vec<String>) -> CmdResult<()> {
+pub async fn git_discard(
+    app: AppHandle,
+    project_id: String,
+    cwd: Option<String>,
+    tracked: Vec<String>,
+    untracked: Vec<String>,
+) -> CmdResult<()> {
     with(app, project_id, cwd, move |r| git::discard(r, &tracked, &untracked)).await
 }
 
 #[tauri::command]
-pub async fn git_commit(app: AppHandle, project_id: String, cwd: Option<String>, message: String, amend: bool, all: bool) -> CmdResult<String> {
+pub async fn git_commit(
+    app: AppHandle,
+    project_id: String,
+    cwd: Option<String>,
+    message: String,
+    amend: bool,
+    all: bool,
+) -> CmdResult<String> {
     with(app, project_id, cwd, move |r| git::commit(r, &message, amend, all)).await
 }
 
@@ -137,6 +162,14 @@ pub async fn pr_state(app: AppHandle, project_id: String, cwd: Option<String>) -
 }
 
 #[tauri::command]
-pub async fn pr_create(app: AppHandle, project_id: String, cwd: Option<String>, title: String, body: String, base: String, draft: bool) -> CmdResult<String> {
+pub async fn pr_create(
+    app: AppHandle,
+    project_id: String,
+    cwd: Option<String>,
+    title: String,
+    body: String,
+    base: String,
+    draft: bool,
+) -> CmdResult<String> {
     with(app, project_id, cwd, move |r| github::pr_create(r, &title, &body, &base, draft)).await
 }

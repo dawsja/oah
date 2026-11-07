@@ -43,7 +43,8 @@ impl Repo {
     /// Runs `program args…` in the repo folder.
     pub fn exec(&self, program: &str, args: &[&str], input: Option<&[u8]>, limit: Duration) -> Result<Output, String> {
         let env = Repo::env();
-        let spec = Spec { location: &self.location, cwd: &self.path, program, args: args.iter().map(|a| a.to_string()).collect(), env: &env };
+        let spec =
+            Spec { location: &self.location, cwd: &self.path, program, args: args.iter().map(|a| a.to_string()).collect(), env: &env };
         oah_transport::run(&spec, input, limit)
     }
 
@@ -64,9 +65,14 @@ impl Repo {
 
 fn git_error(out: &Output) -> String {
     let text = if out.stderr.trim().is_empty() { &out.stdout } else { &out.stderr };
-    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("warning: in the working copy")).collect();
+    let lines: Vec<&str> =
+        text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("warning: in the working copy")).collect();
     let msg = lines.iter().map(|l| l.trim_start_matches("fatal: ").trim_start_matches("error: ")).collect::<Vec<_>>().join("\n");
-    if msg.is_empty() { format!("git exited with {:?}", out.code) } else { msg }
+    if msg.is_empty() {
+        format!("git exited with {:?}", out.code)
+    } else {
+        msg
+    }
 }
 
 // ---- Status ----------------------------------------------------------------------------------
@@ -170,7 +176,13 @@ pub struct Branch {
 }
 
 pub fn branches(repo: &Repo) -> Result<Vec<Branch>, String> {
-    let out = repo.git(&["for-each-ref", "--sort=-committerdate", "--format=%(refname)%1f%(HEAD)%1f%(upstream:short)%1f%(committerdate:unix)", "refs/heads", "refs/remotes"])?;
+    let out = repo.git(&[
+        "for-each-ref",
+        "--sort=-committerdate",
+        "--format=%(refname)%1f%(HEAD)%1f%(upstream:short)%1f%(committerdate:unix)",
+        "refs/heads",
+        "refs/remotes",
+    ])?;
     Ok(parse_branches(&out))
 }
 
@@ -225,7 +237,9 @@ pub fn log(repo: &Repo, limit: usize) -> Result<Vec<GraphRow>, String> {
     }
     match repo.git(&args) {
         Ok(out) => Ok(lanes(parse_log(&out))),
-        Err(e) if e.contains("does not have any commits") || e.contains("bad default revision") || e.contains("unknown revision") => Ok(vec![]),
+        Err(e) if e.contains("does not have any commits") || e.contains("bad default revision") || e.contains("unknown revision") => {
+            Ok(vec![])
+        }
         Err(e) => Err(e),
     }
 }
@@ -306,7 +320,11 @@ pub fn read_file(repo: &Repo, path: &str, max: usize) -> Result<String, String> 
         }
         Location::Ssh { .. } => {
             let out = repo.exec("head", &["-c", &max.to_string(), "--", path], None, QUICK)?;
-            if out.ok() { Ok(out.stdout) } else { Err(git_error(&out)) }
+            if out.ok() {
+                Ok(out.stdout)
+            } else {
+                Err(git_error(&out))
+            }
         }
     }
 }

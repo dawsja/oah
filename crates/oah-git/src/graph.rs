@@ -54,10 +54,16 @@ pub fn lanes(commits: Vec<Commit>) -> Vec<GraphRow> {
         while active.last().is_some_and(|h| h.is_none()) {
             active.pop();
         }
-        let width = [lane + 1, active.len(), into.iter().max().map_or(0, |c| c + 1), through.iter().max().map_or(0, |c| c + 1), out.iter().max().map_or(0, |c| c + 1)]
-            .into_iter()
-            .max()
-            .unwrap_or(1);
+        let width = [
+            lane + 1,
+            active.len(),
+            into.iter().max().map_or(0, |c| c + 1),
+            through.iter().max().map_or(0, |c| c + 1),
+            out.iter().max().map_or(0, |c| c + 1),
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(1);
         let into = into.into_iter().collect();
         rows.push(GraphRow { commit, lane, through, into, out, width });
     }
