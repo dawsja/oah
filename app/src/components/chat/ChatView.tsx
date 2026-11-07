@@ -8,12 +8,15 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { agentChoices, agentKey, agentName, providerFor, type AgentRef } from "@/lib/agents"
 import { emptyTranscript, formatTokens, type ChatMeta, type ModelOption, type SlashCommand, type PlanItem, type Transcript as T } from "@/lib/chat"
 import { copyText } from "@/lib/clipboard"
-import { ipc, pickFolder, type Catalog } from "@/lib/ipc"
+import { LocationIcon } from "@/components/LocationIcon"
+import { addLocalFolder, OpenProjectMenu, useDistros } from "@/components/OpenProject"
+import { ipc, type Catalog } from "@/lib/ipc"
 import { locationLabel, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
 import { useChats } from "@/store/chats"
 import { useGit, useScope } from "@/store/git"
+import { useStartOpenDistro } from "@/store/wsl"
 import { Viewer } from "./Viewer"
 import { ApprovalCard } from "./Approval"
 import { QuestionCard } from "./QuestionCard"
@@ -76,6 +79,7 @@ function NewChat({ project }: { project: Project }) {
   const [permission, setPermission] = useState(d.permission)
   const [model, setModel] = useState<string | null>(null)
   const { models, commands, load } = useCatalog(agent, project.id)
+  const { distro, starting } = useStartOpenDistro(project.location)
   const draftCwd = useApp((s) => s.draftCwd)
   const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
   const send = (text: string, images: { mime: string; data: string }[] = []) =>
@@ -95,6 +99,11 @@ function NewChat({ project }: { project: Project }) {
                   <span className="rounded-sm ml-1 border border-gold/40 px-1 font-mono text-[11px] text-gold">⎇ {worktree.branch}</span>
                 ) : null}
                 <span className="text-faint"> · {locationLabel(project.location)}</span>
+                {starting ? (
+                  <span className="ml-1.5 inline-flex items-center gap-1 text-gold">
+                    <LoaderCircle className="size-3 animate-spin" /> starting {distro}…
+                  </span>
+                ) : null}
               </p>
             </div>
           </div>
@@ -257,24 +266,26 @@ function PlanDock({ items }: { items: PlanItem[] }) {
 }
 
 function NoProject() {
-  const addProject = useApp((s) => s.addProject)
   const openSettings = useApp((s) => s.openSettings)
+  const { distros } = useDistros()
   return (
     <div className="flex h-full flex-col items-center justify-center bg-background px-6 pb-[10vh]">
       <Mark size={48} label="oah" />
       <h1 className="mt-5 text-[22px] font-semibold tracking-tight">Open Agent Harness</h1>
       <p className="mt-2 max-w-md text-center text-[13px] leading-relaxed text-muted-foreground">
-        Chat with Claude Code and Codex in your projects, on this computer or on an SSH host. Add a project to start.
+        Chat with Claude Code, Codex and OpenCode in your projects: on this computer, in WSL, or on an SSH host. Add a project to start.
       </p>
       <div className="mt-6 flex gap-2">
-        <Button
-          onClick={async () => {
-            const path = await pickFolder("Add a project folder")
-            if (path) await addProject({ kind: "local" }, path)
-          }}
-        >
+        <Button onClick={() => void addLocalFolder()}>
           <FolderPlus /> Open folder
         </Button>
+        {distros?.length ? (
+          <OpenProjectMenu>
+            <Button variant="outline">
+              <LocationIcon location={{ kind: "wsl", distro: "" }} /> Folder in WSL <ChevronDown />
+            </Button>
+          </OpenProjectMenu>
+        ) : null}
         <Button variant="outline" onClick={() => openSettings("ssh")}>
           <Server /> Folder on an SSH host
         </Button>

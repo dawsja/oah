@@ -1,7 +1,7 @@
 // The commands the Rust side exposes (app/src-tauri/src/lib.rs).
 
 import type { ChatEvent, ChatMeta, Decision, ModelOption, SlashCommand } from "./chat"
-import type { Account, AgentKind, AppInfo, HostCheck, Limits, Location, PermissionMode, Probe, Project, Settings } from "./types"
+import type { Account, AgentKind, AppInfo, Distro, HostCheck, Limits, Location, PermissionMode, Probe, Project, Settings } from "./types"
 
 /** An agent's models and slash commands, for a chat that hasn't started. */
 export type Catalog = { models: ModelOption[]; commands: SlashCommand[] }
@@ -18,12 +18,15 @@ export const ipc = {
   projectAdd: (location: Location, path: string) => call<[Settings, Project]>("project_add", { location, path }),
   projectRemove: (id: string) => call<Settings>("project_remove", { id }),
   sshConfigHosts: () => call<string[]>("ssh_config_hosts"),
-  sshCheck: (host: string) => call<HostCheck>("ssh_check", { host }),
-  sshListDir: (host: string, path: string) => call<{ path: string; dirs: string[] }>("ssh_list_dir", { host, path }),
+  hostCheck: (location: Location) => call<HostCheck>("location_check", { location }),
+  hostListDir: (location: Location, path: string) => call<{ path: string; dirs: string[] }>("location_list_dir", { location, path }),
+  wslDistros: () => call<Distro[]>("wsl_distros"),
+  wslStart: (distro: string) => call<void>("wsl_start", { distro }),
+  wslPath: (path: string) => call<{ distro: string; path: string } | null>("wsl_path", { path }),
   providerProbe: (kind: AgentKind, binary: string) => call<Probe>("provider_probe", { kind, binary }),
-  providerAccount: (kind: AgentKind, host: string | null = null) => call<Account>("provider_account", { kind, host }),
-  providerLimits: (kind: AgentKind) => call<Limits>("provider_limits", { kind }),
-  providerLogin: (kind: AgentKind) => call<void>("provider_login", { kind }),
+  providerAccount: (kind: AgentKind, location: Location | null = null) => call<Account>("provider_account", { kind, location }),
+  providerLimits: (kind: AgentKind, location: Location | null = null) => call<Limits>("provider_limits", { kind, location }),
+  providerLogin: (kind: AgentKind, location: Location | null = null) => call<void>("provider_login", { kind, location }),
 
   chatList: () => call<ChatMeta[]>("chat_list"),
   chatRunning: () => call<string[]>("chat_running"),

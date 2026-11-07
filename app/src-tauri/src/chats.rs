@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use oah_agents::driver::{self, Driver, Prompt, StartOptions};
 use oah_agents::event::{ChatEvent, Decision, NoticeLevel};
 use oah_core::chats::{now_ms, title_from, ChatMeta, ChatStore};
-use oah_core::settings::{AgentKind, PermissionMode, Settings};
+use oah_core::settings::{AgentKind, Location, PermissionMode, Settings};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -109,13 +109,18 @@ impl Chats {
             kind: meta.agent,
             cwd: if meta.cwd.is_empty() { project.path.clone() } else { meta.cwd.clone() },
             location: project.location.clone(),
-            binary: provider.binary.clone(),
+            binary: provider.binary_on(&project.location),
             model,
             permission: permission.unwrap_or(provider.permission_mode),
             resume: meta.agent_session_id.clone(),
             env: crate::secrets::resolve(&crate::secrets::scope(meta.agent, meta.acp_agent.as_deref()), &provider.env),
             args,
         };
+        // A stopped distro starts here (a few seconds), so a missing or broken one says so
+        // plainly instead of as an agent that exited.
+        if let Location::Wsl { distro } = &project.location {
+            oah_transport::wsl::start(distro)?;
+        }
         self.metas.lock().unwrap().insert(chat_id.to_string(), meta);
 
         let (app, store, metas, id) = (app.clone(), self.store.clone(), self.metas.clone(), chat_id.to_string());

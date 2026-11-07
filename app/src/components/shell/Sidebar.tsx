@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, LoaderCircle, MoreHorizontal, Plus, Server, Settings, SquarePen, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Copy, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, LoaderCircle, MoreHorizontal, Plus, Settings, SquarePen, Trash2 } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { confirmAction, promptText } from "@/components/Prompt"
 import { Tip } from "@/components/Tip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ago, waiting, type ChatMeta } from "@/lib/chat"
 import { samePath, worktrees as wt, type Worktree } from "@/lib/git"
-import { pickFolder } from "@/lib/ipc"
+import { LocationIcon } from "@/components/LocationIcon"
+import { OpenProjectMenu } from "@/components/OpenProject"
+import { isRemote, locationLabel } from "@/lib/types"
+import { useLocationAwake, useLocationStopped, watchWsl } from "@/store/wsl"
 import { copyText } from "@/lib/clipboard"
 import type { Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -17,17 +20,13 @@ import { useGit } from "@/store/git"
 
 /** Projects, each with its worktrees and their chats; Settings at the bottom. */
 export function Sidebar() {
+  useEffect(() => watchWsl(), [])
   const settings = useApp((s) => s.settings)
   const view = useApp((s) => s.view)
   const openSettings = useApp((s) => s.openSettings)
-  const addProject = useApp((s) => s.addProject)
   const projectId = useApp((s) => s.projectId)
   const projects = settings?.projects ?? []
 
-  const add = async () => {
-    const path = await pickFolder("Add a project folder")
-    if (path) await addProject({ kind: "local" }, path)
-  }
 
   return (
     <aside className="flex h-full min-w-0 flex-col border-r bg-sidebar text-sidebar-foreground">
@@ -45,11 +44,11 @@ export function Sidebar() {
 
       <div className="flex h-7 items-center px-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
         Projects
-        <Tip content="Add project" side="right">
-          <button className="rounded-md ml-auto grid size-6 place-items-center hover:bg-accent hover:text-foreground" aria-label="Add project" onClick={add}>
+        <OpenProjectMenu>
+          <button className="rounded-md ml-auto grid size-6 place-items-center hover:bg-accent hover:text-foreground" aria-label="Add project">
             <FolderPlus className="size-3.5" />
           </button>
-        </Tip>
+        </OpenProjectMenu>
       </div>
 
       <nav className="min-h-0 flex-1 overflow-y-auto pb-2">
@@ -112,12 +111,15 @@ function ProjectGroup({ project }: { project: Project }) {
   const openSettings = useApp((s) => s.openSettings)
   const metas = useChats((s) => s.metas)
   const trees = useGit((s) => s.worktrees[project.id])
-  const remote = project.location.kind === "ssh"
-  const Icon = remote ? Server : Folder
+  const remote = isRemote(project.location)
+  // A stopped WSL distro isn't started just to list worktrees; opening the project starts it.
+  const awake = useLocationAwake(project.location)
+  const stopped = useLocationStopped(project.location)
+  const selected = project.id === projectId
 
   useEffect(() => {
-    useGit.getState().loadWorktrees(project.id)
-  }, [project.id])
+    if (awake) useGit.getState().loadWorktrees(project.id)
+  }, [project.id, awake])
 
   const chats = metas.filter((m) => m.projectId === project.id)
   const extra = (trees ?? []).filter((w) => !w.main)
@@ -138,9 +140,10 @@ function ProjectGroup({ project }: { project: Project }) {
         >
           {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         </button>
-        <Icon className={cn("size-3.5 shrink-0", remote ? "text-cyan" : "text-muted-foreground")} />
+        <LocationIcon location={project.location} />
         <span className="truncate font-medium">{project.name}</span>
-        {project.location.kind === "ssh" ? <span className="truncate text-[11px] text-faint">{project.location.host}</span> : null}
+        {remote ? <span className="truncate text-[11px] text-faint">{locationLabel(project.location)}</span> : null}
+        {stopped && !selected ? <span className="rounded-sm shrink-0 border px-1 text-[10px] text-faint">stopped</span> : null}
         <div className="ml-auto flex opacity-0 group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
           <Tip content="New chat" side="top">
             <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="New chat" onClick={(e) => (e.stopPropagation(), newChat(project.id, null))}>

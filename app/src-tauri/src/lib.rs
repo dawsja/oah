@@ -114,16 +114,42 @@ fn ssh_config_hosts() -> Vec<String> {
     ssh::user_config_hosts()
 }
 
-/// Logs in to an SSH host and lists the tools oah uses there.
+/// Reaches an SSH host or a WSL distro and lists the tools oah uses there.
 #[tauri::command]
-async fn ssh_check(host: String) -> CmdResult<oah_transport::remote::HostCheck> {
-    tauri::async_runtime::spawn_blocking(move || oah_transport::remote::check(&host)).await.map_err(err)
+async fn location_check(location: Location) -> CmdResult<oah_transport::remote::HostCheck> {
+    tauri::async_runtime::spawn_blocking(move || oah_transport::remote::check(&location)).await.map_err(err)
 }
 
-/// A folder on an SSH host and its subfolders (empty path: home).
+/// A folder on an SSH host or in a WSL distro, and its subfolders (empty path: home).
 #[tauri::command]
-async fn ssh_list_dir(host: String, path: String) -> CmdResult<oah_transport::remote::Listing> {
-    tauri::async_runtime::spawn_blocking(move || oah_transport::remote::list_dir(&host, &path)).await.map_err(err)?
+async fn location_list_dir(location: Location, path: String) -> CmdResult<oah_transport::remote::Listing> {
+    tauri::async_runtime::spawn_blocking(move || oah_transport::remote::list_dir(&location, &path)).await.map_err(err)?
+}
+
+/// The WSL distros on this computer (none when WSL isn't installed, or off Windows).
+#[tauri::command]
+async fn wsl_distros() -> Vec<oah_transport::wsl::Distro> {
+    tauri::async_runtime::spawn_blocking(|| if cfg!(windows) { oah_transport::wsl::distros().unwrap_or_default() } else { vec![] })
+        .await
+        .unwrap_or_default()
+}
+
+/// Starts a stopped distro (a few seconds the first time).
+#[tauri::command]
+async fn wsl_start(distro: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || oah_transport::wsl::start(&distro)).await.map_err(err)?
+}
+
+#[derive(serde::Serialize)]
+struct WslPath {
+    distro: String,
+    path: String,
+}
+
+/// `\\wsl.localhost\<distro>\…` (from the Windows folder picker) as a distro and a Linux path.
+#[tauri::command]
+fn wsl_path(path: String) -> Option<WslPath> {
+    oah_core::wsl::from_unc(&path).map(|(distro, path)| WslPath { distro, path })
 }
 
 /// Whether an agent CLI is installed, where, and which version. Runs off the UI thread.
@@ -138,22 +164,34 @@ async fn provider_probe(kind: AgentKind, binary: String) -> Probe {
     })
 }
 
-/// Who the agent's CLI is signed in as (on this computer, or `host`).
+/// Who the agent's CLI is signed in as (on this computer, an SSH host or a WSL distro).
 #[tauri::command]
-async fn provider_account(state: State<'_, AppState>, kind: AgentKind, host: Option<String>) -> CmdResult<Account> {
-    let binary = state.settings.lock().unwrap().providers.get(kind).binary.clone();
-    let location = host.map(|host| Location::Ssh { host }).unwrap_or(Location::Local);
+async fn provider_account(state: State<'_, AppState>, kind: AgentKind, location: Option<Location>) -> CmdResult<Account> {
+    let location = location.unwrap_or_default();
+    let binary = state.settings.lock().unwrap().providers.get(kind).binary_on(&location);
     tauri::async_runtime::spawn_blocking(move || account::account(kind, &binary, &location)).await.map_err(err)
 }
 
-/// The agent's plan limits (this computer's sign-in).
+/// The agent's plan limits for the sign-in on this computer, or in a WSL distro (which is never
+/// started just for this).
 #[tauri::command]
-async fn provider_limits(state: State<'_, AppState>, kind: AgentKind) -> CmdResult<Limits> {
-    let binary = state.settings.lock().unwrap().providers.get(kind).binary.clone();
-    tauri::async_runtime::spawn_blocking(move || match kind {
-        AgentKind::Claude => account::claude_limits(),
-        AgentKind::Codex => account::codex_limits(&binary),
-        AgentKind::Opencode | AgentKind::Acp => account::Limits::default(),
+async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: Option<Location>) -> CmdResult<Limits> {
+    let location = location.unwrap_or_default();
+    let binary = state.settings.lock().unwrap().providers.get(kind).binary_on(&location);
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Location::Wsl { distro } = &location {
+            if !oah_transport::wsl::is_running(distro) {
+                return account::Limits {
+                    windows: vec![],
+                    error: Some(format!("{distro} isn't running. Open one of its projects to see these.")),
+                };
+            }
+        }
+        match kind {
+            AgentKind::Claude => account::claude_limits(&location),
+            AgentKind::Codex => account::codex_limits(&binary, &location),
+            AgentKind::Opencode | AgentKind::Acp => account::Limits::default(),
+        }
     })
     .await
     .map_err(err)
@@ -174,7 +212,7 @@ async fn provider_catalog(state: State<'_, AppState>, kind: AgentKind, project_i
         let p = project_id.and_then(|id| s.projects.iter().find(|p| p.id == id).cloned());
         let location = p.as_ref().map(|p| p.location.clone()).unwrap_or(Location::Local);
         let cwd = p.map(|p| p.path).unwrap_or_else(|| paths::home_dir().to_string_lossy().into_owned());
-        (s.providers.get(kind).binary.clone(), location, cwd)
+        (s.providers.get(kind).binary_on(&location), location, cwd)
     };
     tauri::async_runtime::spawn_blocking(move || match kind {
         AgentKind::Claude => oah_agents::claude::catalog(&binary, &location, &cwd).map(|(models, commands)| Catalog { models, commands }),
@@ -197,11 +235,12 @@ async fn provider_catalog(state: State<'_, AppState>, kind: AgentKind, project_i
     .map_err(err)?
 }
 
-/// Opens a terminal running the CLI's sign-in.
+/// Opens a terminal running the CLI's sign-in (on this computer, or in a WSL distro).
 #[tauri::command]
-fn provider_login(state: State<AppState>, kind: AgentKind) -> CmdResult<()> {
-    let binary = state.settings.lock().unwrap().providers.get(kind).binary.clone();
-    account::open_login(kind, &binary)
+fn provider_login(state: State<AppState>, kind: AgentKind, location: Option<Location>) -> CmdResult<()> {
+    let location = location.unwrap_or_default();
+    let binary = state.settings.lock().unwrap().providers.get(kind).binary_on(&location);
+    account::open_login(kind, &binary, &location)
 }
 
 // ---- Chats -----------------------------------------------------------------------------------
@@ -360,8 +399,11 @@ pub fn run() {
             project_add,
             project_remove,
             ssh_config_hosts,
-            ssh_check,
-            ssh_list_dir,
+            location_check,
+            location_list_dir,
+            wsl_distros,
+            wsl_start,
+            wsl_path,
             provider_probe,
             provider_account,
             provider_limits,

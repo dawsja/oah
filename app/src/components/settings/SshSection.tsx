@@ -31,12 +31,12 @@ export function SshSection() {
 
   const test = async (host: string) => {
     setChecks((c) => ({ ...c, [host]: "checking" }))
-    const r = await ipc.sshCheck(host).catch((e) => ({ ok: false, error: String(e) }) as HostCheck)
+    const r = await ipc.hostCheck({ kind: "ssh", host }).catch((e) => ({ ok: false, error: String(e) }) as HostCheck)
     setChecks((c) => ({ ...c, [host]: r }))
   }
 
   const addFolder = async (host: string) => {
-    const path = await pickRemoteFolder(host)
+    const path = await pickRemoteFolder({ kind: "ssh", host })
     if (path) {
       await addProject({ kind: "ssh", host }, path)
       useApp.getState().closeSettings()
@@ -107,13 +107,7 @@ export function SshSection() {
                     <span className="size-6" />
                   )}
                 </div>
-                {c && c !== "checking" && c.ok ? (
-                  <div className="grid grid-cols-4 gap-px border-t bg-border">
-                    {(["claude", "codex", "git", "gh"] as const).map((t) => (
-                      <ToolCell key={t} name={t === "claude" ? "Claude Code" : t === "codex" ? "Codex" : t} tool={c[t]} needed={t !== "gh"} />
-                    ))}
-                  </div>
-                ) : null}
+                {c && c !== "checking" && c.ok ? <ToolGrid check={c} /> : null}
               </div>
             )
           })
@@ -123,14 +117,38 @@ export function SshSection() {
   )
 }
 
-function ToolCell({ name, tool, needed }: { name: string; tool: Tool; needed: boolean }) {
+const TOOLS = [
+  ["claude", "Claude Code"],
+  ["codex", "Codex"],
+  ["opencode", "OpenCode"],
+  ["git", "git"],
+  ["gh", "gh"],
+] as const
+
+/** What a host or distro has installed. Agents are optional (any one will do); git is needed. */
+export function ToolGrid({ check, extra }: { check: HostCheck; extra?: (tool: (typeof TOOLS)[number][0]) => React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-5 gap-px border-t bg-border">
+      {TOOLS.map(([t, name]) => (
+        <ToolCell key={t} name={name} tool={check[t]} needed={t === "git"}>
+          {extra?.(t)}
+        </ToolCell>
+      ))}
+    </div>
+  )
+}
+
+function ToolCell({ name, tool, needed, children }: { name: string; tool: Tool; needed: boolean; children?: React.ReactNode }) {
   const version = tool.version?.match(/\d+\.\d+(\.\d+)?/)?.[0]
   return (
-    <div className="bg-card px-3 py-2">
+    <div className="bg-card px-3 py-2" title={tool.windows ? `Only a Windows copy is on this distro's PATH (${tool.windows}). Install the Linux one there.` : (tool.path ?? undefined)}>
       <div className="flex items-center gap-1.5 text-[12px]">
-        <Dot tone={tool.path ? "ok" : needed ? "warn" : "off"} /> {name}
+        <Dot tone={tool.path ? "ok" : needed || tool.windows ? "warn" : "off"} /> {name}
       </div>
-      <div className={cn("mt-0.5 truncate font-mono text-[11px]", tool.path ? "text-muted-foreground" : "text-faint")}>{tool.path ? (version ? `v${version}` : "installed") : "not installed"}</div>
+      <div className={cn("mt-0.5 truncate font-mono text-[11px]", tool.path ? "text-muted-foreground" : tool.windows ? "text-warn" : "text-faint")}>
+        {tool.path ? (version ? `v${version}` : "installed") : tool.windows ? "Windows copy only" : "not installed"}
+      </div>
+      {children}
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { PanelLeft, PanelRight } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { Mark, WinClose, WinMax, WinMin } from "@/components/icons"
-import { locationLabel } from "@/lib/types"
+import { isRemote, locationLabel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
 import { UpdateButton } from "./Updates"
@@ -17,7 +17,7 @@ export function TitleBar() {
   const layout = useApp((s) => s.layout)
   const setLayout = useApp((s) => s.setLayout)
   const project = useProject()
-  const remote = project?.location.kind === "ssh"
+  const remote = project ? isRemote(project.location) : false
 
   return (
     <header data-tauri-drag-region className="flex h-9 shrink-0 items-center border-b bg-background pl-3 text-[12px]">

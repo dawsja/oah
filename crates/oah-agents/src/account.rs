@@ -150,10 +150,20 @@ pub fn strip_ansi(s: &str) -> String {
 
 // ---- Claude ----------------------------------------------------------------------------------
 
-pub fn claude_limits() -> Limits {
-    let path = oah_core::paths::home_dir().join(".claude").join(".credentials.json");
-    let token = std::fs::read_to_string(&path)
-        .ok()
+/// Claude's plan limits for the sign-in on `location` (this computer's credentials file, or the
+/// one in a WSL distro or on an SSH host).
+pub fn claude_limits(location: &Location) -> Limits {
+    let text = match location {
+        Location::Local => std::fs::read_to_string(oah_core::paths::home_dir().join(".claude").join(".credentials.json")).ok(),
+        _ => {
+            let args = vec!["-c".into(), r#"cat "$HOME/.claude/.credentials.json" 2>/dev/null"#.into()];
+            oah_transport::run(&Spec { location, cwd: "~", program: "sh", args, env: &[] }, None, Duration::from_secs(20))
+                .ok()
+                .filter(|o| o.ok())
+                .map(|o| o.stdout)
+        }
+    };
+    let token = text
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .and_then(|v| v["claudeAiOauth"]["accessToken"].as_str().map(String::from));
     let Some(token) = token else {
@@ -247,8 +257,8 @@ fn iso_ms(s: &str) -> Option<u64> {
 
 // ---- Codex -----------------------------------------------------------------------------------
 
-pub fn codex_limits(binary: &str) -> Limits {
-    match codex_once(&program(AgentKind::Codex, binary), &Location::Local, "account/rateLimits/read", Value::Null) {
+pub fn codex_limits(binary: &str, location: &Location) -> Limits {
+    match codex_once(&program(AgentKind::Codex, binary), location, "account/rateLimits/read", Value::Null) {
         Ok(v) => Limits { windows: parse_codex_limits(&v), error: None },
         Err(e) => Limits { windows: vec![], error: Some(e) },
     }
@@ -315,8 +325,9 @@ pub fn parse_codex_limits(v: &Value) -> Vec<LimitWindow> {
     out
 }
 
-/// Opens a terminal running the CLI's sign-in.
-pub fn open_login(kind: AgentKind, binary: &str) -> Result<(), String> {
+/// Opens a terminal running the CLI's sign-in: on this computer, or inside a WSL distro (the
+/// browser step works there too: WSL2 forwards the sign-in's localhost callback).
+pub fn open_login(kind: AgentKind, binary: &str, location: &Location) -> Result<(), String> {
     let prog = program(kind, binary);
     let line = match kind {
         AgentKind::Claude => format!("{prog} auth login"),
@@ -324,6 +335,11 @@ pub fn open_login(kind: AgentKind, binary: &str) -> Result<(), String> {
         AgentKind::Opencode => format!("{prog} auth login"),
         AgentKind::Acp => return Err("sign in with the agent's own command".into()),
     };
+    match location {
+        Location::Local => {}
+        Location::Wsl { distro } => return open_wsl_login(distro, &prog, &line),
+        Location::Ssh { host } => return Err(format!("sign in on {host} with `{line}` in a terminal there")),
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -347,6 +363,31 @@ pub fn open_login(kind: AgentKind, binary: &str) -> Result<(), String> {
             }
         }
         Err(format!("couldn't open a terminal; run `{line}` yourself"))
+    }
+}
+
+/// A console window running `<line>` in `distro`, left open on a login shell afterwards.
+fn open_wsl_login(distro: &str, prog: &str, line: &str) -> Result<(), String> {
+    if !oah_core::wsl::valid_distro(distro) || !prog.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c)) {
+        return Err("can't build that sign-in command".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let wsl = oah_transport::wsl::exe();
+        std::process::Command::new("cmd")
+            .raw_arg(format!(
+                "/c start \"Sign in ({distro})\" \"{}\" -d {distro} -e sh -lc \"{line}; exec ${{SHELL:-sh}} -l\"",
+                wsl.display()
+            ))
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = line;
+        Err("WSL is a Windows feature".into())
     }
 }
 

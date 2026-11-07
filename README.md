@@ -2,8 +2,9 @@
 
 A chat-first desktop app for coding agents. oah drives **Claude Code**, **Codex**, **OpenCode**
 and any other agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com)
-(the CLIs you already use, with your own sign-ins) in your projects, on this computer or on an SSH host,
-with git, worktrees and pull requests next to the chat. Rust and Tauri; no Electron.
+(the CLIs you already use, with your own sign-ins) in your projects: on this computer, in WSL
+or on an SSH host, with git, worktrees and pull requests next to the chat. Rust and Tauri; no
+Electron.
 
 ![oah](assets/social/oah-readme-banner-dark.png)
 
@@ -22,6 +23,14 @@ with git, worktrees and pull requests next to the chat. Rust and Tauri; no Elect
 - **Side panel.** Files (tree, filter, search in files, add to chat), Source Control (stage,
   discard, commit, branches, push, pull, sync), History (graph), Pull Request (`gh`: open one,
   review state, checks).
+- **WSL.** On Windows, a project can live in a WSL distro. oah runs the agent CLI, git, gh and
+  file reads inside the distro (`wsl.exe -d <distro> -e …`), so the agent works on Linux files
+  with Linux tools; a Windows copy of a CLI that WSL puts on PATH is never used. Add one from
+  the open-project menu and browse the distro's own filesystem (`/`, `/home`, `/etc`…); a
+  `\\wsl.localhost\…` folder picked in Windows becomes a WSL project, and a Windows drive
+  (`/mnt/c/…`) is offered as a project on this computer instead. Settings → Projects lists the
+  distros with what's installed and signed in there; Usage shows a distro's own plan limits.
+  A stopped distro is left asleep until you open one of its projects.
 - **SSH hosts.** Hosts from `~/.ssh/config` (with `Include`) or added by hand. A remote project
   runs the agent CLI, git and gh over `ssh`, so the agent works on that machine's files.
 - **Voice.** Dictation transcribed on this computer with NVIDIA Parakeet (a one-time 731 MB
@@ -36,7 +45,8 @@ Corners are subtle: 2px tags, 4px controls and rows, 6px cards and panels.
 ```
 crates/
   oah-core       data folder (~/.config/oah/app, or $OAH_HOME/app), settings.json, chats on disk
-  oah-transport  runs a program in a folder, locally or over ssh; host checks, remote folders
+  oah-transport  runs a program in a folder: locally, over ssh, or in a WSL distro; distros,
+                 host checks, remote folders
   oah-agents     Claude Code (stream-json), Codex (app-server) and ACP (OpenCode, added agents)
                  drivers → ChatEvent; sign-in, models and plan limits; a scripted mock
                  (OAH_MOCK_AGENT=1)

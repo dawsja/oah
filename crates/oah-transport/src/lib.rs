@@ -1,12 +1,14 @@
-//! Running a program in a project's folder, wherever the project is: on this computer, or on an
-//! SSH host through `ssh -T` (the program's stdio is the ssh session's). Remote commands are one
-//! POSIX `sh` line with every word single-quoted; nothing from the user is spliced in unquoted.
+//! Running a program in a project's folder, wherever the project is: on this computer, on an
+//! SSH host through `ssh -T`, or in a WSL distro through `wsl.exe -e` (the program's stdio is
+//! ssh's or wsl.exe's). Remote commands are one POSIX `sh` script with every word
+//! single-quoted; nothing from the user is spliced in unquoted.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use oah_core::settings::{EnvVar, Location};
 pub mod remote;
+pub mod wsl;
 
 use oah_core::ssh::{sh_quote, valid_host};
 
@@ -43,30 +45,55 @@ pub fn command(spec: &Spec) -> Result<Command, String> {
             c.args(["-T", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "--", host]).arg(remote_line(spec));
             c
         }
+        Location::Wsl { distro } => wsl::command(distro, &remote_script(spec, true))?,
     };
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     no_window(&mut cmd);
     Ok(cmd)
 }
 
-/// The remote shell line: a login shell's PATH (so tools installed for the user are found),
-/// `cd` to the folder (`~` expanded), then `exec env K=V program args…`.
+/// The remote shell line for ssh: a login shell (`sh -lc`, so tools installed for the user are
+/// on PATH) running [`remote_script`].
 pub fn remote_line(spec: &Spec) -> String {
-    let mut words = vec!["exec".to_string(), "env".to_string()];
-    for v in spec.env.iter().filter(|v| valid_env_key(&v.key)) {
-        words.push(sh_quote(&format!("{}={}", v.key, v.value)));
-    }
-    words.push(sh_quote(spec.program));
-    words.extend(spec.args.iter().map(|a| sh_quote(a)));
+    format!("sh -lc {}", sh_quote(&remote_script(spec, false)))
+}
+
+/// `cd` to the folder (`~` expanded), then `exec env K=V program args…`. With `skip_windows`
+/// (WSL), a program given by name is looked up on PATH without the Windows drives WSL adds
+/// (`/mnt/c/…`), so a Windows copy is never run on Linux files; the program itself still gets
+/// the whole PATH.
+pub fn remote_script(spec: &Spec, skip_windows: bool) -> String {
     let cd = match spec.cwd.strip_prefix("~/") {
         Some(rest) => format!("cd \"$HOME\"/{}", sh_quote(rest)),
         None if spec.cwd == "~" || spec.cwd.is_empty() => "cd \"$HOME\"".into(),
         None => format!("cd {}", sh_quote(spec.cwd)),
     };
-    // `sh -lc` reads the login profile; `bash -lc` would too, but sh is always there.
-    let inner = format!("{cd} && {}", words.join(" "));
-    format!("sh -lc {}", sh_quote(&inner))
+    let mut words = vec!["exec".to_string(), "env".to_string()];
+    for v in spec.env.iter().filter(|v| valid_env_key(&v.key)) {
+        words.push(sh_quote(&format!("{}={}", v.key, v.value)));
+    }
+    let by_name = !spec.program.contains('/');
+    let mut lines = vec![cd + " || exit 1"];
+    if skip_windows && by_name {
+        lines.push(LINUX_PATH.trim().to_string());
+        lines.push(format!(
+            "oah_prog=$(PATH=$oah_path command -v {p}) || {{ printf '%s\\n' {msg} >&2; exit 127; }}",
+            p = sh_quote(spec.program),
+            msg = sh_quote(&format!("{} isn't installed in this distro (a Windows copy doesn't count)", spec.program)),
+        ));
+        words.push("\"$oah_prog\"".into());
+    } else {
+        words.push(sh_quote(spec.program));
+    }
+    words.extend(spec.args.iter().map(|a| sh_quote(a)));
+    lines.push(words.join(" "));
+    lines.join("\n")
 }
+
+/// `$oah_path`: `$PATH` without WSL's Windows drives.
+const LINUX_PATH: &str = r#"
+set -f; oah_path=; oah_ifs=$IFS; IFS=:; for oah_d in $PATH; do case $oah_d in /mnt/[a-z]|/mnt/[a-z]/*) ;; *) oah_path=${oah_path:+$oah_path:}$oah_d;; esac; done; IFS=$oah_ifs; set +f
+"#;
 
 fn valid_env_key(k: &str) -> bool {
     !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !k.starts_with(|c: char| c.is_ascii_digit())
@@ -94,11 +121,22 @@ mod tests {
             EnvVar { key: "bad key".into(), value: "x".into(), in_keychain: false },
         ];
         let spec = Spec { location: &loc, cwd: "~/code/my app", program: "claude", args: vec!["-p".into(), "it's".into()], env: &env };
-        let line = remote_line(&spec);
-        assert_eq!(
-            line,
-            r#"sh -lc 'cd "$HOME"/'\''code/my app'\'' && exec env '\''API_KEY=a'\''\'\'''\''b'\'' '\''claude'\'' '\''-p'\'' '\''it'\''\'\'''\''s'\'''"#
-        );
+        let script = remote_script(&spec, false);
+        assert_eq!(script, "cd \"$HOME\"/'code/my app' || exit 1\nexec env 'API_KEY=a'\\''b' 'claude' '-p' 'it'\\''s'");
+        assert_eq!(remote_line(&spec), format!("sh -lc {}", sh_quote(&script)));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn wsl_scripts_say_when_a_program_is_missing() {
+        let loc = Location::Wsl { distro: "Ubuntu".into() };
+        let spec = Spec { location: &loc, cwd: "/", program: "oah-no-such-tool", args: vec![], env: &[] };
+        let out = Command::new("sh").arg("-c").arg(remote_script(&spec, true)).output().unwrap();
+        assert_eq!(out.status.code(), Some(127));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("isn't installed in this distro"));
+        let spec = Spec { location: &loc, cwd: "/", program: "printf", args: vec!["%s|".into(), "a b".into()], env: &[] };
+        let out = Command::new("sh").arg("-c").arg(remote_script(&spec, true)).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "a b|");
     }
 
     #[test]

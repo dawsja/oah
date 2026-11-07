@@ -86,7 +86,12 @@ export const useChats = create<ChatsStore>((set, get) => ({
       const msg = String(e)
       // Not signed in: the CLI's sign-in is one click away.
       const login = msg.includes("isn't signed in") && (opts.agent === "opencode" || opts.agent === "claude" || opts.agent === "codex") ? opts.agent : null
-      toast.error(msg, login ? { action: { label: "Sign in", onClick: () => void ipc.providerLogin(login).catch((err) => toast.error(String(err))) } } : undefined)
+      // Sign in where the project is: this computer, or inside its WSL distro.
+      const meta = get().metas.find((m) => m.id === id)
+      const project = useApp.getState().settings?.projects.find((p) => p.id === (meta?.projectId ?? useApp.getState().projectId))
+      const where = project?.location.kind === "wsl" ? project.location : null
+      const canSignIn = login && project?.location.kind !== "ssh"
+      toast.error(msg, canSignIn ? { action: { label: "Sign in", onClick: () => void ipc.providerLogin(login, where).catch((err) => toast.error(String(err))) } } : undefined)
       if (id) apply(id, { type: "error", message: msg })
     }
   },

@@ -318,7 +318,7 @@ pub fn read_file(repo: &Repo, path: &str, max: usize) -> Result<String, String> 
             let n = bytes.len().min(max);
             Ok(String::from_utf8_lossy(&bytes[..n]).into_owned())
         }
-        Location::Ssh { .. } => {
+        Location::Ssh { .. } | Location::Wsl { .. } => {
             let out = repo.exec("head", &["-c", &max.to_string(), "--", path], None, QUICK)?;
             if out.ok() {
                 Ok(out.stdout)

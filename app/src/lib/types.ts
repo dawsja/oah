@@ -46,7 +46,19 @@ export type Appearance = {
 
 export type SshHost = { host: string; port: number; identityFile: string; label: string }
 
-export type Location = { kind: "local" } | { kind: "ssh"; host: string }
+export type Location = { kind: "local" } | { kind: "ssh"; host: string } | { kind: "wsl"; distro: string }
+
+/** An installed WSL distro. */
+export type Distro = { name: string; default: boolean; running: boolean; version: number }
+
+/** The project's files are on another system (an SSH host, a WSL distro). */
+export const isRemote = (l: Location) => l.kind !== "local"
+
+/** `/mnt/c/Users/u` (a Windows drive as WSL mounts it) → `C:\Users\u`; null for Linux paths. */
+export function windowsPath(linux: string): string | null {
+  const m = /^\/mnt\/([a-z])(\/.*)?$/.exec(linux)
+  return m ? `${m[1].toUpperCase()}:\\${(m[2] ?? "").replace(/^\//, "").replace(/\//g, "\\")}` : null
+}
 
 export type ProjectGit = { baseBranch: string; worktreeDir: string; deleteBranchOnRemove: boolean }
 
@@ -71,7 +83,7 @@ export type Settings = {
 export type AppInfo = { version: string; platform: "windows" | "linux" | "macos" | "web"; dataDir: string; home: string; bundle: string | null }
 
 export function locationLabel(l: Location): string {
-  return l.kind === "local" ? "This computer" : l.host
+  return l.kind === "local" ? "This computer" : l.kind === "ssh" ? l.host : l.distro
 }
 
 export type Probe = { found: boolean; path: string | null; version: string | null; error: string | null; outdated: string | null }
@@ -80,5 +92,6 @@ export type Account = { signedIn: boolean; label: string | null; plan: string | 
 export type LimitWindow = { label: string; usedPercent: number; resetsAt: number | null }
 export type Limits = { windows: LimitWindow[]; error: string | null }
 
-export type Tool = { path: string | null; version: string | null }
-export type HostCheck = { ok: boolean; error: string | null; home: string | null; os: string | null; git: Tool; gh: Tool; claude: Tool; codex: Tool }
+/** `windows`: not installed there, but a Windows copy is on WSL's PATH (where). */
+export type Tool = { path: string | null; version: string | null; windows: string | null }
+export type HostCheck = { ok: boolean; error: string | null; home: string | null; os: string | null; git: Tool; gh: Tool; claude: Tool; codex: Tool; opencode: Tool }

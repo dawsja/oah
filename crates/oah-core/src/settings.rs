@@ -146,6 +146,21 @@ pub struct Provider {
     pub env: Vec<EnvVar>,
 }
 
+impl Provider {
+    /// The executable to run on `location`. A Windows path (`C:\\…`, `\\…`) set here is for this
+    /// computer only; on an SSH host or in WSL the CLI is looked up on that system's PATH. A
+    /// bare name or a Linux path is used everywhere.
+    pub fn binary_on(&self, location: &Location) -> String {
+        let b = self.binary.trim();
+        let windows_path = b.contains('\\') || b.as_bytes().get(1) == Some(&b':');
+        if location.is_remote() && windows_path {
+            String::new()
+        } else {
+            b.to_string()
+        }
+    }
+}
+
 impl Default for Provider {
     fn default() -> Self {
         Provider {
@@ -261,6 +276,18 @@ pub enum Location {
     Ssh {
         host: String,
     },
+    /// A WSL distro on this computer (Windows only); the project path is a Linux path in it.
+    Wsl {
+        distro: String,
+    },
+}
+
+impl Location {
+    /// The project's files are on another system (an SSH host, a WSL distro): Linux paths, and
+    /// programs are found on that system's PATH.
+    pub fn is_remote(&self) -> bool {
+        !matches!(self, Location::Local)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -334,12 +361,20 @@ impl Settings {
         if path.is_empty() {
             return Err(Error::Invalid("no folder given".into()));
         }
-        if let Location::Ssh { host } = &location {
-            if !crate::ssh::valid_host(host) {
+        match &location {
+            Location::Ssh { host } if !crate::ssh::valid_host(host) => {
                 return Err(Error::Invalid(format!("not a valid SSH host: {host:?}")));
             }
+            Location::Wsl { distro } if !crate::wsl::valid_distro(distro) => {
+                return Err(Error::Invalid(format!("not a valid WSL distro name: {distro:?}")));
+            }
+            Location::Wsl { .. } if !path.starts_with('/') => {
+                return Err(Error::Invalid(format!("a WSL project needs a Linux path (like /home/you/code), not {path:?}")));
+            }
+            _ => {}
         }
-        if let Some(p) = self.projects.iter().find(|p| p.location == location && same_path(&p.path, path)) {
+        let local = location == Location::Local;
+        if let Some(p) = self.projects.iter().find(|p| p.location == location && same_path(&p.path, path, local)) {
             return Ok(p.clone());
         }
         let p = Project::new(location, path);
@@ -354,9 +389,10 @@ impl Settings {
     }
 }
 
-fn same_path(a: &str, b: &str) -> bool {
+/// The same folder: Windows paths compare without case, Linux paths (SSH, WSL) with it.
+fn same_path(a: &str, b: &str, local: bool) -> bool {
     let norm = |s: &str| s.trim_end_matches(['/', '\\']).replace('\\', "/");
-    if cfg!(windows) {
+    if local && cfg!(windows) {
         norm(a).eq_ignore_ascii_case(&norm(b))
     } else {
         norm(a) == norm(b)
@@ -390,6 +426,17 @@ mod tests {
     }
 
     #[test]
+    fn windows_executables_stay_on_this_computer() {
+        let p = |b: &str| Provider { binary: b.into(), ..Default::default() };
+        let wsl = Location::Wsl { distro: "Ubuntu".into() };
+        assert_eq!(p(r"C:\Users\u\.local\bin\claude.exe").binary_on(&Location::Local), r"C:\Users\u\.local\bin\claude.exe");
+        assert_eq!(p(r"C:\Users\u\.local\bin\claude.exe").binary_on(&wsl), "");
+        assert_eq!(p(r"\\server\tools\codex.cmd").binary_on(&Location::Ssh { host: "box".into() }), "");
+        assert_eq!(p("/opt/claude/bin/claude").binary_on(&wsl), "/opt/claude/bin/claude");
+        assert_eq!(p("claude-beta").binary_on(&wsl), "claude-beta");
+    }
+
+    #[test]
     fn projects_are_unique_per_folder() {
         let mut s = Settings::default();
         let a = s.add_project(Location::Local, "/code/web").unwrap();
@@ -398,8 +445,13 @@ mod tests {
         let c = s.add_project(Location::Ssh { host: "box".into() }, "/code/web").unwrap();
         assert_ne!(a.id, c.id, "same folder on another machine is another project");
         assert!(s.add_project(Location::Ssh { host: "-oX".into() }, "/x").is_err());
+        let w = s.add_project(Location::Wsl { distro: "Ubuntu".into() }, "/home/u/web").unwrap();
+        assert_eq!(w.name, "web");
+        assert_ne!(s.add_project(Location::Wsl { distro: "Ubuntu".into() }, "/home/u/Web").unwrap().id, w.id, "Linux paths keep case");
+        assert!(s.add_project(Location::Wsl { distro: "-d".into() }, "/x").is_err());
+        assert!(s.add_project(Location::Wsl { distro: "Ubuntu".into() }, r"C:\x").is_err());
         assert!(s.remove_project(&a.id));
-        assert_eq!(s.projects.len(), 1);
+        assert_eq!(s.projects.len(), 3);
         assert_eq!(Project::new(Location::Local, r"C:\Users\u\code\oah").name, "oah");
     }
 }
