@@ -18,6 +18,9 @@ export type ComposerProps = {
   onSend?: (text: string) => void
   onStop?: () => void
   className?: string
+  autoFocus?: boolean
+  /** The agent can't change once a chat started. */
+  lockAgent?: boolean
 }
 
 const PERMISSIONS: PermissionMode[] = ["ask", "acceptEdits", "plan", "fullAccess"]
@@ -37,6 +40,7 @@ export function Composer(p: ComposerProps) {
     <div className={cn("border border-input bg-card focus-within:border-ring/70", p.className)}>
       <textarea
         ref={ref}
+        autoFocus={p.autoFocus}
         value={text}
         rows={3}
         placeholder={p.placeholder ?? "Ask anything, @ to add files"}
@@ -46,16 +50,19 @@ export function Composer(p: ComposerProps) {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
             send()
+          } else if (e.key === "Escape" && p.running) {
+            e.preventDefault()
+            p.onStop?.()
           }
         }}
       />
       <div className="flex items-center gap-1 px-1.5 pb-1.5">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex h-7 items-center gap-1.5 px-2 text-[12px] font-medium hover:bg-accent">
+          <DropdownMenuTrigger asChild disabled={p.lockAgent}>
+            <button className="flex h-7 items-center gap-1.5 px-2 text-[12px] font-medium hover:bg-accent disabled:hover:bg-transparent">
               <AgentGlyph agent={p.agent} className="size-3.5" />
               {AGENT_LABEL[p.agent]}
-              <ChevronDown className="size-3 text-muted-foreground" />
+              {p.lockAgent ? null : <ChevronDown className="size-3 text-muted-foreground" />}
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-52">

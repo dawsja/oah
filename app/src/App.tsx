@@ -8,6 +8,7 @@ import { Resizer } from "@/components/shell/Resizer"
 import { Sidebar } from "@/components/shell/Sidebar"
 import { TitleBar } from "@/components/shell/TitleBar"
 import { useApp } from "@/store/app"
+import { useChats } from "@/store/chats"
 
 export function App() {
   const load = useApp((s) => s.load)
@@ -17,13 +18,16 @@ export function App() {
   const setLayout = useApp((s) => s.setLayout)
 
   useEffect(() => {
-    load()
+    load().then(() => useChats.getState().init())
   }, [load])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = useApp.getState()
-      if (e.ctrlKey && e.key === ",") {
+      if (e.ctrlKey && (e.key === "n" || e.key === "N")) {
+        e.preventDefault()
+        useApp.setState({ chatId: null, view: "chat" })
+      } else if (e.ctrlKey && e.key === ",") {
         e.preventDefault()
         s.view === "settings" ? s.closeSettings() : s.openSettings()
       } else if (e.key === "Escape" && s.view === "settings") {

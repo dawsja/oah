@@ -1,17 +1,21 @@
 import { useState } from "react"
-import { ChevronDown, ChevronRight, Folder, FolderPlus, MoreHorizontal, Plus, Server, Settings, SquarePen, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Folder, FolderPlus, LoaderCircle, MoreHorizontal, Plus, Server, Settings, SquarePen, Trash2 } from "lucide-react"
+import { AgentGlyph } from "@/components/icons"
 import { Tip } from "@/components/Tip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { pickFolder } from "@/lib/ipc"
 import type { Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { ago, type ChatMeta } from "@/lib/chat"
 import { useApp } from "@/store/app"
+import { useChats } from "@/store/chats"
 
 /** Projects, each with its workspaces and chats; Settings at the bottom. */
 export function Sidebar() {
   const settings = useApp((s) => s.settings)
   const projectId = useApp((s) => s.projectId)
   const view = useApp((s) => s.view)
+  const chatId = useApp((s) => s.chatId)
   const openSettings = useApp((s) => s.openSettings)
   const addProject = useApp((s) => s.addProject)
   const projects = settings?.projects ?? []
@@ -27,7 +31,7 @@ export function Sidebar() {
         <button
           className="flex h-8 w-full items-center gap-2 border border-input bg-background px-2.5 text-left text-[12.5px] font-medium hover:border-ring/60 hover:bg-accent disabled:opacity-50"
           disabled={!projectId}
-          onClick={() => useApp.getState().closeSettings()}
+          onClick={() => useApp.setState({ chatId: null, view: "chat" })}
         >
           <SquarePen className="size-3.5 text-muted-foreground" />
           New chat
@@ -50,7 +54,7 @@ export function Sidebar() {
             No projects yet. Add a folder on this computer or on an SSH host to start chatting.
           </div>
         ) : (
-          projects.map((p) => <ProjectGroup key={p.id} project={p} active={p.id === projectId && view === "chat"} />)
+          projects.map((p) => <ProjectGroup key={p.id} project={p} active={p.id === projectId && view === "chat" && !chatId} />)
         )}
       </nav>
 
@@ -68,20 +72,63 @@ export function Sidebar() {
   )
 }
 
+function ChatRow({ meta }: { meta: ChatMeta }) {
+  const chatId = useApp((s) => s.chatId)
+  const view = useApp((s) => s.view)
+  const t = useChats((s) => s.transcripts[meta.id])
+  const active = chatId === meta.id && view === "chat"
+  return (
+    <div
+      className={cn("group/chat flex h-7 cursor-pointer items-center gap-2 pr-1 pl-9 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", active && "row-active")}
+      onClick={() => {
+        useApp.getState().selectProject(meta.projectId)
+        useChats.getState().open(meta.id)
+      }}
+    >
+      {t?.pending ? (
+        <span className="size-1.5 shrink-0 bg-primary" />
+      ) : t?.running ? (
+        <LoaderCircle className="size-3 shrink-0 animate-spin text-gold" />
+      ) : (
+        <AgentGlyph agent={meta.agent} className="size-3 shrink-0 opacity-70" />
+      )}
+      <span className="truncate">{meta.title || "New chat"}</span>
+      <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint group-hover/chat:hidden">{ago(meta.updatedAt)}</span>
+      <button
+        className="hidden size-5 shrink-0 place-items-center text-faint group-hover/chat:grid hover:text-red"
+        aria-label="Delete chat"
+        onClick={(e) => {
+          e.stopPropagation()
+          useChats.getState().remove(meta.id)
+        }}
+      >
+        <Trash2 className="size-3" />
+      </button>
+    </div>
+  )
+}
+
 function ProjectGroup({ project, active }: { project: Project; active: boolean }) {
   const [open, setOpen] = useState(true)
   const selectProject = useApp((s) => s.selectProject)
   const removeProject = useApp((s) => s.removeProject)
   const openSettings = useApp((s) => s.openSettings)
+  const chatId = useApp((s) => s.chatId)
   const remote = project.location.kind === "ssh"
   const Icon = remote ? Server : Folder
+  const metas = useChats((s) => s.metas)
+  const chats = metas.filter((m) => m.projectId === project.id)
+  const newChat = () => {
+    selectProject(project.id)
+    useApp.setState({ chatId: null })
+  }
 
   return (
     <div className="mt-px">
       <div
         className={cn("group flex h-8 cursor-pointer items-center gap-1.5 pr-1 pl-2 text-[12.5px] hover:bg-accent", active && "row-active")}
         onClick={() => {
-          selectProject(project.id)
+          newChat()
           setOpen(true)
         }}
       >
@@ -100,7 +147,7 @@ function ProjectGroup({ project, active }: { project: Project; active: boolean }
         {remote && project.location.kind === "ssh" ? <span className="truncate text-[11px] text-faint">{project.location.host}</span> : null}
         <div className="ml-auto flex opacity-0 group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
           <Tip content="New chat" side="top">
-            <button className="grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="New chat" onClick={(e) => (e.stopPropagation(), selectProject(project.id))}>
+            <button className="grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="New chat" onClick={(e) => (e.stopPropagation(), newChat())}>
               <Plus className="size-3.5" />
             </button>
           </Tip>
@@ -121,7 +168,13 @@ function ProjectGroup({ project, active }: { project: Project; active: boolean }
           </DropdownMenu>
         </div>
       </div>
-      {open ? <div className="py-0.5 pr-2 pl-9 text-[12px] text-faint">No chats yet</div> : null}
+      {open ? (
+        chats.length ? (
+          chats.map((c) => <ChatRow key={c.id} meta={c} />)
+        ) : (
+          <div className="py-0.5 pr-2 pl-9 text-[12px] text-faint">No chats yet</div>
+        )
+      ) : null}
     </div>
   )
 }

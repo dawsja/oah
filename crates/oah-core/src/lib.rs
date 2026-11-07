@@ -1,6 +1,7 @@
 //! oah's data, with no GUI dependencies: where it lives ([`paths`]), the settings file
 //! ([`settings`]) and the hosts in `~/.ssh/config` ([`ssh`]).
 
+pub mod chats;
 pub mod paths;
 pub mod settings;
 pub mod ssh;

@@ -2,7 +2,8 @@
 // browser) a small in-memory stand-in answers instead, so the UI can be developed and looked at
 // without the shell.
 
-import type { AgentKind, AppInfo, Location, Probe, Project, Settings } from "./types"
+import type { ChatEvent, ChatMeta, Decision } from "./chat"
+import type { AgentKind, AppInfo, Location, PermissionMode, Probe, Project, Settings } from "./types"
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
@@ -22,6 +23,27 @@ export const ipc = {
   projectRemove: (id: string) => call<Settings>("project_remove", { id }),
   sshConfigHosts: () => call<string[]>("ssh_config_hosts"),
   providerProbe: (kind: AgentKind, binary: string) => call<Probe>("provider_probe", { kind, binary }),
+
+  chatList: () => call<ChatMeta[]>("chat_list"),
+  chatRunning: () => call<string[]>("chat_running"),
+  chatCreate: (projectId: string, agent: AgentKind | null, model: string | null, cwd: string | null) =>
+    call<ChatMeta>("chat_create", { projectId, agent, model, cwd }),
+  chatEvents: (chatId: string) => call<ChatEvent[]>("chat_events", { chatId }),
+  chatSend: (chatId: string, prompt: { id: string; text: string; images: { mime: string; data: string }[] }, permission: PermissionMode | null) =>
+    call<void>("chat_send", { chatId, prompt, permission }),
+  chatInterrupt: (chatId: string) => call<void>("chat_interrupt", { chatId }),
+  chatAnswer: (chatId: string, requestId: string, decision: Decision) => call<void>("chat_answer", { chatId, requestId, decision }),
+  chatSetPermission: (chatId: string, mode: PermissionMode) => call<void>("chat_set_permission", { chatId, mode }),
+  chatClose: (chatId: string) => call<void>("chat_close", { chatId }),
+  chatDelete: (chatId: string) => call<void>("chat_delete", { chatId }),
+  chatRename: (chatId: string, title: string) => call<ChatMeta>("chat_rename", { chatId, title }),
+}
+
+/** Calls `fn` for every chat event the app emits; returns the unsubscribe. */
+export async function onChatEvent(fn: (chatId: string, event: ChatEvent) => void): Promise<() => void> {
+  if (!inTauri) return () => {}
+  const { listen } = await import("@tauri-apps/api/event")
+  return listen<{ chatId: string; event: ChatEvent }>("chat-event", (e) => fn(e.payload.chatId, e.payload.event))
 }
 
 /** Picks a folder on this computer; null when cancelled. */
@@ -110,6 +132,10 @@ async function web(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       return a.kind === "claude"
         ? { found: true, path: "C:/Users/you/.local/bin/claude.exe", version: "2.1.319", error: null }
         : { found: true, path: "C:/Users/you/AppData/Roaming/npm/codex.cmd", version: "0.166.0", error: null }
+    case "chat_list":
+    case "chat_running":
+    case "chat_events":
+      return []
     default:
       throw new Error(`${cmd} isn't available outside the app`)
   }
