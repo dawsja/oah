@@ -32,3 +32,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 
 Both themes follow T3 Code's: the true-black dark theme and the zinc light theme, with oah's yellow in place of its blue.
 Licensed under the MIT License, with the same terms as above (Copyright (c) 2026 T3 Tools Inc.).
+
+## Agent marks
+
+oah shows each agent next to its name with the agent's own mark: the Claude mark (Anthropic),
+the OpenAI mark for Codex (OpenAI), and the OpenCode mark (from opencode.ai's favicon). The
+SVG paths are as Orca ships them. These marks are trademarks of their owners, used only to
+identify their products; they aren't covered by oah's MIT license.
