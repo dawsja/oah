@@ -104,7 +104,7 @@ function memSave(s: Settings) {
 async function web(cmd: string, a: Record<string, unknown>): Promise<unknown> {
   switch (cmd) {
     case "app_info":
-      return { version: "0.2.0-web", platform: "web", dataDir: "~/.config/oah/app", home: "~" } satisfies AppInfo
+      return { version: "0.2.0-web", platform: "web", dataDir: "~/.config/oah/app", home: "~", bundle: null } satisfies AppInfo
     case "settings_get":
       return structuredClone(memSettings())
     case "settings_set":

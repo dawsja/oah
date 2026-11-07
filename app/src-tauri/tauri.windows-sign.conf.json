@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "windows": {
+      "signCommand": "artifact-signing-cli -e https://scus.codesigning.azure.net -a oah -c oah-prod -d oah %1"
+    }
+  }
+}

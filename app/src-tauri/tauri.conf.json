@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "oah",
-  "mainBinaryName": "oah",
+  "mainBinaryName": "oah-desktop",
   "version": "../package.json",
-  "identifier": "dev.oah.app",
+  "identifier": "dev.oah.desktop",
   "build": {
     "beforeDevCommand": "bun run web",
     "devUrl": "http://localhost:1420",
@@ -31,7 +31,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm", "appimage", "nsis"],
+    "targets": [
+      "deb",
+      "rpm",
+      "appimage",
+      "nsis"
+    ],
     "category": "DeveloperTool",
     "shortDescription": "oah — open agent harness",
     "longDescription": "A chat-first desktop app for coding agents: Claude Code and Codex, on this computer or over SSH, with git, worktrees and pull requests built in.",
@@ -44,7 +49,24 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" }
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installerHooks": "windows/hooks.nsh"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3NkI4Nzg1MUU0RDJEMjIKUldRaUxVMGVoWWRyZDc1TEYyQkVzQVd1YzdCQzUzMUJQNjhtTThiUTZQWHpaM3Nlb1NWNWZsZG8K",
+      "endpoints": [
+        "https://dl.oah.dev/desktop/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

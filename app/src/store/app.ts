@@ -65,6 +65,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const last = localStorage.getItem("oah.project")
       const projectId = settings.projects.find((p) => p.id === last)?.id ?? settings.projects[0]?.id ?? null
       set({ info, settings, projectId })
+      import("@/lib/updates").then((u) => u.updater.start(info.bundle))
       applyAppearance(settings.appearance)
     } catch (e) {
       set({ error: String(e) })

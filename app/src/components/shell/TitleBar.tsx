@@ -5,6 +5,7 @@ import { inTauri } from "@/lib/ipc"
 import { locationLabel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
+import { UpdateButton } from "./Updates"
 
 async function win() {
   const { getCurrentWindow } = await import("@tauri-apps/api/window")
@@ -44,6 +45,7 @@ export function TitleBar() {
         ) : null}
       </div>
       <div data-tauri-drag-region className="h-full flex-1" onDoubleClick={() => inTauri && win().then((w) => w.toggleMaximize())} />
+      <UpdateButton />
       {view === "chat" ? (
         <Tip content="Toggle side panel" side="bottom">
           <button

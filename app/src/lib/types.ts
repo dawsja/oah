@@ -62,7 +62,7 @@ export type Settings = {
   projects: Project[]
 }
 
-export type AppInfo = { version: string; platform: "windows" | "linux" | "macos" | "web"; dataDir: string; home: string }
+export type AppInfo = { version: string; platform: "windows" | "linux" | "macos" | "web"; dataDir: string; home: string; bundle: string | null }
 
 export function locationLabel(l: Location): string {
   return l.kind === "local" ? "This computer" : l.host

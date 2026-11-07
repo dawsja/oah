@@ -38,6 +38,20 @@ struct AppInfo {
     platform: &'static str,
     data_dir: String,
     home: String,
+    /// How this copy was installed (`nsis`, `deb`, `appimage`…); none in development.
+    bundle: Option<&'static str>,
+}
+
+fn bundle_name() -> Option<&'static str> {
+    use tauri::utils::config::BundleType;
+    Some(match tauri::utils::platform::bundle_type()? {
+        BundleType::AppImage => "appimage",
+        BundleType::Deb => "deb",
+        BundleType::Rpm => "rpm",
+        BundleType::Nsis => "nsis",
+        BundleType::Msi => "msi",
+        _ => return None,
+    })
 }
 
 #[tauri::command]
@@ -53,6 +67,7 @@ fn app_info() -> AppInfo {
         },
         data_dir: paths::app_dir().to_string_lossy().into_owned(),
         home: paths::home_dir().to_string_lossy().into_owned(),
+        bundle: bundle_name(),
     }
 }
 
@@ -258,6 +273,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // Window size, position and maximized state, remembered between runs.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState {

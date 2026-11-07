@@ -1,5 +1,7 @@
 import { Activity, AudioLines, Bot, FolderGit2, Palette, Server, X, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { updater, useUpdates } from "@/lib/updates"
+import { updateStatus } from "@/components/shell/Updates"
 import { type SettingsSection, useApp } from "@/store/app"
 import { AppearanceSection } from "./AppearanceSection"
 import { ProjectsSection } from "./ProjectsSection"
@@ -21,6 +23,7 @@ export function SettingsPage() {
   const section = useApp((s) => s.section)
   const info = useApp((s) => s.info)
   const close = useApp((s) => s.closeSettings)
+  const update = useUpdates((u) => u.state)
 
   return (
     <div className="flex h-full min-w-0 bg-background">
@@ -40,6 +43,13 @@ export function SettingsPage() {
           oah {info?.version}
           <br />
           {info?.dataDir}
+          <br />
+          <span className={update.kind === "error" ? "text-red" : undefined}>{updateStatus()}</span>
+          {update.kind !== "off" ? (
+            <button className="mt-1 block rounded-md border px-2 py-0.5 font-sans text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => void updater.check(true)}>
+              Check for updates
+            </button>
+          ) : null}
         </div>
       </nav>
       <div className="relative min-w-0 flex-1 overflow-y-auto">
