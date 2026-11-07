@@ -66,6 +66,6 @@ cargo test --workspace
 
 ## Credits
 
-The interface follows [Orca](https://github.com/stablyai/orca) and the dark theme
+The interface follows [Orca](https://github.com/stablyai/orca) and both themes
 [T3 Code](https://github.com/pingdotgg/t3code); voice comes from Gond Code. See
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). MIT licensed.

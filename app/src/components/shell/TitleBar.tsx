@@ -20,7 +20,7 @@ export function TitleBar() {
   const remote = project?.location.kind === "ssh"
 
   return (
-    <header data-tauri-drag-region className="flex h-9 shrink-0 items-center border-b bg-sidebar pl-3 text-[12px]">
+    <header data-tauri-drag-region className="flex h-9 shrink-0 items-center border-b bg-background pl-3 text-[12px]">
       <div data-tauri-drag-region className="flex items-center gap-2 pr-3">
         <Mark size={16} label="oah" />
         <span data-tauri-drag-region className="font-mono text-[12px] font-bold tracking-tight text-brand">oah</span>

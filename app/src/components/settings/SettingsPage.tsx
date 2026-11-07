@@ -24,7 +24,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full min-w-0 bg-background">
-      <nav className="flex w-52 shrink-0 flex-col border-r bg-sidebar/60 py-3">
+      <nav className="flex w-52 shrink-0 flex-col border-r bg-sidebar py-3">
         <div className="mb-2 px-4 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Settings</div>
         {SECTIONS.map((s) => (
           <button

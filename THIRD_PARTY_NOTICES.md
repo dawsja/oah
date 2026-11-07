@@ -30,5 +30,5 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 
 ## T3 Code — https://github.com/pingdotgg/t3code
 
-The dark theme's surfaces (pure black, near-black cards, white-alpha borders) follow T3 Code's.
+Both themes follow T3 Code's: the true-black dark theme and the zinc light theme, with oah's yellow in place of its blue.
 Licensed under the MIT License, with the same terms as above (Copyright (c) 2026 T3 Tools Inc.).
