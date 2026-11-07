@@ -4,16 +4,25 @@
 import { toast } from "sonner"
 import { create } from "zustand"
 import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript } from "@/lib/chat"
+import { providerFor } from "@/lib/agents"
 import { ipc, onChatEvent } from "@/lib/ipc"
 import { notify } from "@/lib/notify"
 import type { AgentKind, PermissionMode } from "@/lib/types"
 import { useApp } from "./app"
+import { draftKey, drafts } from "./drafts"
+
+type Image = { mime: string; data: string; name?: string }
+
+/** A message typed while the agent worked: it goes when the turn ends, or now if asked. */
+export type Queued = { id: string; text: string; images: Image[] }
 
 type ChatsStore = {
   metas: ChatMeta[]
   transcripts: Record<string, Transcript>
   /** Per-chat permission override, chosen in the composer. */
   permission: Record<string, PermissionMode>
+  /** Per chat, messages waiting for the running turn to end, in order. */
+  queued: Record<string, Queued[]>
 
   init(): Promise<void>
   refresh(): Promise<void>
@@ -37,6 +46,15 @@ type ChatsStore = {
   remove(chatId: string): Promise<void>
   rename(chatId: string, title: string): Promise<void>
   setPermission(chatId: string, mode: PermissionMode): void
+  /** Holds a message until the chat's turn ends; then the first waiting one is sent. */
+  enqueue(chatId: string, text: string, images: Image[]): void
+  /** Takes a message off the queue (to edit it, or drop it). */
+  unqueue(chatId: string, id: string): Queued | undefined
+  /** Sends now, into the turn that's running: Claude Code takes it at its next step and Codex
+   *  steers with it; an agent that can't take one mid-turn is stopped first. */
+  steer(chatId: string, text: string, images: Image[]): Promise<void>
+  /** Sends a queued message now (the first one, without an id). */
+  sendQueued(chatId: string, id?: string): Promise<void>
 }
 
 let started = false
@@ -45,6 +63,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
   metas: [],
   transcripts: {},
   permission: {},
+  queued: {},
 
   async init() {
     if (started) return
@@ -136,8 +155,10 @@ export const useChats = create<ChatsStore>((set, get) => ({
     await ipc.chatDelete(chatId).catch((e) => toast.error(String(e)))
     set((s) => {
       const { [chatId]: _, ...rest } = s.transcripts
-      return { metas: s.metas.filter((m) => m.id !== chatId), transcripts: rest }
+      const { [chatId]: __, ...queued } = s.queued
+      return { metas: s.metas.filter((m) => m.id !== chatId), transcripts: rest, queued }
     })
+    drafts.drop(draftKey(chatId, ""))
     if (useApp.getState().chatId === chatId) useApp.setState({ chatId: null })
   },
 
@@ -150,7 +171,43 @@ export const useChats = create<ChatsStore>((set, get) => ({
     set((s) => ({ permission: { ...s.permission, [chatId]: mode } }))
     ipc.chatSetPermission(chatId, mode).catch(() => {})
   },
+
+  enqueue(chatId, text, images) {
+    const item = { id: crypto.randomUUID(), text, images }
+    set((s) => ({ queued: { ...s.queued, [chatId]: [...(s.queued[chatId] ?? []), item] } }))
+  },
+
+  unqueue(chatId, id) {
+    const item = get().queued[chatId]?.find((q) => q.id === id)
+    if (item) set((s) => ({ queued: { ...s.queued, [chatId]: s.queued[chatId].filter((q) => q.id !== id) } }))
+    return item
+  },
+
+  async steer(chatId, text, images) {
+    const opts = sendOpts(chatId, images)
+    if (!opts) return
+    if (get().transcripts[chatId]?.running && (opts.agent === "opencode" || opts.agent === "acp")) await get().interrupt(chatId)
+    await get().send(chatId, text, opts)
+  },
+
+  async sendQueued(chatId, id) {
+    const item = get().unqueue(chatId, id ?? get().queued[chatId]?.[0]?.id ?? "")
+    if (!item) return
+    if (get().transcripts[chatId]?.running) return get().steer(chatId, item.text, item.images)
+    const opts = sendOpts(chatId, item.images)
+    if (opts) await get().send(chatId, item.text, opts)
+  },
 }))
+
+/** How an open chat sends: its agent, and the permission chosen for it (else the agent's default). */
+function sendOpts(chatId: string, images: Image[]) {
+  const meta = useChats.getState().metas.find((m) => m.id === chatId)
+  if (!meta) return null
+  const settings = useApp.getState().settings
+  const provider = settings ? providerFor(settings, { kind: meta.agent, acpId: meta.acpAgent }) : null
+  const permission = useChats.getState().permission[chatId] ?? provider?.permissionMode ?? "ask"
+  return { agent: meta.agent, acpId: meta.acpAgent, permission, images: images.map(({ mime, data }) => ({ mime, data })) }
+}
 
 /** Batches events per animation frame so streaming text doesn't re-render per token. */
 let queue: [string, ChatEvent][] = []
@@ -171,5 +228,9 @@ function apply(chatId: string, event: ChatEvent) {
       return { transcripts }
     })
     if (batch.some(([, e]) => e.type === "turnFinished" || e.type === "started")) useChats.getState().refresh()
+    // A turn that ended by itself sends the next queued message; one that was stopped holds them.
+    const ended = new Set(batch.flatMap(([id, e]) => (e.type === "turnFinished" && !e.interrupted ? [id] : [])))
+    const s = useChats.getState()
+    for (const id of ended) if (s.queued[id]?.length && !s.transcripts[id]?.running) void s.sendQueued(id)
   })
 }

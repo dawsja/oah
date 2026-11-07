@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Check, ChevronDown, ChevronRight, Circle, FolderPlus, LoaderCircle, MoreHorizontal, Server, Trash2 } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Circle, CornerDownRight, FolderPlus, Image as ImageIcon, LoaderCircle, MoreHorizontal, Pause, Pencil, Server, Trash2, X } from "lucide-react"
 import { AgentGlyph, Mark } from "@/components/icons"
 import { promptText } from "@/components/Prompt"
 import { Button } from "@/components/ui/button"
@@ -13,13 +13,15 @@ import { ipc, type Catalog } from "@/lib/ipc"
 import { locationLabel, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
-import { useChats } from "@/store/chats"
+import { useChats, type Queued } from "@/store/chats"
+import { draftKey } from "@/store/drafts"
 import { useGit, useScope } from "@/store/git"
 import { useStartOpenDistro } from "@/store/wsl"
 import { Viewer } from "./Viewer"
 import { ApprovalCard } from "./Approval"
 import { QuestionCard } from "./QuestionCard"
-import { Composer } from "./Composer"
+import { Composer, editInComposer, STEER_KEY } from "./Composer"
+import { Tip } from "@/components/Tip"
 import { CwdContext } from "./cwd"
 import { Transcript } from "./Transcript"
 
@@ -108,6 +110,8 @@ function NewChat({ project }: { project: Project }) {
             </div>
           </div>
           <Composer
+            key={draftKey(null, project.id, draftCwd)}
+            draftKey={draftKey(null, project.id, draftCwd)}
             agent={agent}
             agents={choices}
             onAgent={(a) => {
@@ -147,6 +151,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
   const d = useAgentDefaults(project, agent)
   const { models, commands, load } = useCatalog(agent, project.id, transcript)
   const permission = useChats((s) => s.permission[meta.id]) ?? d.permission
+  const queued = useChats((s) => s.queued[meta.id]) ?? NONE
   const chats = useChats.getState()
 
   return (
@@ -161,7 +166,10 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
         ) : transcript.approvals[0] ? (
           <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
         ) : null}
+        {queued.length ? <QueueDock chatId={meta.id} items={queued} running={transcript.running} /> : null}
         <Composer
+          key={meta.id}
+          draftKey={draftKey(meta.id, project.id)}
           agent={agent}
           model={meta.model || transcript.model || d.model}
           effort={meta.effort}
@@ -178,9 +186,16 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
           permission={permission}
           onPermission={(m) => chats.setPermission(meta.id, m)}
           running={transcript.running}
-          onSend={(text, images) => chats.send(meta.id, text, { agent: meta.agent, acpId: meta.acpAgent, permission, images })}
+          onSend={(text, images, how) => {
+            const running = useChats.getState().transcripts[meta.id]?.running
+            // A command never goes into a turn that's running: it waits its turn.
+            if (running && how === "steer" && !text.startsWith("/")) void chats.steer(meta.id, text, images)
+            else if (running) chats.enqueue(meta.id, text, images)
+            else void chats.send(meta.id, text, { agent: meta.agent, acpId: meta.acpAgent, permission, images })
+          }}
+          onSteerQueued={queued.length ? () => void chats.sendQueued(meta.id) : undefined}
           onStop={() => chats.interrupt(meta.id)}
-          placeholder={transcript.running ? "Queue a follow-up…" : "Reply, @ to add files, / for commands"}
+          placeholder={transcript.running ? `Queue a follow-up, or ${STEER_KEY}+Enter to send it now` : "Reply, @ to add files, / for commands"}
           lockAgent
           autoFocus
         />
@@ -222,6 +237,62 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+    </div>
+  )
+}
+
+const NONE: Queued[] = []
+
+/** Messages waiting for the turn to end: each can go now, back to the composer, or away. */
+function QueueDock({ chatId, items, running }: { chatId: string; items: Queued[]; running: boolean }) {
+  const chats = useChats.getState()
+  return (
+    <div className="rounded-lg border bg-card text-[12.5px]">
+      <div className="flex h-7 items-center gap-1.5 border-b px-3 text-[11.5px] text-muted-foreground">
+        {running ? null : <Pause className="size-3" />}
+        <span className="font-medium text-foreground">{items.length} queued</span>
+        <span className="truncate text-faint">{running ? "· sends when the agent finishes" : "· held after the stop"}</span>
+        {running ? null : (
+          <button className="rounded-sm ml-auto px-1.5 text-[11.5px] text-foreground hover:bg-accent" onClick={() => void chats.sendQueued(chatId)}>
+            Resume
+          </button>
+        )}
+      </div>
+      <ul className="max-h-40 overflow-y-auto py-0.5">
+        {items.map((q, i) => (
+          <li key={q.id} className="group/q flex h-8 items-center gap-2 px-3 hover:bg-accent/50">
+            <span className="w-3 shrink-0 text-right font-mono text-[10.5px] text-faint">{i + 1}</span>
+            <span className="min-w-0 flex-1 truncate">{q.text.replace(/\s+/g, " ")}</span>
+            {q.images.length ? (
+              <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-faint">
+                <ImageIcon className="size-3" /> {q.images.length}
+              </span>
+            ) : null}
+            <Tip content={running ? `Send now: the agent takes it at its next step (${STEER_KEY}+Enter on an empty box sends the first)` : "Send now"}>
+              <button className="rounded-md flex h-6 shrink-0 items-center gap-1 px-1.5 text-[11.5px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => void chats.sendQueued(chatId, q.id)}>
+                <CornerDownRight className="size-3" /> Send now
+              </button>
+            </Tip>
+            <Tip content="Edit: back to the box">
+              <button
+                className="rounded-md grid size-6 shrink-0 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground"
+                aria-label="Edit queued message"
+                onClick={() => {
+                  const item = chats.unqueue(chatId, q.id)
+                  if (item) editInComposer(item.text, item.images.map((img) => ({ mime: img.mime, data: img.data, name: img.name ?? "image" })))
+                }}
+              >
+                <Pencil className="size-3" />
+              </button>
+            </Tip>
+            <Tip content="Remove">
+              <button className="rounded-md grid size-6 shrink-0 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Remove queued message" onClick={() => chats.unqueue(chatId, q.id)}>
+                <X className="size-3.5" />
+              </button>
+            </Tip>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

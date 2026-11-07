@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { ipc } from "@/lib/ipc"
 import { promptText } from "@/components/Prompt"
+import { PERMISSION_ICON } from "@/components/permission"
 import { AGENTS, AGENT_LABEL, PERMISSION_LABEL, type Account, type AcpAgent, type AgentKind, type PermissionMode, type Probe, type Provider, type Settings } from "@/lib/types"
 import { useApp } from "@/store/app"
 import { Dot, Group, Row, Section, Segmented } from "./layout"
@@ -185,7 +186,10 @@ function ProviderCard({ target, provider }: { target: Target; provider: Provider
       <Row label="Permissions" description="What the agent may do without asking.">
         <Segmented<PermissionMode>
           value={provider.permissionMode}
-          options={(["ask", "acceptEdits", "plan", "fullAccess"] as const).map((m) => ({ value: m, label: PERMISSION_LABEL[m] }))}
+          options={(["ask", "acceptEdits", "plan", "fullAccess"] as const).map((m) => {
+            const Icon = PERMISSION_ICON[m]
+            return { value: m, label: <span className="flex items-center gap-1.5"><Icon className="size-3.5" />{PERMISSION_LABEL[m]}</span> }
+          })}
           onChange={(v) => edit((p) => void (p.permissionMode = v))}
         />
       </Row>

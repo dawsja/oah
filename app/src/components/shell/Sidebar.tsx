@@ -156,7 +156,8 @@ function ProjectGroup({ project }: { project: Project }) {
                 <MoreHorizontal className="size-3.5" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-52">
+            {/* React bubbles portal clicks to the row, whose onClick would start a new chat. */}
+            <DropdownMenuContent align="start" className="w-52" onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem disabled={trees !== undefined && trees.length === 0} onSelect={() => newWorktree(project)}>
                 <GitBranchPlus /> New worktree…
               </DropdownMenuItem>
@@ -256,7 +257,7 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
                   <MoreHorizontal className="size-3.5" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuContent align="start" className="w-48" onClick={(e) => e.stopPropagation()}>
                 <DropdownMenuItem onSelect={() => copyText(tree!.path)}>
                   <Copy /> Copy path
                 </DropdownMenuItem>

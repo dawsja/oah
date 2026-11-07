@@ -25,8 +25,10 @@ import { filterCommands, menuCommands, ownCommand, slashQuery, type MenuCommand,
 import { fuzzyPaths, mention, mentionAt } from "@/lib/fuzzy"
 import { git } from "@/lib/git"
 import { PERMISSION_LABEL, type PermissionMode } from "@/lib/types"
+import { PERMISSION_ICON, PERMISSION_TONE } from "@/components/permission"
 import { useApp } from "@/store/app"
 import { useScope } from "@/store/git"
+import { drafts } from "@/store/drafts"
 import { cn } from "@/lib/utils"
 import { Dictation } from "./Dictation"
 
@@ -56,8 +58,13 @@ export type ComposerProps = {
   running?: boolean
   disabled?: boolean
   placeholder?: string
-  onSend?: (text: string, images: Attachment[]) => void
+  /** `steer` (Ctrl/⌘+Enter): send it now, into the turn that's running. */
+  onSend?: (text: string, images: Attachment[], how: "send" | "steer") => void
   onStop?: () => void
+  /** Ctrl/⌘+Enter with nothing typed while the agent works: the first queued message goes now. */
+  onSteerQueued?: () => void
+  /** Where what's typed is kept until it's sent (see `draftKey`); mount one composer per key. */
+  draftKey?: string
   className?: string
   autoFocus?: boolean
   /** The agent can't change once a chat started. */
@@ -70,6 +77,14 @@ const PERMISSIONS: PermissionMode[] = ["ask", "acceptEdits", "plan", "fullAccess
 export type Attachment = { mime: string; data: string; name: string }
 
 const MAX_IMAGE = 5 * 1024 * 1024
+const MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
+/** The send-now chord's modifier, as shown. */
+export const STEER_KEY = MAC ? "⌘" : "Ctrl"
+
+/** Puts a message back in the composer to edit (a queued one taken off the queue). */
+export function editInComposer(text: string, images: Attachment[]) {
+  window.dispatchEvent(new CustomEvent("oah:edit", { detail: { text, images } }))
+}
 const MAX_IMAGES = 8
 
 function readImage(file: File): Promise<Attachment | null> {
@@ -87,6 +102,7 @@ const fileCache = new Map<string, { at: number; files: Promise<string[]> }>()
 
 /** The prompt box: text, then a toolbar with the agent, model and permission chips. */
 export function Composer(p: ComposerProps) {
+  const PermissionIcon = PERMISSION_ICON[p.permission]
   const settings = useApp((s) => s.settings)
   const scope = useScope()
   const [menu, setMenu] = useState<{ start: number; query: string; items: string[]; index: number } | null>(null)
@@ -159,7 +175,7 @@ export function Composer(p: ComposerProps) {
     }
     if (run && !c.skill && !c.hint) {
       setText("")
-      p.onSend?.(`/${c.name}`, [])
+      p.onSend?.(`/${c.name}`, [], "send")
       return
     }
     // Codex skills are mentioned with $ in the message; they don't run by themselves.
@@ -170,8 +186,11 @@ export function Composer(p: ComposerProps) {
       el?.setSelectionRange(insert.length, insert.length)
     })
   }
-  const [text, setText] = useState("")
-  const [images, setImages] = useState<Attachment[]>([])
+  const [text, setText] = useState(() => (p.draftKey ? drafts.get(p.draftKey).text : ""))
+  const [images, setImages] = useState<Attachment[]>(() => (p.draftKey ? drafts.get(p.draftKey).images : []))
+  useEffect(() => {
+    if (p.draftKey) drafts.set(p.draftKey, text, images)
+  }, [p.draftKey, text, images])
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
@@ -195,8 +214,24 @@ export function Composer(p: ComposerProps) {
     window.addEventListener("oah:insert", onInsert)
     return () => window.removeEventListener("oah:insert", onInsert)
   }, [text.length])
-  const send = () => {
+  // A queued message back to edit: it goes before whatever is typed already.
+  useEffect(() => {
+    const onEdit = (e: Event) => {
+      const back = (e as CustomEvent<{ text: string; images: Attachment[] }>).detail
+      setText((t) => (t.trim() ? `${back.text}\n\n${t}` : back.text))
+      setImages((cur) => [...back.images, ...cur].slice(0, MAX_IMAGES))
+      requestAnimationFrame(() => {
+        const el = ref.current
+        el?.focus()
+        el?.setSelectionRange(back.text.length, back.text.length)
+      })
+    }
+    window.addEventListener("oah:edit", onEdit)
+    return () => window.removeEventListener("oah:edit", onEdit)
+  }, [])
+  const send = (how: "send" | "steer" = "send") => {
     const t = text.trim()
+    if (!t && !images.length && how === "steer" && p.running) return p.onSteerQueued?.()
     if ((!t && !images.length) || p.disabled) return
     const own = images.length ? null : ownCommand(t, inChat)
     if (own) {
@@ -204,7 +239,7 @@ export function Composer(p: ComposerProps) {
       setText("")
       return
     }
-    p.onSend?.(t || "(see the attached image)", images)
+    p.onSend?.(t || "(see the attached image)", images, how)
     setText("")
     setImages([])
   }
@@ -355,7 +390,7 @@ export function Composer(p: ComposerProps) {
           }
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
-            send()
+            send((MAC ? e.metaKey : e.ctrlKey) ? "steer" : "send")
           } else if (e.key === "Escape" && p.running) {
             e.preventDefault()
             p.onStop?.()
@@ -426,7 +461,8 @@ export function Composer(p: ComposerProps) {
         </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className={cn("rounded-md flex h-7 items-center gap-1 px-2 text-[12px] hover:bg-accent", p.permission === "fullAccess" ? "text-red" : p.permission === "plan" ? "text-cyan" : "text-muted-foreground")}>
+            <button className={cn("rounded-md flex h-7 items-center gap-1 px-2 text-[12px] hover:bg-accent", PERMISSION_TONE[p.permission] || "text-muted-foreground")}>
+              <PermissionIcon className="size-3.5" />
               {PERMISSION_LABEL[p.permission]}
               <ChevronDown className="size-3" />
             </button>
@@ -435,11 +471,15 @@ export function Composer(p: ComposerProps) {
             <DropdownMenuLabel>Permissions</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuRadioGroup value={p.permission} onValueChange={(v) => p.onPermission?.(v as PermissionMode)}>
-              {PERMISSIONS.map((m) => (
-                <DropdownMenuRadioItem key={m} value={m}>
-                  {PERMISSION_LABEL[m]}
-                </DropdownMenuRadioItem>
-              ))}
+              {PERMISSIONS.map((m) => {
+                const Icon = PERMISSION_ICON[m]
+                return (
+                  <DropdownMenuRadioItem key={m} value={m}>
+                    <Icon className={cn("size-3.5", PERMISSION_TONE[m] || "text-muted-foreground")} />
+                    <span className={cn(m === p.permission && PERMISSION_TONE[m])}>{PERMISSION_LABEL[m]}</span>
+                  </DropdownMenuRadioItem>
+                )
+              })}
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -451,6 +491,13 @@ export function Composer(p: ComposerProps) {
             </button>
           </Tip>
           <Dictation onText={(t) => window.dispatchEvent(new CustomEvent("oah:insert", { detail: t + " " }))} />
+          {p.running && (text.trim() || images.length) ? (
+            <Tip content={`Queue: sends when the agent finishes (Enter) · Send now (${STEER_KEY}+Enter)`}>
+              <button className="rounded-md ml-1 grid size-7 place-items-center bg-primary text-primary-foreground hover:bg-primary/90" aria-label="Queue" onClick={() => send()}>
+                <ArrowUp className="size-4" />
+              </button>
+            </Tip>
+          ) : null}
           {p.running ? (
             <Tip content="Stop (Esc)">
               <button className="rounded-md ml-1 grid size-7 place-items-center bg-foreground text-background hover:opacity-90" aria-label="Stop" onClick={p.onStop}>
@@ -463,7 +510,7 @@ export function Composer(p: ComposerProps) {
                 className="rounded-md ml-1 grid size-7 place-items-center bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint"
                 aria-label="Send"
                 disabled={(!text.trim() && !images.length) || p.disabled}
-                onClick={send}
+                onClick={() => send()}
               >
                 <ArrowUp className="size-4" />
               </button>

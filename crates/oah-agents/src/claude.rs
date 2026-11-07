@@ -36,8 +36,10 @@ struct State {
     pending: HashMap<String, (Value, Value)>,
     /// The turn being run, for `TurnFinished`.
     turn_id: Option<String>,
-    /// Messages sent while a turn ran: Claude runs each as its own turn after the current one.
-    queued: u32,
+    /// The `uuid`s of messages sent and not yet answered, oldest first. A message sent while a
+    /// turn runs is folded into it at the next tool boundary (its `result` lists both), or, if it
+    /// came too late, runs as its own turn after it.
+    waiting: Vec<String>,
     seq: u32,
     /// The model from `system/init`.
     model: Option<String>,
@@ -137,7 +139,12 @@ impl ClaudeDriver {
                 } else {
                     Some(tail.lock().unwrap().clone()).filter(|m| !m.is_empty())
                 };
-                if let Some(turn_id) = state.lock().unwrap().turn_id.take() {
+                let turn = {
+                    let mut s = state.lock().unwrap();
+                    s.waiting.clear();
+                    s.turn_id.take()
+                };
+                if let Some(turn_id) = turn {
                     sink(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted: true });
                 }
                 sink(ChatEvent::Exited { code, message });
@@ -166,6 +173,7 @@ impl Driver for ClaudeDriver {
         }
         self.turn += 1;
         let turn_id = format!("turn-{}", self.turn);
+        let uuid = message_uuid(&prompt.id);
         let mut content = vec![json!({"type": "text", "text": prompt.text})];
         for img in &prompt.images {
             content.push(json!({"type": "image", "source": {"type": "base64", "media_type": img.mime, "data": img.data}}));
@@ -178,18 +186,13 @@ impl Driver for ClaudeDriver {
         });
         let started = {
             let mut s = self.state.lock().unwrap();
-            if s.turn_id.is_none() {
-                s.turn_id = Some(turn_id.clone());
-                true
-            } else {
-                s.queued += 1;
-                false
-            }
+            s.waiting.push(uuid.clone());
+            s.turn_id.is_none().then(|| s.turn_id = Some(turn_id.clone())).is_some()
         };
         if started {
             (self.sink)(ChatEvent::TurnStarted { turn_id });
         }
-        self.write(&json!({"type": "user", "message": {"role": "user", "content": content}}))
+        self.write(&json!({"type": "user", "uuid": uuid, "message": {"role": "user", "content": content}}))
     }
 
     fn interrupt(&mut self) -> DriverResult<()> {
@@ -569,11 +572,11 @@ impl Translator {
         }
         // And what that context is made of (Claude Code's /context).
         self.ask_context();
-        // A message sent during that turn runs now, as the next turn.
+        // A message sent during that turn and not folded into it runs now, as the next turn.
         let next = {
             let mut s = self.state.lock().unwrap();
-            if s.queued > 0 {
-                s.queued -= 1;
+            settle(&mut s.waiting, v, interrupted);
+            if !s.waiting.is_empty() {
                 s.seq += 1;
                 let id = format!("turn-q{}", s.seq);
                 s.turn_id = Some(id.clone());
@@ -585,6 +588,39 @@ impl Translator {
         if let Some(turn_id) = next {
             self.emit(ChatEvent::TurnStarted { turn_id });
         }
+    }
+}
+
+/// The `uuid` Claude Code tags a message with (and lists in the `result` that answers it): the
+/// prompt's own id when it is one, else a fresh one.
+fn message_uuid(id: &str) -> String {
+    let is_uuid =
+        id.len() == 36 && id.char_indices().all(|(i, c)| if [8, 13, 18, 23].contains(&i) { c == '-' } else { c.is_ascii_hexdigit() });
+    if is_uuid {
+        return id.to_ascii_lowercase();
+    }
+    use std::hash::{BuildHasher, Hasher};
+    let mut bytes = [0u8; 16];
+    for half in bytes.chunks_mut(8) {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write(id.as_bytes());
+        half.copy_from_slice(&h.finish().to_le_bytes());
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
+}
+
+/// Drops the messages a `result` answered from `waiting`. It names them in `user_message_uuids`;
+/// a CLI that doesn't answered the oldest. An interrupt drops the ones it cut off too.
+fn settle(waiting: &mut Vec<String>, result: &Value, interrupted: bool) {
+    if interrupted {
+        waiting.clear();
+    } else if let Some(done) = result["user_message_uuids"].as_array() {
+        waiting.retain(|u| !done.iter().any(|d| d.as_str() == Some(u)));
+    } else if !waiting.is_empty() {
+        waiting.remove(0);
     }
 }
 
@@ -977,6 +1013,45 @@ mod tests {
             parse_models(&json!({"models":[{"value":"opus","displayName":"Opus 5.5","description":"x"},{"value":"old","disabled":true}]}));
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].name, "Opus 5.5");
+    }
+
+    #[test]
+    fn steers_fold_into_the_running_turn() {
+        let result = |uuids: &[&str]| json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{},"user_message_uuids":uuids});
+        let started = |ev: &[ChatEvent]| ev.iter().filter(|e| matches!(e, ChatEvent::TurnStarted { .. })).count();
+        let finished = |ev: &[ChatEvent]| ev.iter().filter(|e| matches!(e, ChatEvent::TurnFinished { .. })).count();
+        let run_waiting = |waiting: &[&str], lines: &[Value]| {
+            let out = Arc::new(Mutex::new(Vec::new()));
+            let o = out.clone();
+            let sink: Sink = Arc::new(move |e| o.lock().unwrap().push(e));
+            let waiting = waiting.iter().map(|s| s.to_string()).collect();
+            let state = Arc::new(Mutex::new(State { alive: true, turn_id: Some("turn-1".into()), waiting, ..Default::default() }));
+            let mut tr = Translator::new(sink, state.clone());
+            for l in lines {
+                tr.handle(l);
+            }
+            let ev = out.lock().unwrap().clone();
+            let s = state.lock().unwrap();
+            (ev, s.turn_id.clone(), s.waiting.clone())
+        };
+        // Folded: one result answers both, and the chat is idle after it.
+        let (ev, turn, waiting) = run_waiting(&["a", "b"], &[result(&["a", "b"])]);
+        assert_eq!((finished(&ev), started(&ev), turn, waiting.len()), (1, 0, None, 0));
+        // Too late to fold: it runs as the next turn, which its own result ends.
+        let (ev, turn, waiting) = run_waiting(&["a", "b"], &[result(&["a"])]);
+        assert_eq!((finished(&ev), started(&ev), turn.is_some(), waiting), (1, 1, true, vec!["b".to_string()]));
+        let (ev, turn, _) = run_waiting(&["a", "b"], &[result(&["a"]), result(&["b"])]);
+        assert_eq!((finished(&ev), started(&ev), turn), (2, 1, None));
+        // An interrupt drops what it cut off.
+        let stopped = json!({"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.0,"usage":{}});
+        let (ev, turn, _) = run_waiting(&["a", "b"], &[stopped]);
+        assert_eq!((finished(&ev), started(&ev), turn), (1, 0, None));
+        // A CLI that doesn't list them: one result per message, as before.
+        let (ev, turn, _) = run_waiting(&["a", "b"], &[json!({"type":"result","subtype":"success","total_cost_usd":0.0,"usage":{}})]);
+        assert_eq!((finished(&ev), started(&ev), turn.is_some()), (1, 1, true));
+        assert_eq!(message_uuid("0F8FAD5B-D9CB-469F-A165-70867728950E"), "0f8fad5b-d9cb-469f-a165-70867728950e");
+        let made = message_uuid("compact-1");
+        assert_eq!((made.len(), &made[14..15]), (36, "4"));
     }
 
     #[test]
