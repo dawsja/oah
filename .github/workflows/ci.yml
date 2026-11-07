@@ -1,7 +1,9 @@
 name: CI
 
+# Branches only: a v* tag points at a commit CI already checked on main, and release.yml builds it.
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
