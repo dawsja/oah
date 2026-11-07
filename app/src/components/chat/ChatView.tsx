@@ -2,11 +2,10 @@ import { useEffect, useState } from "react"
 import { Check, ChevronDown, ChevronRight, Circle, FolderPlus, LoaderCircle, MoreHorizontal, Server, Trash2 } from "lucide-react"
 import { AgentGlyph, Mark } from "@/components/icons"
 import { promptText } from "@/components/Prompt"
-import { Tip } from "@/components/Tip"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { agentChoices, agentKey, agentName, providerFor, type AgentRef } from "@/lib/agents"
-import { emptyTranscript, formatTokens, type ChatMeta, type ModelOption, type SlashCommand, type PlanItem, type Transcript as T } from "@/lib/chat"
+import { emptyTranscript, type ChatMeta, type ModelOption, type SlashCommand, type PlanItem, type Transcript as T } from "@/lib/chat"
 import { copyText } from "@/lib/clipboard"
 import { LocationIcon } from "@/components/LocationIcon"
 import { addLocalFolder, OpenProjectMenu, useDistros } from "@/components/OpenProject"
@@ -166,6 +165,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
           agent={agent}
           model={meta.model || transcript.model || d.model}
           effort={meta.effort}
+          context={transcript.context}
           models={models}
           onModel={(id, e) => {
             if (id !== meta.model) void chats.setModel(meta.id, id)
@@ -191,26 +191,12 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
 }
 
 function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T; model: string }) {
-  const ctx = transcript.context
-  const pct = ctx ? Math.min(100, (ctx.used / ctx.window) * 100) : 0
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
       <AgentGlyph agent={meta.agent} className="size-3.5" />
       <span className="truncate text-[13px] font-medium">{meta.title || "New chat"}</span>
       {transcript.running ? <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" /> : null}
       <span className="ml-auto font-mono text-[11px] text-faint">{model}</span>
-      {ctx ? (
-        <Tip content={`Context: ${formatTokens(ctx.used)} of ${formatTokens(ctx.window)} tokens`} side="bottom">
-          <div className="flex items-center gap-1.5">
-            <div className="flex h-2 w-16 gap-px">
-              {Array.from({ length: 10 }, (_, i) => (
-                <span key={i} className={cn("flex-1", i < Math.round(pct / 10) ? (pct > 85 ? "bg-red" : pct > 65 ? "bg-warn" : "bg-primary") : "bg-muted")} />
-              ))}
-            </div>
-            <span className="font-mono text-[11px] text-muted-foreground">{Math.round(pct)}%</span>
-          </div>
-        </Tip>
-      ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Chat menu">

@@ -12,8 +12,9 @@ Electron.
 
 - **Chat.** Streaming answers, folded tool runs, file diffs, approvals (allow, always allow,
   deny; queued when several arrive), questions the agent asks (options, multi-select, typed
-  answers, one question at a time with number keys), plans to approve or send back, context and
-  token use per turn, a model picker with each agent's own models and their effort levels (hover a
+  answers, one question at a time with number keys), plans to approve or send back, a context ring
+  by the send button (click it for what fills the window: messages, tools, skills, system prompt,
+  free space; Claude Code reports the breakdown, the others the total), token use per turn, a model picker with each agent's own models and their effort levels (hover a
   model: Low … Max open to the right), `@` file mentions, and a `/` menu: oah's `/model`, `/plan`, `/compact` and `/clear`, then the agent's own
   commands and skills. "Always allow" lasts for the chat's session; it never writes the agent's
   settings files. Messages sent mid-turn are steered in (Codex) or queued (Claude, ACP). Chats

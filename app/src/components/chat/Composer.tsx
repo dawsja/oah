@@ -19,7 +19,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { agentKey, agentName, parseAgentKey, type AgentRef } from "@/lib/agents"
-import { effortLabel, type ModelOption, type SlashCommand } from "@/lib/chat"
+import { effortLabel, type ContextFill, type ModelOption, type SlashCommand } from "@/lib/chat"
+import { ContextRing } from "./ContextRing"
 import { filterCommands, menuCommands, ownCommand, slashQuery, type MenuCommand, type OwnCommand } from "@/lib/commands"
 import { fuzzyPaths, mention, mentionAt } from "@/lib/fuzzy"
 import { git } from "@/lib/git"
@@ -37,6 +38,8 @@ export type ComposerProps = {
   model: string
   /** Reasoning effort; empty: the model's default. */
   effort?: string
+  /** How full the chat's context is (an open chat). */
+  context?: ContextFill | null
   /** The agent's models; empty while unknown. */
   models?: ModelOption[]
   /** Picks a model and its effort (empty: the model's default). */
@@ -441,6 +444,7 @@ export function Composer(p: ComposerProps) {
           </DropdownMenuContent>
         </DropdownMenu>
         <div className="ml-auto flex items-center gap-0.5">
+          <ContextRing context={p.context ?? null} />
           <Tip content="Attach images (up to 5 MB each, 8 at a time)">
             <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Attach image" onClick={() => picker.current?.click()}>
               <Paperclip className="size-3.5" />

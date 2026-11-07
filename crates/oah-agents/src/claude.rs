@@ -118,10 +118,11 @@ impl ClaudeDriver {
             });
         }
         {
-            let (sink, state, child) = (sink.clone(), state.clone(), child.clone());
+            let (sink, state, child, stdin_for_reader) = (sink.clone(), state.clone(), child.clone(), stdin.clone());
             thread::spawn(move || {
                 let reader = BufReader::new(stdout);
                 let mut tr = Translator::new(sink.clone(), state.clone());
+                tr.stdin = Some(stdin_for_reader);
                 for line in reader.lines().map_while(Result::ok) {
                     if let Ok(v) = serde_json::from_str::<Value>(&line) {
                         tr.handle(&v);
@@ -269,13 +270,28 @@ impl Drop for ClaudeDriver {
 struct Translator {
     sink: Sink,
     state: Arc<Mutex<State>>,
+    /// To ask Claude for its context breakdown after a turn (none in tests).
+    stdin: Option<Arc<Mutex<Option<ChildStdin>>>>,
+    asked: u32,
 }
 
 const MAX_OUTPUT: usize = 16 * 1024;
 
 impl Translator {
     fn new(sink: Sink, state: Arc<Mutex<State>>) -> Translator {
-        Translator { sink, state }
+        Translator { sink, state, stdin: None, asked: 0 }
+    }
+
+    /// `get_context_usage`: what the window holds, by category (answered as a control_response).
+    fn ask_context(&mut self) {
+        let Some(stdin) = &self.stdin else { return };
+        self.asked += 1;
+        let req = json!({"type": "control_request", "request_id": format!("oah-ctx-{}", self.asked), "request": {"subtype": "get_context_usage"}});
+        if let Some(w) = stdin.lock().unwrap().as_mut() {
+            let mut line = serde_json::to_vec(&req).unwrap_or_default();
+            line.push(b'\n');
+            let _ = w.write_all(&line).and_then(|_| w.flush());
+        }
     }
 
     fn emit(&self, e: ChatEvent) {
@@ -304,6 +320,11 @@ impl Translator {
                 let commands = parse_commands(&v["response"]["response"]);
                 if !commands.is_empty() {
                     self.emit(ChatEvent::Commands { commands });
+                }
+            }
+            "control_response" if v["response"]["request_id"].as_str().is_some_and(|id| id.starts_with("oah-ctx-")) => {
+                if let Some(e) = parse_context(&v["response"]["response"]) {
+                    self.emit(e);
                 }
             }
             "control_response" if v["response"]["request_id"] == "oah-models" => {
@@ -543,9 +564,11 @@ impl Translator {
                 .sum::<u64>();
             let window = v["modelUsage"].as_object().and_then(|m| m.values().find_map(|x| x["contextWindow"].as_u64())).unwrap_or(200_000);
             if used > 0 {
-                self.emit(ChatEvent::Context { used_tokens: used, window_tokens: window });
+                self.emit(ChatEvent::Context { used_tokens: used, window_tokens: window, parts: vec![] });
             }
         }
+        // And what that context is made of (Claude Code's /context).
+        self.ask_context();
         // A message sent during that turn runs now, as the next turn.
         let next = {
             let mut s = self.state.lock().unwrap();
@@ -585,6 +608,24 @@ pub fn parse_models(r: &Value) -> Vec<ModelOption> {
             })
         })
         .collect()
+}
+
+/// `get_context_usage`'s answer: `{categories: [{name, tokens, kind}], totalTokens, maxTokens}`.
+/// Empty categories are left out; the rest go largest first, with free space last.
+pub fn parse_context(r: &Value) -> Option<ChatEvent> {
+    let used = r["totalTokens"].as_u64()?;
+    let window = r["maxTokens"].as_u64().filter(|w| *w > 0)?;
+    let mut parts: Vec<ContextPart> = r["categories"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let tokens = c["tokens"].as_u64().filter(|t| *t > 0)?;
+            Some(ContextPart { name: c["name"].as_str()?.to_string(), tokens, kind: c["kind"].as_str().unwrap_or("used").to_string() })
+        })
+        .collect();
+    parts.sort_by_key(|p| (p.kind == "free", std::cmp::Reverse(p.tokens)));
+    Some(ChatEvent::Context { used_tokens: used, window_tokens: window, parts })
 }
 
 fn strings(v: &Value) -> Vec<String> {
@@ -810,6 +851,26 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_context_breakdown() {
+        let r = json!({"totalTokens": 45061, "maxTokens": 1000000, "categories": [
+            {"name": "System prompt", "tokens": 3501, "kind": "used"},
+            {"name": "Free space", "tokens": 921939, "kind": "free"},
+            {"name": "MCP tools (deferred)", "tokens": 176195, "kind": "deferred"},
+            {"name": "Messages", "tokens": 12359, "kind": "used"},
+            {"name": "Memory files", "tokens": 0, "kind": "used"}
+        ]});
+        let Some(ChatEvent::Context { used_tokens, window_tokens, parts }) = parse_context(&r) else { panic!() };
+        assert_eq!((used_tokens, window_tokens), (45061, 1_000_000));
+        assert_eq!(
+            parts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["MCP tools (deferred)", "Messages", "System prompt", "Free space"]
+        );
+        assert!(parse_context(&json!({"categories": []})).is_none());
+        let ev = run(&[json!({"type": "control_response", "response": {"subtype": "success", "request_id": "oah-ctx-1", "response": r}})]);
+        assert!(matches!(&ev[..], [ChatEvent::Context { parts, .. }] if parts.len() == 4));
+    }
+
+    #[test]
     fn reads_effort_levels() {
         let m = parse_models(&json!({"models": [
             {"value": "opus", "displayName": "Opus 5.5", "supportsEffort": true, "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
@@ -887,7 +948,7 @@ mod tests {
             }
             e => panic!("{e:?}"),
         }
-        assert!(matches!(&ev[6], ChatEvent::Context { used_tokens: 54630, window_tokens: 1_000_000 }));
+        assert!(matches!(&ev[6], ChatEvent::Context { used_tokens: 54630, window_tokens: 1_000_000, .. }));
     }
 
     #[test]

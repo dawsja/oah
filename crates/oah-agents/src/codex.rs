@@ -362,7 +362,11 @@ impl Translator {
                     acc.cache_write_tokens += usage.cache_write_tokens;
                 }
                 if let Some(window) = u["modelContextWindow"].as_u64() {
-                    self.emit(ChatEvent::Context { used_tokens: last["totalTokens"].as_u64().unwrap_or(input), window_tokens: window });
+                    self.emit(ChatEvent::Context {
+                        used_tokens: last["totalTokens"].as_u64().unwrap_or(input),
+                        window_tokens: window,
+                        parts: vec![],
+                    });
                 }
             }
             "turn/completed" => {
@@ -684,7 +688,7 @@ mod tests {
             e => panic!("{e:?}"),
         }
         assert!(state.lock().unwrap().pending.is_empty(), "the turn ending drops unanswered questions");
-        assert!(matches!(&ev[7], ChatEvent::Context { used_tokens: 20184, window_tokens: 258400 }));
+        assert!(matches!(&ev[7], ChatEvent::Context { used_tokens: 20184, window_tokens: 258400, .. }));
         match &ev[8] {
             ChatEvent::TurnFinished { usage: Some(u), duration_ms: Some(9000), interrupted: false, .. } => {
                 assert_eq!((u.input_tokens, u.cache_read_tokens, u.output_tokens), (7714, 12416, 54));

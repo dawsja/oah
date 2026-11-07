@@ -69,6 +69,8 @@ struct State {
     cost: f64,
     cost_at_turn: f64,
     current_model: Option<String>,
+    /// Set when the process starts; part of every turn id.
+    nonce: String,
     permission: PermissionMode,
 }
 
@@ -118,7 +120,11 @@ impl AcpDriver {
         let stderr = child.stderr.take().ok_or("no stderr")?;
         let rpc = Rpc::new(child.stdin.take(), name.clone());
         let child = Arc::new(Mutex::new(Some(child)));
-        let state = Arc::new(Mutex::new(State { alive: true, permission: opts.permission, ..Default::default() }));
+        let nonce = format!(
+            "{:x}",
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0) % 0xffffff
+        );
+        let state = Arc::new(Mutex::new(State { alive: true, permission: opts.permission, nonce, ..Default::default() }));
 
         let tail = Arc::new(Mutex::new(String::new()));
         {
@@ -323,7 +329,9 @@ fn run_prompt(rpc: Rpc, state: Arc<Mutex<State>>, sink: Sink, queue: Arc<Mutex<V
         s.turns += 1;
         s.stretch += 1;
         s.cost_at_turn = s.cost;
-        let id = format!("turn-{}", s.turns);
+        // Unique per process: a restarted agent counts from 1 again, and ids made from this one
+        // (text without a message id) must not land in an earlier message.
+        let id = format!("turn-{}-{}", s.nonce, s.turns);
         s.turn_id = Some(id.clone());
         (s.session_id.clone().unwrap_or_default(), id)
     };
@@ -570,7 +578,7 @@ impl Translator {
                     self.state.lock().unwrap().cost = amount;
                 }
                 if let (Some(used), Some(size)) = (u["used"].as_u64(), u["size"].as_u64()) {
-                    self.emit(ChatEvent::Context { used_tokens: used, window_tokens: size });
+                    self.emit(ChatEvent::Context { used_tokens: used, window_tokens: size, parts: vec![] });
                 }
             }
             "config_option_update" => {
@@ -1152,7 +1160,7 @@ mod tests {
             e => panic!("{e:?}"),
         }
         assert!(matches!(&ev[7], ChatEvent::Plan { items } if items[0].status == PlanStatus::Completed));
-        assert!(matches!(&ev[8], ChatEvent::Context { used_tokens: 12000, window_tokens: 200000 }));
+        assert!(matches!(&ev[8], ChatEvent::Context { used_tokens: 12000, window_tokens: 200000, .. }));
     }
 
     #[test]
@@ -1332,7 +1340,7 @@ opencode/big-pickle
                             ChatEvent::TextDelta { text: t, .. } => text.push_str(t),
                             ChatEvent::ToolStarted { tool, .. } => eprintln!("  tool: {:?} {}", tool.kind, tool.title),
                             ChatEvent::ToolFinished { ok, .. } => eprintln!("  tool done ok={ok}"),
-                            ChatEvent::Context { used_tokens, window_tokens } => eprintln!("  context {used_tokens}/{window_tokens}"),
+                            ChatEvent::Context { used_tokens, window_tokens, .. } => eprintln!("  context {used_tokens}/{window_tokens}"),
                             ChatEvent::TurnFinished { usage, cost_usd, .. } => eprintln!("  finished usage={usage:?} cost={cost_usd:?}"),
                             ChatEvent::Error { message } => eprintln!("  error: {message}"),
                             _ => {}

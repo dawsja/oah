@@ -29,6 +29,10 @@ export function effortLabel(e: string): string {
   return named[e] ?? e.charAt(0).toUpperCase() + e.slice(1)
 }
 /** `skill`: a Codex skill, mentioned as `$name` instead of run as `/name`. */
+/** Part of the context window: `kind` is used, deferred (loaded when needed), buffer or free. */
+export type ContextPart = { name: string; tokens: number; kind: string }
+/** How full the context window is, and (when the agent says) what fills it. */
+export type ContextFill = { used: number; window: number; parts: ContextPart[] }
 export type SlashCommand = { name: string; description: string; hint: string; skill: boolean }
 export type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
 
@@ -51,7 +55,7 @@ export type ChatEvent =
   | { type: "permissionChanged"; mode: PermissionMode }
   | { type: "plan"; items: PlanItem[] }
   | { type: "turnFinished"; turnId: string; usage: Usage | null; costUsd: number | null; durationMs: number | null; interrupted: boolean }
-  | { type: "context"; usedTokens: number; windowTokens: number }
+  | { type: "context"; usedTokens: number; windowTokens: number; parts?: ContextPart[] }
   | { type: "notice"; level: "info" | "warn"; text: string }
   | { type: "error"; message: string }
   | { type: "exited"; code: number | null; message: string | null }
@@ -89,7 +93,7 @@ export type Transcript = {
   items: Item[]
   running: boolean
   plan: PlanItem[]
-  context: { used: number; window: number } | null
+  context: ContextFill | null
   model: string | null
   /** The agent's working folder, to show paths relative to it. */
   cwd: string | null
@@ -186,11 +190,13 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
         running: false,
         approvals: [],
         questions: [],
-        items: [...settled, { kind: "turnEnd", id: e.turnId, usage: e.usage, costUsd: e.costUsd, durationMs: e.durationMs, interrupted: e.interrupted }],
+        // A restarted CLI counts turns from 1 again: the position keeps the id unique.
+        items: [...settled, { kind: "turnEnd", id: `${e.turnId}@${items.length}`, usage: e.usage, costUsd: e.costUsd, durationMs: e.durationMs, interrupted: e.interrupted }],
       }
     }
     case "context":
-      return { ...t, context: { used: e.usedTokens, window: e.windowTokens } }
+      // A total without a breakdown keeps the last breakdown until a new one comes.
+      return { ...t, context: { used: e.usedTokens, window: e.windowTokens, parts: e.parts?.length ? e.parts : (t.context?.parts ?? []) } }
     case "notice":
       return push({ kind: "notice", id: uid("n"), level: e.level, text: e.text })
     case "error":
@@ -228,8 +234,9 @@ export function blocks(items: Item[]): Block[] {
 }
 
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`
+  // 1M, 1.5M, 9.9k, 54k: no trailing ".0".
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1).replace(/\.0$/, "")}k`
   return String(n)
 }
 

@@ -99,6 +99,9 @@ pub enum ChatEvent {
     Context {
         used_tokens: u64,
         window_tokens: u64,
+        /// What the window holds, when the agent says (Claude Code's `/context`): largest first.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parts: Vec<ContextPart>,
     },
     Notice {
         level: NoticeLevel,
@@ -237,6 +240,16 @@ pub struct Question {
 pub struct QuestionOption {
     pub label: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextPart {
+    /// "Messages", "System tools", "Free space"…
+    pub name: String,
+    pub tokens: u64,
+    /// `used`, `deferred` (loaded only when needed), `buffer` (kept free for compaction) or `free`.
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

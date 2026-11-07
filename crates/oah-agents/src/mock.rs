@@ -214,7 +214,21 @@ fn play(n: u32, text: &str, sink: Sink, stop: Arc<AtomicBool>, answers: Receiver
             duration_ms: Some(14_800),
             interrupted,
         });
-        sink(ChatEvent::Context { used_tokens: 61_000 + n as u64 * 4_000, window_tokens: 200_000 });
+        let used = 61_000 + n as u64 * 4_000;
+        let p = |name: &str, tokens: u64, kind: &str| ContextPart { name: name.into(), tokens, kind: kind.into() };
+        sink(ChatEvent::Context {
+            used_tokens: used,
+            window_tokens: 200_000,
+            parts: vec![
+                p("Messages", used - 31_000, "used"),
+                p("System tools", 18_000, "used"),
+                p("Skills", 9_000, "used"),
+                p("System prompt", 3_500, "used"),
+                p("MCP tools (deferred)", 22_000, "deferred"),
+                p("Autocompact buffer", 33_000, "buffer"),
+                p("Free space", 200_000 - used - 33_000, "free"),
+            ],
+        });
     };
     sink(ChatEvent::TurnStarted { turn_id: turn.clone() });
     for chunk in ["The user wants ", "me to look at how settings ", "are saved. I'll read the file first, ", "then fix the write path."] {
