@@ -12,6 +12,7 @@ repository = "https://github.com/dawsja/oah"
 oah-core = { path = "crates/oah-core" }
 oah-transport = { path = "crates/oah-transport" }
 oah-agents = { path = "crates/oah-agents" }
+oah-git = { path = "crates/oah-git" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

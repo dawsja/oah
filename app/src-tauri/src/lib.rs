@@ -2,6 +2,7 @@
 //! crates; this file only adapts them to IPC.
 
 mod chats;
+mod git;
 
 use std::sync::Mutex;
 
@@ -16,14 +17,14 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
 /// The settings as last saved, shared by every command.
-struct AppState {
-    settings: Mutex<Settings>,
+pub(crate) struct AppState {
+    pub(crate) settings: Mutex<Settings>,
     chats: chats::Chats,
 }
 
-type CmdResult<T> = Result<T, String>;
+pub(crate) type CmdResult<T> = Result<T, String>;
 
-fn err(e: impl std::fmt::Display) -> String {
+pub(crate) fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
@@ -231,6 +232,21 @@ pub fn run() {
             chat_close,
             chat_delete,
             chat_rename,
+            git::git_status,
+            git::git_diff,
+            git::git_stage,
+            git::git_unstage,
+            git::git_discard,
+            git::git_commit,
+            git::git_branches,
+            git::git_switch,
+            git::git_sync,
+            git::git_log,
+            git::git_commit_files,
+            git::git_commit_diff,
+            git::files_list,
+            git::files_grep,
+            git::file_read,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oah")

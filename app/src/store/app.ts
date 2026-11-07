@@ -110,6 +110,7 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ view: "chat" })
   },
   selectProject(id) {
+    if (id !== get().projectId) import("./git").then((m) => m.useGit.getState().open(null))
     set({ projectId: id, view: "chat" })
     if (id) localStorage.setItem("oah.project", id)
   },

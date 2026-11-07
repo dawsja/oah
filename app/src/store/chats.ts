@@ -47,6 +47,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
 
   async open(chatId) {
     useApp.setState({ chatId, view: "chat" })
+    import("./git").then((m) => m.useGit.getState().open(null))
     if (get().transcripts[chatId]) return
     const events = await ipc.chatEvents(chatId).catch(() => [] as ChatEvent[])
     const running = await ipc.chatRunning().catch(() => [] as string[])

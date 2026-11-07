@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ArrowUp, ChevronDown, Mic, Paperclip, Square } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { AgentGlyph } from "@/components/icons"
@@ -29,6 +29,18 @@ const PERMISSIONS: PermissionMode[] = ["ask", "acceptEdits", "plan", "fullAccess
 export function Composer(p: ComposerProps) {
   const [text, setText] = useState("")
   const ref = useRef<HTMLTextAreaElement>(null)
+  // "Add to chat" from the side panel puts `@path ` at the cursor.
+  useEffect(() => {
+    const onInsert = (e: Event) => {
+      const add = (e as CustomEvent<string>).detail
+      const el = ref.current
+      const at = el?.selectionStart ?? text.length
+      setText((t) => t.slice(0, at) + (at > 0 && !/\s$/.test(t.slice(0, at)) ? " " : "") + add + t.slice(at))
+      requestAnimationFrame(() => el?.focus())
+    }
+    window.addEventListener("oah:insert", onInsert)
+    return () => window.removeEventListener("oah:insert", onInsert)
+  }, [text.length])
   const send = () => {
     const t = text.trim()
     if (!t || p.disabled) return

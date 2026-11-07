@@ -1,20 +1,28 @@
-import { Files, GitBranch, GitPullRequest, History, type LucideIcon } from "lucide-react"
+import { Files as FilesIcon, GitBranch, GitPullRequest, History as HistoryIcon, type LucideIcon } from "lucide-react"
 import { Tip } from "@/components/Tip"
+import { changeCount } from "@/lib/git"
 import { cn } from "@/lib/utils"
-import { type RightTab, useApp, useProject } from "@/store/app"
+import { type RightTab, useApp } from "@/store/app"
+import { useScope, useStatus } from "@/store/git"
+import { Files } from "./Files"
+import { History } from "./History"
+import { PullRequest } from "./PullRequest"
+import { SourceControl } from "./SourceControl"
 
 const TABS: { id: RightTab; label: string; icon: LucideIcon }[] = [
-  { id: "files", label: "Files", icon: Files },
+  { id: "files", label: "Files", icon: FilesIcon },
   { id: "scm", label: "Source Control", icon: GitBranch },
-  { id: "history", label: "History", icon: History },
+  { id: "history", label: "History", icon: HistoryIcon },
   { id: "pr", label: "Pull Request", icon: GitPullRequest },
 ]
 
-/** The side panel on the right: files and git for the current workspace. */
+/** The side panel on the right: files and git for the workspace on screen. */
 export function RightPanel() {
   const tab = useApp((s) => s.layout.rightTab)
   const setLayout = useApp((s) => s.setLayout)
-  const project = useProject()
+  const scope = useScope()
+  const { status } = useStatus(scope)
+  const count = changeCount(status)
   const current = TABS.find((t) => t.id === tab) ?? TABS[1]
 
   return (
@@ -33,20 +41,25 @@ export function RightPanel() {
               onClick={() => setLayout({ rightTab: t.id })}
             >
               <t.icon className="size-4" />
+              {t.id === "scm" && count > 0 ? (
+                <span className="absolute top-1 right-0.5 min-w-3.5 bg-primary px-0.5 text-center font-mono text-[9px] leading-3.5 text-primary-foreground">{count > 99 ? "99" : count}</span>
+              ) : null}
             </button>
           </Tip>
         ))}
-        <span className="ml-auto self-center pr-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{current.label}</span>
+        <span className="ml-auto self-center truncate pr-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{current.label}</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {project ? (
-          <div className="p-4 text-[12px] leading-relaxed text-muted-foreground">
-            <div className="border border-dashed p-3">
-              {current.label} for <span className="text-foreground">{project.name}</span> shows up here.
-            </div>
-          </div>
-        ) : (
+        {!scope ? (
           <div className="p-4 text-[12px] text-faint">No project selected.</div>
+        ) : tab === "files" ? (
+          <Files scope={scope} />
+        ) : tab === "history" ? (
+          <History scope={scope} />
+        ) : tab === "pr" ? (
+          <PullRequest scope={scope} />
+        ) : (
+          <SourceControl scope={scope} />
         )}
       </div>
     </aside>

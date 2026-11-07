@@ -10,6 +10,8 @@ import { AGENT_LABEL, locationLabel, type AgentKind, type Project } from "@/lib/
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
 import { useChats } from "@/store/chats"
+import { useGit, useScope } from "@/store/git"
+import { Viewer } from "./Viewer"
 import { ApprovalCard } from "./Approval"
 import { Composer } from "./Composer"
 import { CwdContext } from "./cwd"
@@ -22,6 +24,8 @@ export function ChatView() {
   const project = useProject()
   const meta = useChats((s) => s.metas.find((m) => m.id === chatId))
   const transcript = useChats((s) => (chatId ? s.transcripts[chatId] : undefined))
+  const viewer = useGit((s) => s.viewer)
+  const scope = useScope()
 
   useEffect(() => {
     if (chatId && !transcript) useChats.getState().open(chatId)
@@ -29,6 +33,7 @@ export function ChatView() {
 
   if (!settings) return null
   if (!project) return <NoProject />
+  if (viewer && scope) return <Viewer scope={scope} viewer={viewer} />
   if (chatId && meta && meta.projectId === project.id) return <OpenChat project={project} meta={meta} transcript={transcript ?? emptyTranscript()} />
   return <NewChat project={project} />
 }

@@ -1,0 +1,15 @@
+[package]
+name = "oah-git"
+description = "oah: git and GitHub for the side panel and worktrees, through the git and gh CLIs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oah-core.workspace = true
+oah-transport.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
