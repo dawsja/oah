@@ -112,3 +112,56 @@ mod tests {
         assert!(command(&spec).is_err());
     }
 }
+
+/// What a finished command printed.
+#[derive(Debug, Clone)]
+pub struct Output {
+    pub code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl Output {
+    pub fn ok(&self) -> bool {
+        self.code == Some(0)
+    }
+}
+
+/// Runs `spec` to completion with `input` on stdin (none: closed), giving up after `limit`.
+pub fn run(spec: &Spec, input: Option<&[u8]>, limit: std::time::Duration) -> Result<Output, String> {
+    use std::io::{Read, Write};
+    let mut child = command(spec)?.spawn().map_err(|e| format!("couldn't run {}: {e}", spec.program))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Some(data) = input {
+            let _ = stdin.write_all(data);
+        }
+    }
+    let mut out = child.stdout.take().ok_or("no stdout")?;
+    let mut err = child.stderr.take().ok_or("no stderr")?;
+    let t_out = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        let _ = out.read_to_end(&mut b);
+        b
+    });
+    let t_err = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        let _ = err.read_to_end(&mut b);
+        b
+    });
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) if start.elapsed() > limit => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{} didn't finish in {}s", spec.program, limit.as_secs()));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(15)),
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+    let stdout = String::from_utf8_lossy(&t_out.join().unwrap_or_default()).into_owned();
+    let stderr = String::from_utf8_lossy(&t_err.join().unwrap_or_default()).into_owned();
+    Ok(Output { code: status.code(), stdout, stderr })
+}

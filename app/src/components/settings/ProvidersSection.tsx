@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { ipc } from "@/lib/ipc"
-import { AGENTS, AGENT_LABEL, PERMISSION_LABEL, type AgentKind, type PermissionMode, type Probe, type Provider } from "@/lib/types"
+import { AGENTS, AGENT_LABEL, PERMISSION_LABEL, type Account, type AgentKind, type PermissionMode, type Probe, type Provider } from "@/lib/types"
 import { useApp } from "@/store/app"
 import { Dot, Group, Row, Section, Segmented } from "./layout"
 
@@ -94,9 +94,7 @@ function ProviderCard({ kind, provider }: { kind: AgentKind; provider: Provider 
           Install: {kind === "claude" ? "npm i -g @anthropic-ai/claude-code" : "npm i -g @openai/codex"}
         </div>
       ) : null}
-      <Row label="Sign-in" description={kind === "claude" ? "Run `claude` once and use /login, or set ANTHROPIC_API_KEY below." : "Sign in with ChatGPT or an API key."}>
-        <span className="text-[12px] text-faint">Checked when a chat starts</span>
-      </Row>
+      <SignIn kind={kind} installed={!!probe?.found} />
       <Row label="Default model" description="Empty uses the CLI's own default.">
         <Input
           className="h-7 w-56 font-mono text-[12px]"
@@ -122,6 +120,44 @@ function ProviderCard({ kind, provider }: { kind: AgentKind; provider: Provider 
       </Row>
       <EnvRows kind={kind} provider={provider} />
     </Group>
+  )
+}
+
+function SignIn({ kind, installed }: { kind: AgentKind; installed: boolean }) {
+  const [account, setAccount] = useState<Account | null>(null)
+  const check = () => {
+    setAccount(null)
+    ipc.providerAccount(kind).then(setAccount, (e) => setAccount({ signedIn: false, label: null, plan: null, error: String(e) }))
+  }
+  useEffect(() => {
+    if (installed) check()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [installed])
+  const desc = !installed ? (
+    "Install it first."
+  ) : !account ? (
+    "Checking…"
+  ) : account.signedIn ? (
+    <span className="flex items-center gap-1.5">
+      <Dot tone="ok" /> Signed in{account.label ? <> as <span className="text-foreground">{account.label}</span></> : null}
+      {account.plan ? <span className="border px-1 font-mono text-[10.5px] uppercase">{account.plan}</span> : null}
+    </span>
+  ) : (
+    <span className="flex items-center gap-1.5">
+      <Dot tone="warn" /> {account.error ?? "Not signed in"}
+    </span>
+  )
+  return (
+    <Row label="Sign-in" description={desc}>
+      {account && !account.signedIn ? (
+        <Button size="xs" onClick={() => ipc.providerLogin(kind).then(() => setTimeout(check, 4000))}>
+          Sign in
+        </Button>
+      ) : null}
+      <Button variant="outline" size="xs" onClick={check} disabled={!installed}>
+        Check
+      </Button>
+    </Row>
   )
 }
 

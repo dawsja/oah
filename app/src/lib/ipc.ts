@@ -3,7 +3,7 @@
 // without the shell.
 
 import type { ChatEvent, ChatMeta, Decision } from "./chat"
-import type { AgentKind, AppInfo, Location, PermissionMode, Probe, Project, Settings } from "./types"
+import type { Account, AgentKind, AppInfo, Limits, Location, PermissionMode, Probe, Project, Settings } from "./types"
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
@@ -23,6 +23,9 @@ export const ipc = {
   projectRemove: (id: string) => call<Settings>("project_remove", { id }),
   sshConfigHosts: () => call<string[]>("ssh_config_hosts"),
   providerProbe: (kind: AgentKind, binary: string) => call<Probe>("provider_probe", { kind, binary }),
+  providerAccount: (kind: AgentKind, host: string | null = null) => call<Account>("provider_account", { kind, host }),
+  providerLimits: (kind: AgentKind) => call<Limits>("provider_limits", { kind }),
+  providerLogin: (kind: AgentKind) => call<void>("provider_login", { kind }),
 
   chatList: () => call<ChatMeta[]>("chat_list"),
   chatRunning: () => call<string[]>("chat_running"),
@@ -132,6 +135,10 @@ async function web(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       return a.kind === "claude"
         ? { found: true, path: "C:/Users/you/.local/bin/claude.exe", version: "2.1.319", error: null }
         : { found: true, path: "C:/Users/you/AppData/Roaming/npm/codex.cmd", version: "0.166.0", error: null }
+    case "provider_account":
+      return { signedIn: true, label: "you@example.com", plan: a.kind === "claude" ? "max" : null, error: null }
+    case "provider_limits":
+      return { windows: [], error: "Limits load in the app" }
     case "chat_list":
     case "chat_running":
     case "chat_events":

@@ -5,6 +5,7 @@ mod chats;
 
 use std::sync::Mutex;
 
+use oah_agents::account::{self, Account, Limits};
 use oah_agents::driver::Prompt;
 use oah_agents::event::Decision;
 use oah_agents::probe::{self, Probe};
@@ -98,6 +99,33 @@ async fn provider_probe(kind: AgentKind, binary: String) -> Probe {
         .unwrap_or_else(|e| Probe { found: false, path: None, version: None, error: Some(e.to_string()) })
 }
 
+/// Who the agent's CLI is signed in as (on this computer, or `host`).
+#[tauri::command]
+async fn provider_account(state: State<'_, AppState>, kind: AgentKind, host: Option<String>) -> CmdResult<Account> {
+    let binary = state.settings.lock().unwrap().providers.get(kind).binary.clone();
+    let location = host.map(|host| Location::Ssh { host }).unwrap_or(Location::Local);
+    tauri::async_runtime::spawn_blocking(move || account::account(kind, &binary, &location)).await.map_err(err)
+}
+
+/// The agent's plan limits (this computer's sign-in).
+#[tauri::command]
+async fn provider_limits(state: State<'_, AppState>, kind: AgentKind) -> CmdResult<Limits> {
+    let binary = state.settings.lock().unwrap().providers.get(kind).binary.clone();
+    tauri::async_runtime::spawn_blocking(move || match kind {
+        AgentKind::Claude => account::claude_limits(),
+        AgentKind::Codex => account::codex_limits(&binary),
+    })
+    .await
+    .map_err(err)
+}
+
+/// Opens a terminal running the CLI's sign-in.
+#[tauri::command]
+fn provider_login(state: State<AppState>, kind: AgentKind) -> CmdResult<()> {
+    let binary = state.settings.lock().unwrap().providers.get(kind).binary.clone();
+    account::open_login(kind, &binary)
+}
+
 // ---- Chats -----------------------------------------------------------------------------------
 
 #[tauri::command]
@@ -189,6 +217,9 @@ pub fn run() {
             project_remove,
             ssh_config_hosts,
             provider_probe,
+            provider_account,
+            provider_limits,
+            provider_login,
             chat_list,
             chat_running,
             chat_create,

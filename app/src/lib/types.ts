@@ -68,3 +68,7 @@ export function locationLabel(l: Location): string {
 }
 
 export type Probe = { found: boolean; path: string | null; version: string | null; error: string | null }
+
+export type Account = { signedIn: boolean; label: string | null; plan: string | null; error: string | null }
+export type LimitWindow = { label: string; usedPercent: number; resetsAt: number | null }
+export type Limits = { windows: LimitWindow[]; error: string | null }

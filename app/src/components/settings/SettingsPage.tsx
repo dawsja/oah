@@ -36,7 +36,7 @@ export function SettingsPage() {
             {s.label}
           </button>
         ))}
-        <div className="mt-auto px-4 font-mono text-[10.5px] leading-relaxed text-faint">
+        <div className="mt-auto px-4 font-mono text-[10.5px] leading-relaxed break-all text-faint">
           oah {info?.version}
           <br />
           {info?.dataDir}
