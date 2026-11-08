@@ -31,6 +31,7 @@ import { useApp } from "@/store/app"
 import { useScope } from "@/store/git"
 import { drafts } from "@/store/drafts"
 import { cn } from "@/lib/utils"
+import { PromptHistory, historyBoundary } from "@/lib/prompt-history"
 import { Dictation } from "./Dictation"
 
 export type ComposerProps = {
@@ -65,6 +66,7 @@ export type ComposerProps = {
   /** Ctrl/⌘+Enter with nothing typed while the agent works: the first queued message goes now. */
   onSteerQueued?: () => void
   /** Where what's typed is kept until it's sent (see `draftKey`); mount one composer per key. */
+  history?: string[]
   draftKey?: string
   className?: string
   autoFocus?: boolean
@@ -90,6 +92,19 @@ const fileCache = new Map<string, { at: number; files: Promise<string[]> }>()
 
 /** The prompt box: text, then a toolbar with the agent, model and permission chips. */
 export function Composer(p: ComposerProps) {
+  const history = useRef(new PromptHistory())
+  const seenHistory = useRef(0)
+  useEffect(() => {
+    const entries = p.history ?? []
+    for (const entry of entries.slice(seenHistory.current)) history.current.add(entry)
+    seenHistory.current = entries.length
+  }, [p.history])
+  const remember = (value: string) => {
+    history.current.add(value)
+    history.current.reset()
+    setSlash(null)
+    setMenu(null)
+  }
   const PermissionIcon = PERMISSION_ICON[p.permission]
   const settings = useApp((s) => s.settings)
   const scope = useScope()
@@ -157,11 +172,13 @@ export function Composer(p: ComposerProps) {
     const el = ref.current
     setSlash(null)
     if (run && c.own) {
+      remember(`/${c.name}`)
       setText("")
       runOwn(c.own, "")
       return
     }
     if (run && !c.skill && !c.hint) {
+      remember(`/${c.name}`)
       setText("")
       p.onSend?.(`/${c.name}`, [], "send")
       return
@@ -229,6 +246,7 @@ export function Composer(p: ComposerProps) {
     const t = text.trim()
     if (!t && !images.length && how === "steer" && p.running) return p.onSteerQueued?.()
     if ((!t && !images.length) || p.disabled) return
+    remember(t)
     const own = images.length ? null : ownCommand(t, inChat)
     if (own) {
       runOwn(own.own, own.args)
@@ -384,6 +402,23 @@ export function Composer(p: ComposerProps) {
               e.stopPropagation()
               setMenu(null)
               return
+            }
+          }
+          if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.nativeEvent.isComposing && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            const direction = e.key === "ArrowUp" ? -1 : 1
+            const el = e.currentTarget
+            if (historyBoundary(text, el.selectionStart, el.selectionEnd, direction)) {
+              const recalled = history.current.move(direction, text)
+              if (recalled !== null) {
+                e.preventDefault()
+                setText(recalled)
+                // A recalled /command is text to resend, not a fresh autocomplete query.
+                setSlash(null)
+                setMenu(null)
+                const caret = direction === -1 ? 0 : recalled.length
+                requestAnimationFrame(() => el.setSelectionRange(caret, caret))
+                return
+              }
             }
           }
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {

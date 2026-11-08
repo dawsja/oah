@@ -52,7 +52,7 @@ function useAgentDefaults(project: Project, agent: AgentRef) {
   return { model: project.defaultModel || provider?.defaultModel || "", permission: provider?.permissionMode ?? "ask" }
 }
 
-/** Each agent's models and slash commands, asked once per project (and kept for the session). */
+/** Share in-flight catalog requests; opening the menu refreshes externally changed credentials. */
 const catalogCache = new Map<string, Promise<Catalog>>()
 /** The commands a running chat of each agent last listed, so a new chat has them at once. */
 const seenCommands = new Map<string, SlashCommand[]>()
@@ -63,10 +63,10 @@ function useCatalog(agent: AgentRef, projectId: string, live: { models: ModelOpt
   if (live.commands.length) seenCommands.set(key, live.commands)
   const load = () => {
     if (agent.kind === "acp") return setFetched({ models: [], commands: [] })
-    if (!catalogCache.has(key)) catalogCache.set(key, ipc.providerCatalog(agent.kind, projectId).catch(() => ({ models: [], commands: [] })))
-    catalogCache.get(key)!.then(setFetched)
+    if (!catalogCache.has(key)) catalogCache.set(key, ipc.providerCatalog(agent.kind, projectId).finally(() => catalogCache.delete(key)))
+    catalogCache.get(key)!.then(setFetched).catch(() => {})
   }
-  const models = live.models.length ? live.models : fetched?.models
+  const models = agent.kind === "opencode" && fetched ? fetched.models : live.models.length ? live.models : fetched?.models
   const commands = live.commands.length ? live.commands : (seenCommands.get(key) ?? fetched?.commands ?? [])
   return { models, commands, load }
 }
@@ -172,6 +172,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
         <div className="shrink-0">
           {queued.length ? <QueueDock chatId={meta.id} items={queued} running={transcript.running} /> : null}
           <Composer
+            history={transcript.items.filter((item) => item.kind === "user").map((item) => item.text)}
             key={meta.id}
             draftKey={draftKey(meta.id, project.id)}
             agent={agent}
