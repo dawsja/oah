@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use oah_remote::client::{self, Client};
-use oah_remote::pairing::Link;
 use oah_remote::server::{Event, Feed, Host, Server};
 use oah_remote::Identity;
 use serde_json::{json, Value};
@@ -104,20 +103,19 @@ async fn pairs_by_code_then_connects() {
     let (host, server, addr) = start().await;
     let phone = Identity::generate();
 
-    let e = client::pair(&addr, "AAAA-BBBB", "Pixel", &phone, None).await.unwrap_err();
+    let e = client::pair(&addr, "AAAA-BBBB", "Pixel", &phone).await.unwrap_err();
     assert!(e.contains("No pairing code"), "{e}");
 
     let code = server.open_pairing().code;
     // A dead address next to the live one: the live one wins.
     let addrs = vec!["127.0.0.1:1".to_string(), addr[0].clone()];
-    let p =
-        client::pair(&addrs, &oah_remote::pairing::format_code(&code).to_lowercase(), "Pixel", &phone, Some(host.id.public)).await.unwrap();
+    let p = client::pair(&addrs, &oah_remote::pairing::format_code(&code).to_lowercase(), "Pixel", &phone).await.unwrap();
     assert_eq!(p.device_id, "dev1");
     assert_eq!(p.desktop_name, "test-pc");
     assert_eq!(p.desktop_key, host.id.public);
     assert_eq!(p.address, addr[0]);
     assert!(server.pairing().is_none(), "the code is used up");
-    assert!(client::pair(&addr, &code, "Again", &Identity::generate(), None).await.is_err());
+    assert!(client::pair(&addr, &code, "Again", &Identity::generate()).await.is_err());
 
     let c = Client::connect(&addrs, &phone, &p.desktop_key, |_| {}).await.unwrap();
     assert_eq!(c.desktop_name, "test-pc");
@@ -142,26 +140,15 @@ async fn wrong_codes_count_and_close_the_code() {
     let code = server.open_pairing().code;
     let wrong = format!("{}{}", if code.starts_with('0') { "1" } else { "0" }, &code[1..]);
     for i in 1..=4 {
-        let e = client::pair(&addr, &wrong, "x", &Identity::generate(), None).await.unwrap_err();
+        let e = client::pair(&addr, &wrong, "x", &Identity::generate()).await.unwrap_err();
         assert!(e.contains("isn't right"), "{e}");
         assert!(host.events.lock().unwrap().contains(&Event::PairFailed { left: 5 - i }));
     }
-    let e = client::pair(&addr, &wrong, "x", &Identity::generate(), None).await.unwrap_err();
+    let e = client::pair(&addr, &wrong, "x", &Identity::generate()).await.unwrap_err();
     assert!(e.contains("closed"), "{e}");
     // Even the right code is refused now.
-    let e = client::pair(&addr, &code, "x", &Identity::generate(), None).await.unwrap_err();
+    let e = client::pair(&addr, &code, "x", &Identity::generate()).await.unwrap_err();
     assert!(e.contains("No pairing code"), "{e}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn qr_key_must_match() {
-    let (_host, server, addr) = start().await;
-    let code = server.open_pairing().code;
-    let e = client::pair(&addr, &code, "x", &Identity::generate(), Some(Identity::generate().public)).await.unwrap_err();
-    assert!(e.contains("isn't the one"), "{e}");
-
-    let link = Link { addresses: addr.clone(), code: code.clone(), desktop_name: "test-pc".into(), desktop_key: Some([7; 32]) };
-    assert_eq!(Link::parse(&link.to_url()).unwrap().code, code);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -175,7 +162,7 @@ async fn unknown_and_revoked_phones_are_refused() {
     // Wrong desktop key: the desktop can't read the handshake.
     let code = server.open_pairing().code;
     let phone = Identity::generate();
-    let p = client::pair(&addr, &code, "P", &phone, None).await.unwrap();
+    let p = client::pair(&addr, &code, "P", &phone).await.unwrap();
     assert!(Client::connect(&addr, &phone, &Identity::generate().public, |_| {}).await.is_err());
 
     let c = Client::connect(&addr, &phone, &p.desktop_key, |_| {}).await.unwrap();
@@ -193,7 +180,7 @@ async fn chat_snapshot_then_live_events_without_gaps() {
     let (host, server, addr) = start().await;
     let phone = Identity::generate();
     let code = server.open_pairing().code;
-    let p = client::pair(&addr, &code, "P", &phone, None).await.unwrap();
+    let p = client::pair(&addr, &code, "P", &phone).await.unwrap();
     let pushes = Arc::new(Mutex::new(Vec::<Value>::new()));
     let pp = pushes.clone();
     let c = Client::connect(&addr, &phone, &p.desktop_key, move |v| pp.lock().unwrap().push(v)).await.unwrap();

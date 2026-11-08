@@ -36,7 +36,7 @@ type Store = {
   catalogs: Record<string, Catalog>
 
   init(): Promise<void>
-  pair(o: { link?: string; addresses?: string[]; code?: string; name?: string }): Promise<Desktop>
+  pair(o: { addresses: string[]; code: string; name?: string }): Promise<Desktop>
   forget(id: string): Promise<void>
   connect(id: string): Promise<void>
   refresh(): Promise<void>

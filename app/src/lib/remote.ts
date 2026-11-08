@@ -15,7 +15,7 @@ export type RemoteState = {
   error: string | null
   desktopName: string
 }
-export type PairingInfo = { code: string; expiresAt: number; qrSvg: string; url: string; addresses: string[] }
+export type PairingInfo = { code: string; expiresAt: number; addresses: string[] }
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core")

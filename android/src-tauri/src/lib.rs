@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use oah_remote::client::{self, Client};
-use oah_remote::pairing::{self, Link};
+use oah_remote::pairing;
 use oah_remote::Identity;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -116,33 +116,18 @@ fn desktops(state: State<AppState>) -> Vec<Desktop> {
     state.saved.lock().unwrap().desktops.clone()
 }
 
-/// Pairs with a desktop: from a scanned `link`, or typed `addresses` and `code`.
+/// Pairs with a desktop from the `addresses` and `code` it shows.
 #[tauri::command]
-async fn pair(
-    state: State<'_, AppState>,
-    link: Option<String>,
-    addresses: Vec<String>,
-    code: String,
-    name: String,
-) -> Result<Desktop, String> {
-    let (addresses, code, expected) = match link.filter(|l| !l.trim().is_empty()) {
-        Some(l) => {
-            let l = Link::parse(&l)?;
-            (l.addresses, l.code, l.desktop_key)
-        }
-        None => {
-            let addresses: Vec<String> = addresses.iter().map(|a| a.trim()).filter(|a| !a.is_empty()).map(with_port).collect();
-            if addresses.is_empty() {
-                return Err("Type the desktop's address (Settings → Phone shows it).".into());
-            }
-            if pairing::normalize_code(&code).len() != pairing::CODE_LEN {
-                return Err("The code has 8 characters.".into());
-            }
-            (addresses, code, None)
-        }
-    };
+async fn pair(state: State<'_, AppState>, addresses: Vec<String>, code: String, name: String) -> Result<Desktop, String> {
+    let addresses: Vec<String> = addresses.iter().map(|a| a.trim()).filter(|a| !a.is_empty()).map(with_port).collect();
+    if addresses.is_empty() {
+        return Err("Type the desktop's address (Settings → Phone shows it).".into());
+    }
+    if pairing::normalize_code(&code).len() != pairing::CODE_LEN {
+        return Err("The code has 8 characters.".into());
+    }
     let name = if name.trim().is_empty() { "Android phone".to_string() } else { name.trim().to_string() };
-    let p = client::pair(&addresses, &code, &name, &state.identity, expected).await?;
+    let p = client::pair(&addresses, &code, &name, &state.identity).await?;
     let id = oah_remote::b64(&p.desktop_key);
     // The address that answered goes first; the others stay for other networks.
     let mut all = vec![p.address.clone()];
@@ -284,13 +269,9 @@ async fn rpc(state: State<'_, AppState>, method: String, params: Value) -> Resul
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    #[cfg_attr(not(mobile), allow(unused_mut))]
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_clipboard_manager::init()).plugin(tauri_plugin_opener::init());
-    #[cfg(mobile)]
-    {
-        builder = builder.plugin(tauri_plugin_barcode_scanner::init());
-    }
-    builder
+    tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let dir = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
             app.manage(AppState::load(dir.join("desktops.json")));

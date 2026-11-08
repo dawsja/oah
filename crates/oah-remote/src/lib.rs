@@ -1,9 +1,9 @@
 //! Phones controlling the desktop app (the oah Android app).
 //!
-//! - **Pairing** ([`pairing`]): the desktop shows a one-time code, and a QR with the same code,
-//!   its addresses and its public key. The phone and the desktop run SPAKE2 on the code, so an
-//!   attacker on the network learns nothing beyond one wrong guess, and five wrong guesses close
-//!   the code. Under the key SPAKE2 gives them, they swap long-term X25519 public keys.
+//! - **Pairing** ([`pairing`]): the desktop shows a one-time code and its addresses; the phone
+//!   types both. The phone and the desktop run SPAKE2 on the code, so an attacker on the network
+//!   learns nothing beyond one wrong guess, and five wrong guesses close the code. Under the key
+//!   SPAKE2 gives them, they swap long-term X25519 public keys.
 //! - **Sessions** ([`wire`]): every later connection is a Noise `IK` handshake. The phone knows
 //!   the desktop's key, the desktop only takes keys of paired phones, and each session has its
 //!   own keys (forward secrecy). Traffic is plain `ws://`; everything inside it is encrypted,
@@ -62,7 +62,7 @@ impl Identity {
     }
 }
 
-/// URL-safe base64 without padding (keys in QR codes, settings and files).
+/// URL-safe base64 without padding (keys in settings and files).
 pub fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }

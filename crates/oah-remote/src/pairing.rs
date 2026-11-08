@@ -1,5 +1,5 @@
-//! Pairing a phone: the one-time code, the QR link that carries it, and the SPAKE2 exchange
-//! both sides run on it.
+//! Pairing a phone: the one-time code the desktop shows (the phone types it, with an address),
+//! and the SPAKE2 exchange both sides run on it.
 //!
 //! On the wire (WebSocket binary frames, see [`crate::wire`]):
 //! 1. phone → `PAIR` + SPAKE2 message; desktop → `PAIR` + its SPAKE2 message. Both now hold a
@@ -86,96 +86,6 @@ impl Default for Session {
     }
 }
 
-// ---- The QR link -----------------------------------------------------------------------------
-
-/// What the QR code carries: `oah://pair?v=1&a=<host:port,…>&c=<code>&n=<name>&k=<key>`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Link {
-    /// `host:port` to try, best first.
-    pub addresses: Vec<String>,
-    pub code: String,
-    pub desktop_name: String,
-    /// The desktop's public key: the phone checks the desktop it paired with has it.
-    pub desktop_key: Option<[u8; 32]>,
-}
-
-impl Link {
-    pub fn to_url(&self) -> String {
-        let mut s = format!("oah://pair?v={}&a={}&c={}", crate::PROTOCOL, enc(&self.addresses.join(",")), normalize_code(&self.code));
-        if !self.desktop_name.is_empty() {
-            s.push_str(&format!("&n={}", enc(&self.desktop_name)));
-        }
-        if let Some(k) = &self.desktop_key {
-            s.push_str(&format!("&k={}", crate::b64(k)));
-        }
-        s
-    }
-
-    /// Reads a scanned link. Errors say what's wrong in words a person can act on.
-    pub fn parse(url: &str) -> Result<Link, String> {
-        let url = url.trim();
-        let query = url
-            .strip_prefix("oah://pair?")
-            .or_else(|| url.strip_prefix("oah://pair/?"))
-            .ok_or("That QR code isn't an oah pairing code.")?;
-        let mut link = Link { addresses: vec![], code: String::new(), desktop_name: String::new(), desktop_key: None };
-        for pair in query.split('&') {
-            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-            let v = dec(v);
-            match k {
-                "v" if v.parse::<u32>().map_or(true, |n| n > crate::PROTOCOL) => {
-                    return Err("This desktop's oah is newer than this app. Update the app.".into());
-                }
-                "a" => link.addresses = v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect(),
-                "c" => link.code = normalize_code(&v),
-                "n" => link.desktop_name = v,
-                "k" => link.desktop_key = Some(crate::key_from_b64(&v).ok_or("The QR code is damaged (its key doesn't read).")?),
-                _ => {}
-            }
-        }
-        if link.addresses.is_empty() {
-            return Err("The QR code has no address to connect to.".into());
-        }
-        if link.code.len() != CODE_LEN {
-            return Err("The QR code has no pairing code.".into());
-        }
-        Ok(link)
-    }
-}
-
-fn enc(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b',' | b':' | b'[' | b']' => out.push(b as char),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-fn dec(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'%' if i + 2 < b.len() => match u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or("zz"), 16) {
-                Ok(v) => {
-                    out.push(v);
-                    i += 3;
-                    continue;
-                }
-                Err(_) => out.push(b'%'),
-            },
-            b'+' => out.push(b' '),
-            c => out.push(c),
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 // ---- The exchange ----------------------------------------------------------------------------
 
 /// The phone's first sealed message.
@@ -229,21 +139,6 @@ pub fn open(key: &[u8; 32], dir: Dir, sealed: &[u8]) -> Option<Vec<u8>> {
     ChaCha20Poly1305::new(Key::from_slice(key)).decrypt(&nonce(dir), Payload { msg: sealed, aad: SPAKE_ID }).ok()
 }
 
-/// The QR code for `text`, as an SVG document.
-pub fn qr_svg(text: &str) -> String {
-    use qrcode::render::svg;
-    qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::M)
-        .map(|q| {
-            q.render::<svg::Color>()
-                .quiet_zone(true)
-                .min_dimensions(240, 240)
-                .dark_color(svg::Color("#000000"))
-                .light_color(svg::Color("#ffffff"))
-                .build()
-        })
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,24 +152,6 @@ mod tests {
         assert_eq!(normalize_code(" o1L i-0 "), "01110");
         assert_eq!(format_code("k7qm9xtd"), "K7QM-9XTD");
         assert!(Session::new().open());
-    }
-
-    #[test]
-    fn links_round_trip() {
-        let id = crate::Identity::generate();
-        let l = Link {
-            addresses: vec!["192.168.1.20:7787".into(), "100.64.0.3:7787".into(), "[fe80::1]:7787".into()],
-            code: "K7QM9XTD".into(),
-            desktop_name: "dawso's PC & co".into(),
-            desktop_key: Some(id.public),
-        };
-        let url = l.to_url();
-        assert!(url.starts_with("oah://pair?v=1&a=192.168.1.20:7787,100.64.0.3:7787"));
-        assert_eq!(Link::parse(&url).unwrap(), l);
-        assert!(Link::parse("https://example.com").is_err());
-        assert!(Link::parse("oah://pair?v=1&c=K7QM9XTD").is_err());
-        assert!(Link::parse("oah://pair?v=9&a=1.2.3.4:1&c=K7QM9XTD").unwrap_err().contains("newer"));
-        assert_eq!(dec("a%2"), "a%2");
     }
 
     #[test]
@@ -292,10 +169,5 @@ mod tests {
         let (ka, kb) = (finish(a, &mb).unwrap(), finish(b, &ma).unwrap());
         assert_ne!(ka, kb);
         assert!(open(&kb, Dir::Phone, &seal(&ka, Dir::Phone, b"hi")).is_none());
-    }
-
-    #[test]
-    fn renders_a_qr() {
-        assert!(qr_svg("oah://pair?v=1&a=1.2.3.4:7787&c=K7QM9XTD").starts_with("<?xml"));
     }
 }

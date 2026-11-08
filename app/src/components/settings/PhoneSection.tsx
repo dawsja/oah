@@ -9,7 +9,7 @@ import { confirmAction } from "@/components/Prompt"
 import { remote, seenLabel, useRemote, type PairingInfo } from "@/lib/remote"
 import { Dot, Group, Row, Section } from "./layout"
 
-/** The QR code, the code to type, and the addresses, until a phone pairs or the code runs out. */
+/** The address and the code to type on the phone, until a phone pairs or the code runs out. */
 function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const [info, setInfo] = useState<PairingInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -45,7 +45,7 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Pair a phone</DialogTitle>
-          <DialogDescription>In the oah app on your phone, scan this code, or choose Enter code and type the code and an address below.</DialogDescription>
+          <DialogDescription>In the oah app on your phone, type this address and code.</DialogDescription>
         </DialogHeader>
         {paired ? (
           <div className="flex flex-col items-center gap-3 py-6 text-center">
@@ -59,25 +59,28 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
         ) : error ? (
           <div className="rounded-md border border-red/40 bg-red/5 px-3 py-2.5 text-[12.5px] text-red">{error}</div>
         ) : info && !expired ? (
-          <div className="flex flex-col items-center gap-4">
-            {/* The SVG comes from the Rust side (qrcode crate), not from the network. */}
-            <div className="rounded-md overflow-hidden bg-white p-1 [&_svg]:block [&_svg]:size-56" dangerouslySetInnerHTML={{ __html: info.qrSvg }} aria-label="Pairing QR code" role="img" />
-            <div className="text-center">
-              <div className="font-mono text-[26px] font-semibold tracking-[0.18em]" aria-label="Pairing code">
+          // The same order as the phone's form: address, then code.
+          <div className="flex flex-col gap-3">
+            <div className="rounded-md border bg-card px-4 py-3">
+              <div className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Address</div>
+              <div className="font-mono text-[20px] font-semibold" aria-label="Address">
+                {info.addresses[0]}
+              </div>
+              {info.addresses.length > 1 ? (
+                <div className="mt-1 text-[11.5px] text-muted-foreground">
+                  Or, on another network: <span className="font-mono">{info.addresses.slice(1).join(", ")}</span>
+                </div>
+              ) : null}
+            </div>
+            <div className="rounded-md border bg-card px-4 py-3">
+              <div className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Code</div>
+              <div className="font-mono text-[30px] font-semibold tracking-[0.18em]" aria-label="Pairing code">
                 {info.code}
               </div>
               <div className="mt-1 text-[11.5px] text-muted-foreground">
                 Works once, for {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}
                 {failedLeft !== null && failedLeft > 0 ? <span className="text-warn"> · wrong code tried, {failedLeft} tries left</span> : null}
               </div>
-            </div>
-            <div className="w-full rounded-md border bg-card px-3 py-2">
-              <div className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Address</div>
-              {info.addresses.map((a) => (
-                <div key={a} className="font-mono text-[12.5px]">
-                  {a}
-                </div>
-              ))}
             </div>
           </div>
         ) : (
@@ -144,7 +147,7 @@ export function PhoneSection() {
           <Dot tone={tone} />
           <Switch checked={state.enabled} disabled={busy} onCheckedChange={toggle} aria-label="Let phones connect" />
         </Row>
-        <Row label="Pair a phone" description="Shows a QR code and a one-time code for the oah app. The code works once, for five minutes.">
+        <Row label="Pair a phone" description="Shows this computer's address and a one-time code to type in the oah app. The code works once, for five minutes.">
           <Button size="sm" disabled={!state.running} onClick={() => setPairing(true)}>
             <Smartphone />
             Pair a phone

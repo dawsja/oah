@@ -65,8 +65,8 @@ Electron.
 - **Phone (Android, optional).** The oah app for Android continues your chats away from the
   desk: projects and chats, answers streaming in, replies (queued or sent into the running
   turn), photos, approvals and questions, stop, new chats, and the model, effort and permission.
-  Turn it on in Settings → Phone, choose Pair a phone, and scan the QR code with the app (or
-  type the 8-character code and the address). The phone connects to this computer directly, on
+  Turn it on in Settings → Phone, choose Pair a phone, and type the address and the 8-character
+  code it shows into the app. The phone connects to this computer directly, on
   the same Wi-Fi or a VPN such as Tailscale; pairing runs SPAKE2 on the one-time code (five
   tries, five minutes), and every session after it is Noise `IK` with keys only the two of them
   hold. Settings → Phone lists the paired phones; Forget disconnects one for good.
@@ -89,7 +89,7 @@ crates/
   oah-voice      speech to text (transcribe.cpp; needs CMake to build)
   oah-mcp        the MCP server another agent drives oah's chats with (tools, live chat status,
                  transcripts), and `oah mcp`, the stdio bridge to the running app
-  oah-remote     phones: pairing (SPAKE2 on a one-time code, QR links), encrypted sessions
+  oah-remote     phones: pairing (SPAKE2 on a one-time code), encrypted sessions
                  (Noise IK over WebSocket), the desktop's server and the phone's client
 app/
   src-tauri      the Tauri shell: commands, chat-event / voice-state events, terminal channels;

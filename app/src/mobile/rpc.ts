@@ -28,9 +28,8 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 export const native = {
   desktops: () => invoke<Desktop[]>("desktops"),
-  /** From a scanned link, or a typed address and code. */
-  pair: (o: { link?: string; addresses?: string[]; code?: string; name: string }) =>
-    invoke<Desktop>("pair", { link: o.link ?? null, addresses: o.addresses ?? [], code: o.code ?? "", name: o.name }),
+  /** With the address and code the desktop shows. */
+  pair: (o: { addresses: string[]; code: string; name: string }) => invoke<Desktop>("pair", { addresses: o.addresses, code: o.code, name: o.name }),
   forget: (id: string) => invoke<void>("forget", { id }),
   async connect(id: string, onEvent: (e: LinkEvent) => void) {
     const { Channel } = await import("@tauri-apps/api/core")

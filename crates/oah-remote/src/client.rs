@@ -69,15 +69,8 @@ where
     }
 }
 
-/// Pairs with the desktop showing `code`. `expected` (from a QR code) is the key the desktop
-/// must have.
-pub async fn pair(
-    addresses: &[String],
-    code: &str,
-    device_name: &str,
-    me: &Identity,
-    expected: Option<[u8; 32]>,
-) -> Result<Paired, String> {
+/// Pairs with the desktop showing `code`.
+pub async fn pair(addresses: &[String], code: &str, device_name: &str, me: &Identity) -> Result<Paired, String> {
     // Find the address that answers first, then pair over that one only (each try uses one of
     // the code's five).
     let (mut ws, address) = first(addresses, |a| async move { open_ws(&a).await }).await?;
@@ -99,9 +92,6 @@ pub async fn pair(
         .and_then(|b| serde_json::from_slice(&b).ok())
         .ok_or("The desktop's answer didn't check out. Try again with a new code.")?;
     let desktop_key = crate::key_from_b64(&reply.public_key).ok_or("the desktop's key didn't read")?;
-    if expected.is_some_and(|k| k != desktop_key) {
-        return Err("That desktop isn't the one in the QR code.".into());
-    }
     Ok(Paired { device_id: reply.device_id, desktop_name: reply.desktop_name, desktop_key, address })
 }
 

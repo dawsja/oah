@@ -10,7 +10,7 @@ use oah_agents::event::Decision;
 use oah_core::chats::now_ms;
 use oah_core::paths;
 use oah_core::settings::{AgentKind, PairedDevice, PermissionMode};
-use oah_remote::pairing::{self, Link};
+use oah_remote::pairing;
 use oah_remote::server::{Event, Feed, Host, Server};
 use oah_remote::Identity;
 use serde::{Deserialize, Serialize};
@@ -63,9 +63,7 @@ pub struct PairingInfo {
     /// `XXXX-XXXX`.
     pub code: String,
     pub expires_at: u64,
-    /// The QR code (an SVG document) of `url`.
-    pub qr_svg: String,
-    pub url: String,
+    /// `ip:port` the phone can type, best first.
     pub addresses: Vec<String>,
 }
 
@@ -473,9 +471,9 @@ pub async fn remote_set_port(app: AppHandle, port: u16) -> CmdResult<RemoteState
     Ok(state_of(&app))
 }
 
-/// A new pairing code (any earlier one stops working), with its QR code.
+/// A new pairing code (any earlier one stops working), and the addresses to type with it.
 #[tauri::command]
-pub fn remote_pair_start(app: AppHandle, state: State<AppState>) -> CmdResult<PairingInfo> {
+pub fn remote_pair_start(state: State<AppState>) -> CmdResult<PairingInfo> {
     let guard = state.remote.server.lock().unwrap();
     let server = guard.as_ref().ok_or("Turn on phone access first.")?;
     let port = server.local_addr().port();
@@ -485,14 +483,7 @@ pub fn remote_pair_start(app: AppHandle, state: State<AppState>) -> CmdResult<Pa
     if addresses.is_empty() {
         return Err("This computer isn't on a network a phone can reach.".into());
     }
-    let link = Link {
-        addresses: addresses.clone(),
-        code: code.code.clone(),
-        desktop_name: desktop_name(),
-        desktop_key: Some(identity(&app).public),
-    };
-    let url = link.to_url();
-    Ok(PairingInfo { code: pairing::format_code(&code.code), expires_at: code.expires_at, qr_svg: pairing::qr_svg(&url), url, addresses })
+    Ok(PairingInfo { code: pairing::format_code(&code.code), expires_at: code.expires_at, addresses })
 }
 
 #[tauri::command]
