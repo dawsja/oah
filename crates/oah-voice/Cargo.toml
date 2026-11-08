@@ -5,13 +5,17 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["engine"]
+engine = ["dep:transcribe-cpp"]
+
 [dependencies]
 oah-core.workspace = true
 serde.workspace = true
 sha2 = "0.10"
 ureq = "3"
 # ggml built from source (needs CMake and a C++ compiler). CPU only.
-transcribe-cpp = { version = "=0.4.1", default-features = false }
+transcribe-cpp = { version = "=0.4.1", default-features = false, optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true

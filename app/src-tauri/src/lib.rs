@@ -191,7 +191,8 @@ async fn provider_account(state: State<'_, AppState>, kind: AgentKind, location:
 #[tauri::command]
 async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: Option<Location>) -> CmdResult<Limits> {
     let location = location.unwrap_or_default();
-    let binary = state.settings.lock().unwrap().providers.get(kind).binary_on(&location);
+    let provider = state.settings.lock().unwrap().providers.get(kind).clone();
+    let binary = provider.binary_on(&location);
     tauri::async_runtime::spawn_blocking(move || {
         if let Location::Wsl { distro } = &location {
             if !oah_transport::wsl::is_running(distro) {
@@ -202,10 +203,11 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: 
                 };
             }
         }
+        let env = secrets::resolve(&secrets::scope(kind, None), &provider.env);
         match kind {
-            AgentKind::Claude => account::claude_limits(&location),
+            AgentKind::Claude => account::claude_limits(&location, &env),
             AgentKind::Codex => account::codex_limits(&binary, &location),
-            AgentKind::Opencode => account::opencode_go_limits(&location),
+            AgentKind::Opencode => account::opencode_go_limits(&location, &env),
             AgentKind::Acp => account::Limits::default(),
         }
     })

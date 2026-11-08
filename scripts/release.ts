@@ -131,7 +131,8 @@ async function appsFor(file: string, tag: string): Promise<App[]> {
     return apps
   }
 
-  // The phone links only oah-remote, and only uses its client half.
+  // The phone shares voice and core paths, and uses the client half of oah-remote.
+  if (file.startsWith("crates/oah-voice/") || file.startsWith("crates/oah-core/")) return BOTH
   if (file.startsWith("crates/oah-remote/")) {
     if (file === "crates/oah-remote/src/client.rs") return ["android"]
     if (file === "crates/oah-remote/src/server.rs") return ["desktop"]

@@ -9,6 +9,51 @@ export function Mark({ size = 20, label, className }: { size?: number; label?: s
   )
 }
 
+/** The WSL penguin (assets/svg/wsl-logo.svg). Its 193x256 box is padded to a square so it
+ *  scales like a lucide icon; the mark belongs to Microsoft, see THIRD_PARTY_NOTICES.md. */
+export function WslLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="-31.5 0 256 256" className={className} aria-hidden="true">
+      <defs>
+        <linearGradient id="wsl-logo-body" x1="20.89856" y1="28.70122" x2="160.51789" y2="270.52899" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#0078d3" />
+          <stop offset="1" stopColor="#0c5aa5" />
+        </linearGradient>
+        <radialGradient id="wsl-logo-face" cx="96.61321" cy="162.92136" fx="96.61321" fy="162.92136" r="40.58323" gradientTransform="translate(-28.32862 259.53456) rotate(-90) scale(1 .76688)" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#c86508" />
+          <stop offset="1" stopColor="#bf6009" />
+        </radialGradient>
+        <radialGradient id="wsl-logo-beak" cx="96.5" cy="154.76035" fx="96.5" fy="154.76035" r="40.36821" gradientTransform="translate(-2.6625 251.26035) rotate(-90) scale(1 .64075)" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ef8506" />
+          <stop offset="1" stopColor="#ed7e03" />
+        </radialGradient>
+        <radialGradient id="wsl-logo-belly" cx="96.95112" cy="129.9307" fx="96.95112" fy="129.9307" r="103.07409" gradientTransform="translate(-11.25307 226.88182) rotate(-90) scale(1 .83279)" gradientUnits="userSpaceOnUse">
+          <stop offset=".0784" stopColor="#ffc700" />
+          <stop offset="1" stopColor="#ffc700" />
+        </radialGradient>
+        <filter id="wsl-logo-shadow" x="40.5" y="102" width="112" height="113" filterUnits="userSpaceOnUse">
+          <feOffset dx="0" dy="7" />
+          <feGaussianBlur result="blur" stdDeviation="8" />
+          <feFlood floodColor="#000" floodOpacity=".4" />
+          <feComposite in2="blur" operator="in" />
+          <feComposite in="SourceGraphic" />
+        </filter>
+      </defs>
+      <path fill="url(#wsl-logo-body)" d="M96.49981,0h.00019C149.7598,0,193,43.2402,193,96.5v149.5c0,5.51915-4.48085,10-10,10H10C4.48085,256,0,251.51915,0,246V96.49981C0,43.24011,43.24011,0,96.49981,0Z" />
+      <circle fill="#fff" cx="56.5" cy="87.11" r="32" />
+      <circle fill="#fff" cx="136.5" cy="87.11" r="32" />
+      <path fill="#fff" d="M88.5,87.11H24.5v80.77687c0,35.23677,28.56505,63.80182,63.80182,63.80182h.19818V87.11Z" />
+      <path fill="#fff" d="M104.5,87.11h64v80.77687c0,35.23677-28.56505,63.80182-63.80182,63.80182h-.19818V87.11Z" />
+      <rect fill="#fff" x="75.96226" y="178.00943" width="40.75472" height="48.45283" />
+      <circle cx="56.5" cy="96.10999" r="16.3019" transform="translate(-47.41926 136.48533) rotate(-80.78253)" />
+      <circle cx="136.5" cy="96.11" r="16.30189" />
+      <circle fill="url(#wsl-logo-face)" filter="url(#wsl-logo-shadow)" cx="96.5" cy="151.91" r="32" />
+      <path fill="url(#wsl-logo-beak)" d="M64.5,149.48114c0-14.94339,13.16492-29.21021,32-29.37115,19.08282-.16306,32,16.88058,32,29.37115,0,0-11.54718,7.62885-32,7.62885s-32-7.62885-32-7.62885Z" />
+      <path fill="url(#wsl-logo-belly)" d="M24.5,160.25473c0,19.28659-2.59474,71.85527,71.95556,71.85527s72.04444-50.83755,72.04444-72.35057c0,0-14.9004,53.93208-72.04444,53.93208s-71.95556-53.43678-71.95556-53.43678Z" />
+    </svg>
+  )
+}
+
 export const WinMin = () => (
   <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" strokeWidth="1" /></svg>
 )

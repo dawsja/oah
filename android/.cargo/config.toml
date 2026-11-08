@@ -1,0 +1,4 @@
+# CMake needs the Android NDK toolchain as well as Cargo's cross compiler.
+[env]
+CMAKE = { value = "../scripts/android-cmake.sh", relative = true }
+TRANSCRIBE_CMAKE_ARGS = "-DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8-a"

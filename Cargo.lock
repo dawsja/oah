@@ -2849,7 +2849,9 @@ dependencies = [
 name = "oah-android"
 version = "0.3.3"
 dependencies = [
+ "base64 0.22.1",
  "oah-remote",
+ "oah-voice",
  "serde",
  "serde_json",
  "tauri",

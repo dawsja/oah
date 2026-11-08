@@ -51,7 +51,11 @@ Electron.
 - **Voice (optional).** Off until you turn it on in Settings → Voice, which asks before the
   one-time 731 MB download of NVIDIA Parakeet. Dictation is then transcribed on this computer;
   nothing you say leaves the machine. The mic appears in the message box only while voice is on,
-  and turning it off deletes the model.
+  and turning it off deletes the model. On 64-bit ARM Android phones, use Chat options →
+  Voice on this phone to download the same model separately. Tap the mic to dictate English
+  for up to 30 seconds, then tap Stop to add the text to your draft. Audio stays on the phone;
+  dictation works offline after download. Leaving the chat or backgrounding the app cancels
+  recording. Turning voice off removes the model, and memory is released after each transcription.
 - **Usage.** Plan limits for Claude, Codex and OpenCode Go (session, week, month), in a title bar
   popover and in Settings → Usage, with tokens and cost per project.
 - **MCP (optional).** Another agent (Claude Code, Codex, any MCP client) can drive oah: list
@@ -121,10 +125,12 @@ bun run dev:debug        # the app with DevTools on 127.0.0.1:9223, data in ../.
 `scripts/dev-cdp.ts` drives a `dev:debug` window without touching your mouse or keyboard
 (`shot`, `eval`, `click`, `type`, `key`). `OAH_MOCK_AGENT=1` swaps both agents for a scripted one.
 
-The phone app needs a JDK 17, the Android SDK and NDK, and the Rust Android targets
+The phone app builds on Linux/macOS with Bash, CMake 3.19+, JDK 17, the Android SDK and NDK, and the Rust Android targets
 (`rustup target add aarch64-linux-android armv7-linux-androideabi`):
 
 ```sh
+# Point to your installed NDK; the voice build uses its CMake toolchain.
+export NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
 cd android
 bun install
 bun tauri android dev                # on a connected phone or emulator

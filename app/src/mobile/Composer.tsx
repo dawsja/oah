@@ -6,6 +6,8 @@ import { PERMISSION_LABEL, type PermissionMode } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { readImage, type Image } from "./rpc"
 
+import { usePhoneVoice } from "./Voice"
+
 const MODES: PermissionMode[] = ["ask", "acceptEdits", "plan", "fullAccess"]
 
 type Props = {
@@ -31,6 +33,7 @@ type Props = {
 export function MobileComposer(p: Props) {
   const [text, setText] = useState("")
   const [images, setImages] = useState<Image[]>([])
+  const dictation = usePhoneVoice((words) => setText((draft) => draft ? `${draft}${/\s$/.test(draft) ? "" : " "}${words}` : words))
   const [sheet, setSheet] = useState(false)
   const [clearArmed, setClearArmed] = useState(false)
   useEffect(() => {
@@ -51,7 +54,7 @@ export function MobileComposer(p: Props) {
 
   const has = text.trim().length > 0 || images.length > 0
   const send = (how: "queue" | "now") => {
-    if (!has || p.disabled) return
+    if (!has || p.disabled || dictation.busy) return
     p.onSend(text.trim(), images, how)
     setText("")
     setImages([])
@@ -60,6 +63,7 @@ export function MobileComposer(p: Props) {
 
   return (
     <div className="border-t bg-background px-2.5 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      {dictation.status}
       {images.length ? (
         <div className="mb-2 flex gap-2.5 overflow-x-auto px-1 pt-1.5">
           {images.map((im, i) => (
@@ -114,6 +118,7 @@ export function MobileComposer(p: Props) {
               </>
             )}
           </button>
+          {dictation.button}
           <span className="flex-1" />
           {p.running && p.onStop ? (
             <button
@@ -127,10 +132,10 @@ export function MobileComposer(p: Props) {
           ) : null}
           {p.running && has ? (
             <>
-              <button className="rounded-md flex h-10 shrink-0 items-center gap-1 border border-input px-2.5 text-[13px] active:bg-accent" aria-label="Send now, into the running turn" onClick={() => send("now")}>
+              <button className="rounded-md flex h-10 shrink-0 items-center gap-1 border border-input px-2.5 text-[13px] active:bg-accent" disabled={p.disabled || dictation.busy} aria-label="Send now, into the running turn" onClick={() => send("now")}>
                 <Zap className="size-4" /> Now
               </button>
-              <button className="rounded-md flex h-10 shrink-0 items-center gap-1.5 bg-primary px-3 text-[13px] font-medium text-primary-foreground" aria-label="Queue: send when the turn ends" onClick={() => send("queue")}>
+              <button className="rounded-md flex h-10 shrink-0 items-center gap-1.5 bg-primary px-3 text-[13px] font-medium text-primary-foreground" disabled={p.disabled || dictation.busy} aria-label="Queue: send when the turn ends" onClick={() => send("queue")}>
                 <ListPlus className="size-4" /> Queue
               </button>
             </>
@@ -138,7 +143,7 @@ export function MobileComposer(p: Props) {
             <button
               className="rounded-md grid size-10 shrink-0 place-items-center bg-primary text-primary-foreground disabled:bg-muted disabled:text-faint"
               aria-label="Send"
-              disabled={!has || p.disabled}
+              disabled={!has || p.disabled || dictation.busy}
               onClick={() => send("queue")}
             >
               <ArrowUp className="size-5" />
@@ -152,6 +157,7 @@ export function MobileComposer(p: Props) {
           <SheetHeader>
             <SheetTitle>Chat options</SheetTitle>
           </SheetHeader>
+          {dictation.settings}
           {p.onModel ? (
             <section className="px-4 pb-4">
               <h3 className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Model</h3>

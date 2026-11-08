@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { comboOf, matchesKey, resample, toBase64 } from "./voice"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { comboOf, matchesKey, record, resample, toBase64 } from "./voice"
 
 describe("voice helpers", () => {
   it("records a pressed key as a combo matchesKey accepts", () => {
@@ -24,5 +24,30 @@ describe("voice helpers", () => {
     expect(matchesKey(e(" ", true), "Ctrl+Space")).toBe(true)
     expect(matchesKey(e(" ", true, true), "Ctrl+Space")).toBe(false)
     expect(matchesKey(e("m", true, true), "Ctrl+Shift+M")).toBe(true)
+  })
+})
+
+describe("microphone cleanup", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("releases the microphone if the audio context cannot start", async () => {
+    const stop = vi.fn()
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop }] }) } })
+    vi.stubGlobal("AudioContext", class { constructor() { throw new Error("audio unavailable") } })
+    await expect(record()).rejects.toThrow("audio unavailable")
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it("closes the context and tracks if audio graph setup fails", async () => {
+    const stop = vi.fn()
+    const close = vi.fn(async () => {})
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop }] }) } })
+    vi.stubGlobal("AudioContext", class {
+      close = close
+      createMediaStreamSource() { throw new Error("device removed") }
+    })
+    await expect(record()).rejects.toThrow("device removed")
+    expect(stop).toHaveBeenCalledOnce()
+    expect(close).toHaveBeenCalledOnce()
   })
 })

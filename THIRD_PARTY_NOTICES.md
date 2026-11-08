@@ -34,3 +34,9 @@ oah shows each agent next to its name with the agent's own mark: the Claude mark
 the OpenAI mark for Codex (OpenAI), and the OpenCode mark (from opencode.ai's favicon). These
 marks are trademarks of their owners, used only to identify their products; they aren't
 covered by oah's MIT license.
+
+## WSL logo
+
+oah shows a WSL project with the Windows Subsystem for Linux logo (`assets/svg/wsl-logo.svg`,
+from Microsoft's WSL app assets via Wikimedia Commons). The mark is a trademark of Microsoft,
+used only to identify WSL projects; it isn't covered by oah's MIT license.

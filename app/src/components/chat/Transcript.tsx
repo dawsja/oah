@@ -25,26 +25,63 @@ export function Transcript({ transcript, className }: { transcript: T; className
 
   // Follow new content while the view is at the bottom.
   const stuckRef = useRef(stuck)
-  stuckRef.current = stuck
+  const touching = useRef(false)
+  const follow = (value: boolean) => {
+    // Event handlers and ResizeObserver must see this before React renders again.
+    stuckRef.current = value
+    setStuck(value)
+  }
   useLayoutEffect(() => {
     const el = scroller.current
-    if (el && stuck) el.scrollTop = el.scrollHeight
+    if (el && stuckRef.current && !touching.current) el.scrollTop = el.scrollHeight
   })
   useEffect(() => {
     const el = scroller.current
     if (!el) return
-    const onScroll = () => setStuck(el.scrollHeight - el.scrollTop - el.clientHeight < 48)
+    let previousTop = el.scrollTop
+    let touchY = 0
+    const onScroll = () => {
+      const top = Math.max(0, el.scrollTop)
+      // Even a small move toward history releases the bottom lock. Only reaching
+      // the bottom again resumes following; a proximity threshold traps slow swipes.
+      if (top < previousTop) follow(false)
+      else if (top > previousTop && el.scrollHeight - top - el.clientHeight <= 2) follow(true)
+      previousTop = top
+    }
+    const onTouchStart = (event: TouchEvent) => {
+      touching.current = true
+      touchY = event.touches[0].clientY
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0].clientY
+      if (y > touchY) follow(false)
+      touchY = y
+    }
+    const onTouchEnd = () => { touching.current = false }
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) follow(false)
+    }
+    el.addEventListener("touchstart", onTouchStart, { passive: true })
+    el.addEventListener("touchmove", onTouchMove, { passive: true })
+    el.addEventListener("touchend", onTouchEnd, { passive: true })
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true })
+    el.addEventListener("wheel", onWheel, { passive: true })
     el.addEventListener("scroll", onScroll, { passive: true })
     // Sizes change without a render here too: a card docking under the chat (or the phone's
     // keyboard) shrinks the view, and blocks that skip layout off-screen grow as they come in.
     // While at the bottom, stay there.
     const pin = new ResizeObserver(() => {
-      if (stuckRef.current) el.scrollTop = el.scrollHeight
+      if (stuckRef.current && !touching.current) el.scrollTop = el.scrollHeight
     })
     pin.observe(el)
     if (el.firstElementChild) pin.observe(el.firstElementChild)
     return () => {
       el.removeEventListener("scroll", onScroll)
+      el.removeEventListener("touchstart", onTouchStart)
+      el.removeEventListener("touchmove", onTouchMove)
+      el.removeEventListener("touchend", onTouchEnd)
+      el.removeEventListener("touchcancel", onTouchEnd)
+      el.removeEventListener("wheel", onWheel)
       pin.disconnect()
     }
   }, [])
@@ -68,8 +105,9 @@ export function Transcript({ transcript, className }: { transcript: T; className
             </button>
           ) : null}
           {list.map((b, i) => (
-            // Off-screen blocks skip layout and paint until they scroll into view.
-            <div key={b.kind === "work" ? b.id : `${b.item.kind}-${b.item.id}`} className="[contain-intrinsic-size:auto_120px] [content-visibility:auto]">
+            // Keep real heights on phones: estimated heights changing during a
+            // swipe can shift the viewport and interrupt momentum scrolling.
+            <div key={b.kind === "work" ? b.id : `${b.item.kind}-${b.item.id}`} className={cn(!touch && "[contain-intrinsic-size:auto_120px] [content-visibility:auto]")}>
               {b.kind === "work" ? <WorkGroup items={b.items} live={transcript.running && i === lastWork && i >= list.length - 2} /> : <Row item={b.item} />}
             </div>
           ))}
@@ -82,7 +120,7 @@ export function Transcript({ transcript, className }: { transcript: T; className
           onClick={() => {
             const el = scroller.current
             if (el) el.scrollTop = el.scrollHeight
-            setStuck(true)
+            follow(true)
           }}
         >
           <ArrowDown className="size-3.5" /> Jump to latest

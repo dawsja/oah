@@ -2,6 +2,8 @@
 //! session at a time (reconnecting on its own). The UI calls the desktop through `rpc` and gets
 //! its pushes, and the connection's ups and downs, on the channel it passed to `connect`.
 
+mod voice;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -286,9 +288,24 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
             app.manage(AppState::load(dir.join("desktops.json")));
+            app.manage(voice::Voice::new(dir.join("speech")));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktops, discover, request_pairing, pair, forget, connect, disconnect, wake, rpc])
+        .invoke_handler(tauri::generate_handler![
+            desktops,
+            discover,
+            request_pairing,
+            pair,
+            forget,
+            connect,
+            disconnect,
+            wake,
+            rpc,
+            voice::voice_state,
+            voice::voice_enable,
+            voice::voice_disable,
+            voice::voice_transcribe
+        ])
         .run(tauri::generate_context!())
         .expect("error while running oah");
 }

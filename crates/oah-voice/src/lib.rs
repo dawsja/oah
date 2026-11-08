@@ -7,6 +7,7 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "engine")]
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -113,22 +114,31 @@ pub fn download(dir: &Path, cancel: &AtomicBool, mut progress: impl FnMut(u64, u
 }
 
 /// The loaded model and a session on it, kept between recordings.
+#[cfg(feature = "engine")]
 struct Loaded {
     _model: transcribe_cpp::Model,
     session: transcribe_cpp::Session,
 }
 
+#[cfg(feature = "engine")]
 static LOADED: Mutex<Option<Loaded>> = Mutex::new(None);
 
 /// Text from 16 kHz mono samples in [-1, 1]. Loads the model on first use.
+#[cfg(feature = "engine")]
 pub fn transcribe(pcm: &[f32]) -> Result<String, String> {
+    let path = model_path().ok_or("Voice is off: turn it on in Settings → Voice.")?;
+    transcribe_at(&path, pcm)
+}
+
+/// Android uses its private app-data directory, not the desktop's home directory.
+#[cfg(feature = "engine")]
+pub fn transcribe_at(path: &Path, pcm: &[f32]) -> Result<String, String> {
     if let Some(why) = unsupported() {
         return Err(why);
     }
-    let path = model_path().ok_or("Voice is off: turn it on in Settings → Voice.")?;
     let mut g = LOADED.lock().unwrap_or_else(|e| e.into_inner());
     if g.is_none() {
-        let model = transcribe_cpp::Model::load(&path).map_err(|e| format!("couldn't load the speech model: {e}"))?;
+        let model = transcribe_cpp::Model::load(path).map_err(|e| format!("couldn't load the speech model: {e}"))?;
         let session = model.session().map_err(|e| format!("couldn't start speech to text: {e}"))?;
         *g = Some(Loaded { _model: model, session });
     }
@@ -139,12 +149,20 @@ pub fn transcribe(pcm: &[f32]) -> Result<String, String> {
 
 /// Turns voice off: the model leaves memory and the disk.
 pub fn remove() -> Result<(), String> {
-    *LOADED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    unload();
     let d = dir();
     if d.exists() {
         std::fs::remove_dir_all(d).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Release the model between phone recordings to give memory back to Android.
+pub fn unload() {
+    #[cfg(feature = "engine")]
+    {
+        *LOADED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
 }
 
 /// Samples from the composer: little-endian f32 bytes.
@@ -175,6 +193,7 @@ mod tests {
     /// On a real PC (ignored; downloads 731 MB): the model from download to text.
     #[test]
     #[ignore]
+    #[cfg(feature = "engine")]
     fn real_speech_round_trip() {
         if model_path().is_none() {
             let stop = AtomicBool::new(false);

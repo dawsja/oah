@@ -10,7 +10,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::time::Duration;
 
-use oah_core::settings::{AgentKind, Location};
+use oah_core::settings::{AgentKind, EnvVar, Location};
 use oah_transport::Spec;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -185,44 +185,83 @@ pub fn strip_ansi(s: &str) -> String {
 
 /// Claude's plan limits for the sign-in on `location` (this computer's credentials file, or the
 /// one in a WSL distro or on an SSH host).
-pub fn claude_limits(location: &Location) -> Limits {
+pub fn claude_limits(location: &Location, env: &[EnvVar]) -> Limits {
+    let token = claude_usage_token(location, env);
+    let Some(token) = token else {
+        return Limits {
+            error: Some("Claude plan usage is unavailable: no readable Claude plan credential was found for this location.".into()),
+            ..Default::default()
+        };
+    };
+    let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().new_agent();
+    // Claude may rotate the on-disk token while a usage request is in flight. Retry only if
+    // it actually changed; never refresh or overwrite the CLI's credentials ourselves.
+    let mut token = token;
+    for attempt in 0..2 {
+        let resp = agent
+            .get("https://api.anthropic.com/api/oauth/usage")
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("anthropic-beta", "oauth-2025-04-20")
+            .header("User-Agent", "claude-code/2.1.0")
+            .call();
+        return match resp {
+            Ok(mut r) => match r.body_mut().read_json::<Value>() {
+                Ok(v) => Limits { windows: parse_claude_usage(&v), error: None, extra: vec![] },
+                Err(_) => Limits { error: Some("Claude's usage endpoint returned an unexpected response.".into()), ..Default::default() },
+            },
+            Err(ureq::Error::StatusCode(status)) => {
+                if status == 401 && attempt == 0 {
+                    if let Some(next) = claude_usage_token(location, env).filter(|next| next != &token) {
+                        token = next;
+                        continue;
+                    }
+                }
+                Limits { error: Some(claude_usage_error(status)), ..Default::default() }
+            }
+            Err(e) => Limits { error: Some(format!("couldn't load Claude limits: {e}")), ..Default::default() },
+        };
+    }
+    unreachable!("a second usage attempt always returns")
+}
+
+fn claude_usage_error(status: u16) -> String {
+    match status {
+        401 | 403 => {
+            format!("Claude's usage endpoint rejected access (HTTP {status}). Chat sign-in is checked separately.")
+        }
+        _ => format!("Claude's usage request failed (HTTP {status})."),
+    }
+}
+
+/// Match the provider environment without changing the desktop process's environment.
+fn local_env(env: &[EnvVar], key: &str) -> Option<String> {
+    env.iter().rev().find(|v| v.key == key).map(|v| v.value.clone()).or_else(|| std::env::var(key).ok())
+}
+
+fn credential_home(env: &[EnvVar]) -> std::path::PathBuf {
+    local_env(env, "HOME").filter(|s| !s.is_empty()).map(Into::into).unwrap_or_else(oah_core::paths::home_dir)
+}
+
+fn claude_usage_token(location: &Location, env: &[EnvVar]) -> Option<String> {
     let text = match location {
-        Location::Local => std::fs::read_to_string(oah_core::paths::home_dir().join(".claude").join(".credentials.json")).ok(),
+        Location::Local => {
+            let dir = local_env(env, "CLAUDE_CONFIG_DIR")
+                .filter(|s| !s.is_empty())
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| credential_home(env).join(".claude"));
+            std::fs::read_to_string(dir.join(".credentials.json")).ok()
+        }
         _ => {
-            let args = vec!["-c".into(), r#"cat "$HOME/.claude/.credentials.json" 2>/dev/null"#.into()];
-            oah_transport::run(&Spec { location, cwd: "~", program: "sh", args, env: &[] }, None, Duration::from_secs(20))
+            let args = vec!["-c".into(), r#"cat "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" 2>/dev/null"#.into()];
+            oah_transport::run(&Spec { location, cwd: "~", program: "sh", args, env }, None, Duration::from_secs(20))
                 .ok()
                 .filter(|o| o.ok())
                 .map(|o| o.stdout)
         }
     };
-    let token = text
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| v["claudeAiOauth"]["accessToken"].as_str().map(String::from));
-    let Some(token) = token else {
-        return Limits {
-            windows: vec![],
-            error: Some("Sign in to Claude Code with a Claude plan to see its limits.".into()),
-            extra: vec![],
-        };
-    };
-    let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().new_agent();
-    let resp = agent
-        .get("https://api.anthropic.com/api/oauth/usage")
-        .header("Authorization", &format!("Bearer {token}"))
-        .header("anthropic-beta", "oauth-2025-04-20")
-        .header("User-Agent", "claude-code/2.1.0")
-        .call();
-    match resp {
-        Ok(mut r) => match r.body_mut().read_json::<Value>() {
-            Ok(v) => Limits { windows: parse_claude_usage(&v), error: None, extra: vec![] },
-            Err(e) => Limits { windows: vec![], error: Some(format!("unexpected answer: {e}")), extra: vec![] },
-        },
-        Err(ureq::Error::StatusCode(401)) => {
-            Limits { windows: vec![], error: Some("Claude's sign-in expired. Run Claude Code once to refresh it.".into()), extra: vec![] }
-        }
-        Err(e) => Limits { windows: vec![], error: Some(format!("couldn't load Claude limits: {e}")), extra: vec![] },
-    }
+    text.and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v["claudeAiOauth"]["accessToken"].as_str().map(String::from))
+        .filter(|s| !s.is_empty())
 }
 
 pub fn parse_claude_usage(v: &Value) -> Vec<LimitWindow> {
@@ -296,10 +335,10 @@ fn iso_ms(s: &str) -> Option<u64> {
 
 /// OpenCode Go's plan limits: `GET https://opencode.ai/zen/go/v1/usage` with the `opencode-go`
 /// key from OpenCode's `auth.json` (on this computer, or on `location`).
-pub fn opencode_go_limits(location: &Location) -> Limits {
+pub fn opencode_go_limits(location: &Location, env: &[EnvVar]) -> Limits {
     let fail = |e: String| Limits { windows: vec![], error: Some(e), extra: vec![] };
-    let Some(key) = opencode_go_key(location) else {
-        return fail("Sign in to OpenCode Go (`opencode auth login`, pick OpenCode Go) to see its limits.".into());
+    let Some(key) = opencode_go_key(location, env) else {
+        return fail("No OpenCode Go key found for this location. OpenCode can still use other providers.".into());
     };
     let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(15))).http_status_as_error(false).build().new_agent();
     let resp = agent
@@ -333,11 +372,14 @@ pub fn opencode_go_limits(location: &Location) -> Limits {
 /// account's problems in plain words.
 pub fn opencode_go_answer(status: u16, body: &str, v: &Value) -> Result<Vec<LimitWindow>, String> {
     let kind = v["error"]["type"].as_str().unwrap_or("");
-    if status == 403 || kind == "EntitlementError" {
-        return Err("This OpenCode account has no OpenCode Go subscription.".into());
+    if kind == "EntitlementError" {
+        return Err("OpenCode Go's usage endpoint reports no subscription for this key.".into());
     }
-    if status == 401 || kind == "AuthError" || body.trim_start().starts_with('<') {
-        return Err("OpenCode Go turned the key down. Sign in again with `opencode auth login`.".into());
+    if body.trim_start().starts_with('<') {
+        return Err(format!("OpenCode Go usage is unavailable: the endpoint returned a web page (HTTP {status})."));
+    }
+    if status == 401 || status == 403 || kind == "AuthError" {
+        return Err("OpenCode Go's usage endpoint rejected access. Chat sign-in is checked separately.".into());
     }
     if !(200..300).contains(&status) {
         return Err(format!("OpenCode Go's usage request failed ({status})."));
@@ -357,17 +399,18 @@ pub fn opencode_go_answer(status: u16, body: &str, v: &Value) -> Result<Vec<Limi
 
 /// The `opencode-go` API key: `$OPENCODE_AUTH_CONTENT`, else `auth.json` in OpenCode's data
 /// folder (`$XDG_DATA_HOME/opencode`, or `~/.local/share/opencode`).
-fn opencode_go_key(location: &Location) -> Option<String> {
+fn opencode_go_key(location: &Location, env: &[EnvVar]) -> Option<String> {
     let text = match location {
-        Location::Local => std::env::var("OPENCODE_AUTH_CONTENT").ok().or_else(|| {
-            let data = std::env::var_os("XDG_DATA_HOME")
+        Location::Local => local_env(env, "OPENCODE_AUTH_CONTENT").or_else(|| {
+            let data = local_env(env, "XDG_DATA_HOME")
+                .filter(|s| !s.is_empty())
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| oah_core::paths::home_dir().join(".local").join("share"));
+                .unwrap_or_else(|| credential_home(env).join(".local").join("share"));
             std::fs::read_to_string(data.join("opencode").join("auth.json")).ok()
         }),
         _ => {
-            let args = vec!["-c".into(), r#"cat "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null"#.into()];
-            oah_transport::run(&Spec { location, cwd: "~", program: "sh", args, env: &[] }, None, Duration::from_secs(20))
+            let args = vec!["-c".into(), r#"if [ "${OPENCODE_AUTH_CONTENT+x}" = x ]; then printf '%s' "$OPENCODE_AUTH_CONTENT"; else cat "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null; fi"#.into()];
+            oah_transport::run(&Spec { location, cwd: "~", program: "sh", args, env }, None, Duration::from_secs(20))
                 .ok()
                 .filter(|o| o.ok())
                 .map(|o| o.stdout)
@@ -552,11 +595,49 @@ mod tests {
         assert_eq!(w.iter().map(|w| w.used_percent).collect::<Vec<_>>(), [30.0, 51.0, 100.0]);
         assert_eq!(w[0].label, "Current session (5 hours)");
         assert!(w[0].resets_at.is_some());
-        assert!(opencode_go_answer(403, "", &Value::Null).unwrap_err().contains("no OpenCode Go subscription"));
+        assert!(opencode_go_answer(403, "", &Value::Null).unwrap_err().contains("rejected access"));
         assert!(opencode_go_answer(200, "", &json!({"error":{"type":"EntitlementError"}})).unwrap_err().contains("subscription"));
-        assert!(opencode_go_answer(401, "", &Value::Null).unwrap_err().contains("turned the key down"));
-        assert!(opencode_go_answer(200, "<html>sign in</html>", &Value::Null).unwrap_err().contains("turned the key down"));
+        assert!(opencode_go_answer(401, "", &Value::Null).unwrap_err().contains("rejected access"));
+        assert!(opencode_go_answer(200, "<html>sign in</html>", &Value::Null).unwrap_err().contains("web page"));
         assert!(opencode_go_answer(200, "{}", &json!({"usage":{"rolling":{"percent":1}}})).is_err());
+    }
+
+    #[test]
+    fn usage_errors_do_not_infer_chat_sign_in_or_subscription() {
+        for status in [401, 403] {
+            let claude = claude_usage_error(status);
+            assert!(claude.contains("usage endpoint"));
+            assert!(!claude.contains("expired"));
+            let go = opencode_go_answer(status, "", &Value::Null).unwrap_err();
+            assert!(go.contains("usage endpoint"));
+            assert!(!go.contains("no subscription"));
+            assert!(!go.contains("Sign in again"));
+        }
+        for status in [200, 403, 502] {
+            let html = opencode_go_answer(status, " \n<!DOCTYPE html><title>Gateway</title>", &Value::Null).unwrap_err();
+            assert!(html.contains("web page"));
+            assert!(!html.contains("rejected access"));
+        }
+        assert!(opencode_go_answer(429, "", &Value::Null).unwrap_err().contains("429"));
+    }
+
+    #[test]
+    fn usage_reads_the_configured_provider_credentials() {
+        let dir = std::env::temp_dir().join(format!("oah-usage-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".credentials.json"), r#"{"claudeAiOauth":{"accessToken":"test-claude"}}"#).unwrap();
+        let var = |key: &str, value: &str| EnvVar { key: key.into(), value: value.into(), in_keychain: false };
+        let path = dir.to_str().unwrap();
+        assert_eq!(claude_usage_token(&Location::Local, &[var("CLAUDE_CONFIG_DIR", path)]).as_deref(), Some("test-claude"));
+        // An explicit inline credential takes precedence without changing the process env.
+        let inline = r#"{"opencode-go":{"type":"api","key":"test-inline"}}"#;
+        assert_eq!(
+            opencode_go_key(&Location::Local, &[var("XDG_DATA_HOME", path), var("OPENCODE_AUTH_CONTENT", inline)]).as_deref(),
+            Some("test-inline")
+        );
+        assert!(opencode_go_key(&Location::Local, &[var("OPENCODE_AUTH_CONTENT", "invalid")]).is_none());
+        assert_eq!(credential_home(&[var("HOME", path)]), dir);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

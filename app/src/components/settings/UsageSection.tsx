@@ -1,15 +1,13 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { RefreshCw } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { formatTokens } from "@/lib/chat"
-import { ipc } from "@/lib/ipc"
-import { LIMIT_AGENTS, LIMIT_LABEL, type AgentKind, type Limits } from "@/lib/types"
+import { LIMIT_AGENTS, LIMIT_LABEL } from "@/lib/types"
 import { useChats } from "@/store/chats"
-import { useUsage } from "@/store/usage"
-import { useWsl } from "@/store/wsl"
-import { LocationIcon } from "@/components/LocationIcon"
-import { useApp } from "@/store/app"
+import { LOCAL_USAGE, usageLocationLabel, useUsageAt } from "@/store/usage"
+import { useLocationAwake } from "@/store/wsl"
+import { useApp, useProject } from "@/store/app"
 import { Group, Section } from "./layout"
 
 function resets(ms: number | null): string | undefined {
@@ -42,16 +40,18 @@ export function LimitBar({ label, used, resets }: { label: string; used: number 
 export function UsageSection() {
   const projects = useApp((s) => s.settings!.projects)
   const metas = useChats((s) => s.metas)
-  const { limits, loading, load: fetchLimits } = useUsage()
+  const location = useProject()?.location ?? LOCAL_USAGE
+  const awake = useLocationAwake(location)
+  const { limits, loading, load: fetchLimits } = useUsageAt(location)
   const load = () => void fetchLimits(true)
   useEffect(() => {
-    void fetchLimits()
-  }, [fetchLimits])
+    void fetchLimits(true)
+  }, [fetchLimits, awake])
 
   return (
     <Section
       title="Usage"
-      description="Plan limits from each provider, and what oah's chats have used."
+      description={`Plan limits for ${usageLocationLabel(location)}. OpenCode Go covers the Go subscription only.`}
       actions={
         <Button variant="outline" size="sm" onClick={load} disabled={loading}>
           <RefreshCw className={loading ? "animate-spin" : undefined} /> Refresh
@@ -87,9 +87,6 @@ export function UsageSection() {
           </Group>
         )
       })}
-      {[...new Set(projects.flatMap((p) => (p.location.kind === "wsl" ? [p.location.distro] : [])))].map((d) => (
-        <WslLimits key={d} distro={d} refresh={loading} />
-      ))}
       <Group title="By project">
         <div className="grid grid-cols-[1fr_repeat(3,7rem)] border-b bg-muted/50 px-4 py-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
           <span>Project</span>
@@ -117,69 +114,5 @@ export function UsageSection() {
       </Group>
       <p className="-mt-2 text-[11.5px] text-faint">Cost is what Claude Code reports per turn; Codex doesn't report cost.</p>
     </Section>
-  )
-}
-
-/** A WSL distro's own sign-ins: their limits, unless it's the same account as this computer's
- *  (then the bars above already are its limits). A stopped distro isn't started for this. */
-function WslLimits({ distro, refresh }: { distro: string; refresh: boolean }) {
-  const running = useWsl((s) => s.running[distro])
-  const location = { kind: "wsl" as const, distro }
-  const [rows, setRows] = useState<Partial<Record<AgentKind, { same: string | null; limits: Limits | null }>>>({})
-
-  useEffect(() => {
-    if (refresh || running !== true) return
-    setRows({})
-    for (const a of LIMIT_AGENTS) {
-      if (a === "opencode") {
-        void ipc.providerLimits(a, location).then(
-          (limits) => setRows((r) => ({ ...r, [a]: { same: null, limits } })),
-          (e) => setRows((r) => ({ ...r, [a]: { same: null, limits: { windows: [], error: String(e), extra: [] } } })),
-        )
-        continue
-      }
-      Promise.all([ipc.providerAccount(a, location).catch(() => null), ipc.providerAccount(a).catch(() => null)]).then(async ([there, here]) => {
-        if (!there?.signedIn) return setRows((r) => ({ ...r, [a]: { same: null, limits: { windows: [], error: there?.error ?? `Not signed in in ${distro}.`, extra: [] } } }))
-        // Only an email says which account it is (an API key doesn't).
-        if (here?.signedIn && there.label?.includes("@") && there.label === here.label) return setRows((r) => ({ ...r, [a]: { same: there.label, limits: null } }))
-        const limits = await ipc.providerLimits(a, location).catch((e) => ({ windows: [], error: String(e), extra: [] }))
-        setRows((r) => ({ ...r, [a]: { same: null, limits } }))
-      })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [distro, running, refresh])
-
-  return (
-    <Group
-      title={
-        <span className="flex items-center gap-1.5">
-          <LocationIcon location={location} className="size-3" /> In {distro}
-        </span>
-      }
-    >
-      {running !== true ? (
-        <div className="px-4 py-3 text-[12px] text-muted-foreground">{distro} isn't running. Open one of its projects to see its sign-ins' limits.</div>
-      ) : (
-        LIMIT_AGENTS.map((a) => {
-          const r = rows[a]
-          return (
-            <div key={a} className="border-b last:border-b-0">
-              <div className="flex items-center gap-1.5 px-4 pt-2.5 text-[11.5px] text-muted-foreground">
-                <AgentGlyph agent={a} className="size-3" /> {LIMIT_LABEL[a]}
-              </div>
-              {r === undefined ? (
-                <LimitBar label="…" used={null} />
-              ) : r.same ? (
-                <div className="px-4 pt-1 pb-3 text-[12px] text-faint">Same account as this computer ({r.same}): the limits above.</div>
-              ) : r.limits?.error ? (
-                <div className="px-4 pt-1 pb-3 text-[12px] text-muted-foreground">{r.limits.error}</div>
-              ) : (
-                r.limits?.windows.map((w) => <LimitBar key={w.label} label={w.label} used={w.usedPercent} resets={resets(w.resetsAt)} />)
-              )}
-            </div>
-          )
-        })
-      )}
-    </Group>
   )
 }

@@ -28,6 +28,9 @@ pub struct CodexDriver {
     state: Arc<Mutex<State>>,
     sink: Sink,
     permission: PermissionMode,
+    /// After a mode change, send its sandbox on every new turn (including retries).
+    /// Until then, preserve the sandbox resolved by thread/start or thread/resume.
+    permission_changed: bool,
     model: Option<String>,
     effort: Option<String>,
 }
@@ -109,8 +112,16 @@ impl CodexDriver {
             });
         }
 
-        let d =
-            CodexDriver { rpc, child, state, sink, permission: opts.permission, model: opts.model.clone(), effort: opts.effort.clone() };
+        let d = CodexDriver {
+            rpc,
+            child,
+            state,
+            sink,
+            permission: opts.permission,
+            permission_changed: false,
+            model: opts.model.clone(),
+            effort: opts.effort.clone(),
+        };
         d.rpc.call(
             "initialize",
             json!({"clientInfo": {"name": "oah", "title": "oah", "version": env!("CARGO_PKG_VERSION")}, "capabilities": null}),
@@ -173,6 +184,15 @@ impl Driver for CodexDriver {
         });
         let (approval, _) = policy(self.permission);
         let mut params = json!({"threadId": thread_id, "input": input, "approvalPolicy": approval});
+        if self.permission_changed {
+            // turn/start takes a tagged policy, unlike thread/start's kebab-case mode.
+            // Changing approvals alone leaves the previous sandbox in force.
+            params["sandboxPolicy"] = match self.permission {
+                PermissionMode::Ask | PermissionMode::AcceptEdits => json!({"type": "workspaceWrite", "networkAccess": false}),
+                PermissionMode::Plan => json!({"type": "readOnly"}),
+                PermissionMode::FullAccess => json!({"type": "dangerFullAccess"}),
+            };
+        }
         if let Some(m) = &self.model {
             params["model"] = json!(m);
         }
@@ -234,6 +254,7 @@ impl Driver for CodexDriver {
 
     fn set_permission(&mut self, mode: PermissionMode) -> DriverResult<()> {
         // Applied with the next turn/start.
+        self.permission_changed |= self.permission != mode;
         self.permission = mode;
         Ok(())
     }
@@ -661,6 +682,65 @@ mod tests {
         }
         let v = out.lock().unwrap().clone();
         (v, state)
+    }
+
+    /// Exercise the actual send path across mode changes on one live thread. `cat`
+    /// echoes JSON-RPC requests so the peer can capture and acknowledge them.
+    #[cfg(unix)]
+    #[test]
+    fn permission_changes_update_approvals_and_sandbox_on_the_same_thread() {
+        use std::process::{Command, Stdio};
+        use std::sync::mpsc;
+
+        let mut child = Command::new("cat").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let rpc = Rpc::new(child.stdin.take(), "test peer");
+        let peer = rpc.clone();
+        let (tx, rx) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                let request: Value = serde_json::from_str(&line).unwrap();
+                peer.take_reply(&json!({"id": request["id"], "result": {}}));
+                if tx.send(request).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut driver = CodexDriver {
+            rpc,
+            child: Arc::new(Mutex::new(Some(child))),
+            state: Arc::new(Mutex::new(State { alive: true, thread_id: Some("existing-thread".into()), ..Default::default() })),
+            sink: Arc::new(|_| {}),
+            permission: PermissionMode::Ask,
+            permission_changed: false,
+            model: None,
+            effort: None,
+        };
+        let mut send = |mode, expected: Option<(&str, &str)>| {
+            driver.set_permission(mode).unwrap();
+            driver.send(Prompt { id: "p".into(), text: "continue".into(), images: vec![], files: vec![] }).unwrap();
+            let request = rx.recv_timeout(Duration::from_secs(5)).expect("driver sent a request");
+            assert_eq!(request["method"], "turn/start");
+            let params = &request["params"];
+            assert_eq!(params["threadId"], "existing-thread");
+            if let Some((approval, sandbox)) = expected {
+                assert_eq!(params["approvalPolicy"], approval);
+                assert_eq!(params["sandboxPolicy"]["type"], sandbox);
+                if sandbox == "workspaceWrite" {
+                    assert_eq!(params["sandboxPolicy"]["networkAccess"], false);
+                }
+            } else {
+                assert!(params.get("sandboxPolicy").is_none(), "unchanged modes inherit the server's resolved sandbox");
+            }
+        };
+        send(PermissionMode::Ask, None);
+        send(PermissionMode::FullAccess, Some(("never", "dangerFullAccess")));
+        send(PermissionMode::FullAccess, Some(("never", "dangerFullAccess")));
+        send(PermissionMode::Ask, Some(("untrusted", "workspaceWrite")));
+        send(PermissionMode::Plan, Some(("on-request", "readOnly")));
+        send(PermissionMode::AcceptEdits, Some(("on-request", "workspaceWrite")));
+        driver.stop();
+        reader.join().unwrap();
     }
 
     #[test]

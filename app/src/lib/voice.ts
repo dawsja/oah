@@ -12,15 +12,20 @@ export type VoiceState =
 
 export const useVoice = create<{ state: VoiceState }>(() => ({ state: { state: "off" } }))
 
-let listening = false
-/** Loads the voice state once and follows `voice-state` events. */
-export async function initVoice() {
-  if (listening) return
-  listening = true
-  const { invoke } = await import("@tauri-apps/api/core")
-  const { listen } = await import("@tauri-apps/api/event")
-  await listen<VoiceState>("voice-state", (e) => useVoice.setState({ state: e.payload }))
-  useVoice.setState({ state: await invoke<VoiceState>("voice_state") })
+let initializing: Promise<void> | undefined
+/** Loads the voice state once and follows `voice-state` events. Failed setup can be retried. */
+export function initVoice(): Promise<void> {
+  return initializing ??= (async () => {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const { listen } = await import("@tauri-apps/api/event")
+    const unlisten = await listen<VoiceState>("voice-state", (e) => useVoice.setState({ state: e.payload }))
+    try {
+      useVoice.setState({ state: await invoke<VoiceState>("voice_state") })
+    } catch (e) {
+      unlisten()
+      throw e
+    }
+  })().catch((e) => { initializing = undefined; throw e })
 }
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -51,41 +56,49 @@ export async function record(deviceId = ""): Promise<Recording> {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) },
   })
-  const ctx = new AudioContext({ sampleRate: RATE })
-  const source = ctx.createMediaStreamSource(stream)
-  // ScriptProcessor rather than a worklet: a worklet needs a module URL the CSP doesn't allow.
-  const node = ctx.createScriptProcessor(4096, 1, 1)
-  const chunks: Float32Array[] = []
-  node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)))
-  source.connect(node)
-  node.connect(ctx.destination)
-  const analyser = ctx.createAnalyser()
-  analyser.fftSize = 512
-  source.connect(analyser)
-  const frame = new Float32Array(analyser.fftSize)
-  const end = () => {
-    node.disconnect()
-    source.disconnect()
+  let ctx: AudioContext | undefined
+  try {
+    ctx = new AudioContext()
+    const audio = ctx
+    const source = audio.createMediaStreamSource(stream)
+    // ScriptProcessor rather than a worklet: a worklet needs a module URL the CSP doesn't allow.
+    const node = audio.createScriptProcessor(4096, 1, 1)
+    const chunks: Float32Array[] = []
+    node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)))
+    source.connect(node)
+    node.connect(audio.destination)
+    const analyser = audio.createAnalyser()
+    analyser.fftSize = 512
+    source.connect(analyser)
+    const frame = new Float32Array(analyser.fftSize)
+    const end = () => {
+      node.disconnect()
+      source.disconnect()
+      stream.getTracks().forEach((t) => t.stop())
+      void audio.close().catch(() => {})
+    }
+    return {
+      stop: () => {
+        end()
+        const all = new Float32Array(chunks.reduce((n, c) => n + c.length, 0))
+        let at = 0
+        for (const c of chunks) {
+          all.set(c, at)
+          at += c.length
+        }
+        return audio.sampleRate === RATE ? all : resample(all, audio.sampleRate, RATE)
+      },
+      cancel: end,
+      level: () => {
+        analyser.getFloatTimeDomainData(frame)
+        const rms = Math.sqrt(frame.reduce((n, x) => n + x * x, 0) / frame.length)
+        return Math.min(1, rms * 8)
+      },
+    }
+  } catch (e) {
     stream.getTracks().forEach((t) => t.stop())
-    void ctx.close()
-  }
-  return {
-    stop: () => {
-      end()
-      const all = new Float32Array(chunks.reduce((n, c) => n + c.length, 0))
-      let at = 0
-      for (const c of chunks) {
-        all.set(c, at)
-        at += c.length
-      }
-      return ctx.sampleRate === RATE ? all : resample(all, ctx.sampleRate, RATE)
-    },
-    cancel: end,
-    level: () => {
-      analyser.getFloatTimeDomainData(frame)
-      const rms = Math.sqrt(frame.reduce((n, x) => n + x * x, 0) / frame.length)
-      return Math.min(1, rms * 8)
-    },
+    if (ctx) void ctx.close().catch(() => {})
+    throw e
   }
 }
 

@@ -5,17 +5,20 @@ import { Tip } from "@/components/Tip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { LIMIT_AGENTS, LIMIT_LABEL, type Limits } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { useApp } from "@/store/app"
-import { nextReset, resetsIn, shortLabel, useUsage } from "@/store/usage"
+import { useApp, useProject } from "@/store/app"
+import { LOCAL_USAGE, nextReset, resetsIn, shortLabel, usageLocationLabel, useUsageAt } from "@/store/usage"
+import { useLocationAwake } from "@/store/wsl"
 
 /** The title bar's usage icon and a popover with each agent's windows. */
 export function UsageButton() {
-  const { limits, loading, load } = useUsage()
+  const location = useProject()?.location ?? LOCAL_USAGE
+  const awake = useLocationAwake(location)
+  const { limits, loading, load } = useUsageAt(location)
   useEffect(() => {
-    void load()
+    void load(true)
     const t = setInterval(() => document.visibilityState === "visible" && void load(), 5 * 60_000)
     return () => clearInterval(t)
-  }, [load])
+  }, [load, awake])
   const top = Math.max(0, ...Object.values(limits).flatMap((l) => l?.windows.map((w) => w.usedPercent) ?? []))
   const tone = top >= 90 ? "text-red" : top >= 70 ? "text-warn" : "text-muted-foreground"
 
@@ -30,7 +33,7 @@ export function UsageButton() {
       </Tip>
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center px-3 pt-2.5 pb-1.5 text-[12.5px] font-semibold">
-          Usage
+          <span className="min-w-0 truncate" title={usageLocationLabel(location)}>Usage · {usageLocationLabel(location)}</span>
           <button className="rounded-md ml-auto grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Refresh usage" onClick={() => void load(true)}>
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
           </button>
