@@ -1,8 +1,9 @@
 name: Release
 
-# A v* tag (matching app/package.json's version) builds the installers, signs them, and
-# publishes them: to dl.oah.dev (R2; the app's updater and oah.dev's download links read
-# desktop/latest.json there) and to a GitHub release.
+# A desktop-v* tag (matching app/package.json's version; scripts/release.ts makes it only when
+# the desktop app changed) builds the installers, signs them, and publishes them: to dl.oah.dev
+# (R2; the app's updater and oah.dev's download links read desktop/latest.json there) and to a
+# GitHub release. The phone app has its own android-v* tags (android.yml).
 #
 # Secrets (each step skips itself when its secrets aren't set):
 #   TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)  signs updates (the app checks them with the pubkey in
@@ -11,7 +12,7 @@ name: Release
 #   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID  the R2 upload (vars.OAH_R2_BUCKET optional)
 on:
   push:
-    tags: ["v*"]
+    tags: ["desktop-v*"]
   workflow_dispatch:
 
 permissions:
@@ -84,7 +85,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -99,7 +100,7 @@ jobs:
           merge-multiple: true
           path: app/release
       - name: Manifest (updates + downloads)
-        run: bun app/scripts/manifest.ts --notes "oah ${GITHUB_REF_NAME#v}"
+        run: bun app/scripts/manifest.ts --notes "oah ${GITHUB_REF_NAME#desktop-v}"
       - name: Publish to R2 (dl.oah.dev)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

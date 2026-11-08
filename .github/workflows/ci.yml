@@ -1,6 +1,7 @@
 name: CI
 
-# Branches only: a v* tag points at a commit CI already checked on main, and release.yml builds it.
+# Branches only: a release tag (desktop-v*, android-v*) points at a commit CI already checked on
+# main; release.yml and android.yml build it.
 on:
   push:
     branches: ["**"]

@@ -20,6 +20,10 @@ PUBLIC="${OAH_PUBLIC_URL:-https://dl.oah.dev}"
 version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' app/package.json | head -1)"
 apk="release/oah-android-$version.apk"
 [ -f "$apk" ] || { echo "$apk is missing" >&2; exit 1; }
+if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == android-v* ]] && [ "${GITHUB_REF_NAME#android-v}" != "$version" ]; then
+  echo "tag $GITHUB_REF_NAME doesn't match app/package.json version $version" >&2
+  exit 1
+fi
 
 put() { # put <bucket key> <file> <content-type> <cache-control>
   echo "  r2://$BUCKET/$1"

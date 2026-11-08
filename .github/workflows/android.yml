@@ -1,9 +1,10 @@
 name: Android
 
-# The phone app (android/): a v* tag builds the APK, publishes it to R2 (dl.oah.dev/android/, see
-# scripts/publish-android-r2.sh) and attaches it (and its sha256) to the
-# GitHub release release.yml makes for the same tag; a manual run leaves it as an artifact (or,
-# given `release`, attaches it to that existing release).
+# The phone app (android/): an android-v* tag (scripts/release.ts makes it only when the phone
+# app changed) builds the APK, publishes it to R2 (dl.oah.dev/android/, see
+# scripts/publish-android-r2.sh) and attaches it (and its sha256) to a GitHub release for that
+# tag; a manual run leaves it as an artifact (or, given `release`, attaches it to that existing
+# release).
 # It's sideloaded: there's no Play Store listing.
 #
 # Secrets (without them the APK is unsigned, which Android won't install):
@@ -12,11 +13,11 @@ name: Android
 #   ANDROID_KEY_ALIAS          the key's alias
 on:
   push:
-    tags: ["v*"]
+    tags: ["android-v*"]
   workflow_dispatch:
     inputs:
       release:
-        description: "Also attach the APK to this existing release (e.g. v0.3.0)"
+        description: "Also attach the APK to this existing release (e.g. android-v0.3.4)"
         required: false
         default: ""
 
@@ -75,7 +76,7 @@ jobs:
           cp "$apk" "release/oah-android-$version.apk"
           (cd release && sha256sum "oah-android-$version.apk" > "oah-android-$version.apk.sha256")
       - name: Publish to R2 (dl.oah.dev)
-        if: (startsWith(github.ref, 'refs/tags/v') || inputs.release != '') && env.ANDROID_KEYSTORE_PATH != ''
+        if: (startsWith(github.ref, 'refs/tags/android-v') || inputs.release != '') && env.ANDROID_KEYSTORE_PATH != ''
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -93,7 +94,7 @@ jobs:
           if-no-files-found: error
       # Only a signed APK goes on the release: Android won't install an unsigned one.
       - uses: softprops/action-gh-release@v2
-        if: (startsWith(github.ref, 'refs/tags/v') || inputs.release != '') && env.ANDROID_KEYSTORE_PATH != ''
+        if: (startsWith(github.ref, 'refs/tags/android-v') || inputs.release != '') && env.ANDROID_KEYSTORE_PATH != ''
         with:
           tag_name: ${{ inputs.release || github.ref_name }}
           name: oah ${{ inputs.release || github.ref_name }}

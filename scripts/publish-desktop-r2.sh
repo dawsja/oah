@@ -24,7 +24,7 @@ version="$(tr -d ' \r\n' <"$REL/latest.txt" 2>/dev/null || true)"
 [ -n "$version" ] || { echo "$REL/latest.txt is missing — run app/scripts/collect.ts and manifest.ts first" >&2; exit 1; }
 want="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' app/package.json | head -1)"
 [ "$version" = "$want" ] || { echo "release is $version but app/package.json says $want" >&2; exit 1; }
-if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]] && [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == desktop-v* ]] && [ "${GITHUB_REF_NAME#desktop-v}" != "$version" ]; then
   echo "tag $GITHUB_REF_NAME doesn't match app/package.json version $version" >&2
   exit 1
 fi
