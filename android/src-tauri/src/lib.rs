@@ -116,6 +116,17 @@ fn desktops(state: State<AppState>) -> Vec<Desktop> {
     state.saved.lock().unwrap().desktops.clone()
 }
 
+#[tauri::command]
+async fn discover() -> Result<Vec<oah_remote::discovery::Found>, String> {
+    oah_remote::discovery::discover().await
+}
+
+#[tauri::command]
+async fn request_pairing(address: String, name: String) -> Result<(), String> {
+    let name: String = name.chars().filter(|c| !c.is_control()).take(32).collect();
+    client::request_pairing(&with_port(&address), if name.trim().is_empty() { "Android phone" } else { &name }).await
+}
+
 /// Pairs with a desktop from the `addresses` and `code` it shows.
 #[tauri::command]
 async fn pair(state: State<'_, AppState>, addresses: Vec<String>, code: String, name: String) -> Result<Desktop, String> {
@@ -277,7 +288,7 @@ pub fn run() {
             app.manage(AppState::load(dir.join("desktops.json")));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktops, pair, forget, connect, disconnect, wake, rpc])
+        .invoke_handler(tauri::generate_handler![desktops, discover, request_pairing, pair, forget, connect, disconnect, wake, rpc])
         .run(tauri::generate_context!())
         .expect("error while running oah");
 }

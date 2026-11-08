@@ -223,3 +223,17 @@ async fn chat_snapshot_then_live_events_without_gaps() {
     assert_eq!(pushes.lock().unwrap().len(), before + 1);
     assert!(c.call("chat.open", json!({ "chatId": "nope" })).await.is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn nearby_request_needs_local_approval_and_code_and_is_rate_limited() {
+    let (host, server, addr) = start().await;
+    client::request_pairing(&addr[0], "Pixel").await.unwrap();
+    assert!(host.events.lock().unwrap().contains(&Event::PairRequested { name: "Pixel".into() }));
+    assert!(server.pairing().is_none(), "a remote request cannot open a code");
+    assert!(host.devices.lock().unwrap().is_empty(), "a remote request cannot pair itself");
+    assert!(client::request_pairing(&addr[0], "Pixel").await.unwrap_err().contains("recently"));
+    // Local approval opens a code; the normal authenticated pairing still works.
+    let code = server.open_pairing().code;
+    client::pair(&addr, &code, "Pixel", &Identity::generate()).await.unwrap();
+    assert_eq!(host.devices.lock().unwrap().len(), 1);
+}

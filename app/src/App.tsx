@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { PhonePairingHost } from "@/components/settings/PhoneSection"
 import { PromptHost } from "@/components/Prompt"
 import { ImageLightbox } from "@/components/ImageView"
 import { RemoteFolderHost } from "@/components/settings/RemoteFolder"
@@ -89,6 +90,7 @@ export function App() {
       </div>
       <Toaster position="bottom-right" />
       <PromptHost />
+      <PhonePairingHost />
       <ImageLightbox />
       <RemoteFolderHost />
     </TooltipProvider>

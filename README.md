@@ -65,9 +65,14 @@ Electron.
 - **Phone (Android, optional).** The oah app for Android continues your chats away from the
   desk: projects and chats, answers streaming in, replies (queued or sent into the running
   turn), photos, approvals and questions, stop, new chats, and the model, effort and permission.
-  Turn it on in Settings → Phone, choose Pair a phone, and type the address and the 8-character
-  code it shows into the app. The phone connects to this computer directly, on
-  the same Wi-Fi or a VPN such as Tailscale; pairing runs SPAKE2 on the one-time code (five
+  Turn it on in Settings → Phone, then choose the computer under Nearby computers on the
+  phone and tap Connect. Accept the desktop's Connect prompt and enter its 8-character code.
+  Manual address/code pairing is also available. Nearby discovery uses UDP port 7788; pairing
+  and chat use TCP/WebSocket on the configured port (7787 by default). On Windows, the
+  Allow connections button requests administrator permission to allow oah on Private networks
+  from the local subnet. Discovery cannot cross guest-network isolation or blocked firewalls.
+  The phone connects directly over the same local network (Ethernet and Wi-Fi work together)
+  or a VPN such as Tailscale; pairing runs SPAKE2 on the one-time code (five
   tries, five minutes), and every session after it is Noise `IK` with keys only the two of them
   hold. Settings → Phone lists the paired phones; Forget disconnects one for good.
 - **Settings.** Providers, Voice, Appearance (dark, light, system), Usage, SSH Hosts, Projects, MCP,

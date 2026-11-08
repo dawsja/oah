@@ -20,7 +20,7 @@ use crate::wire::{self, Transport};
 use crate::Identity;
 
 /// Time to reach an address and finish the handshake.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// A call the desktop doesn't answer in this long fails (starting an agent can take a while).
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 /// The desktop pings every 20 s: nothing for this long means the link is gone.
@@ -41,11 +41,31 @@ pub struct Paired {
 async fn open_ws(address: &str) -> Result<Ws, String> {
     let url = format!("ws://{address}{}", crate::PATH);
     let config = WebSocketConfig::default().max_message_size(Some(wire::MAX_MESSAGE)).max_frame_size(Some(1 << 20));
-    let (ws, _) = tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async_with_config(url, Some(config), true))
-        .await
-        .map_err(|_| format!("{address} didn't answer"))?
-        .map_err(|e| format!("couldn't reach {address}: {e}"))?;
+    let stream = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(address)).await
+        .map_err(|_| format!("Cannot reach {address}: the TCP connection timed out. On the desktop, allow oah through Windows Firewall on your Private network. Also check guest Wi-Fi/client isolation."))?
+        .map_err(|e| format!("Cannot reach {address}: {e}. Check that phone access is enabled and the address and port match the desktop."))?;
+    let _ = stream.set_nodelay(true);
+    let (ws, _) = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        tokio_tungstenite::client_async_with_config(url, MaybeTlsStream::Plain(stream), Some(config)),
+    )
+    .await
+    .map_err(|_| format!("Reached {address}, but the oah handshake timed out. Check that this port belongs to oah."))?
+    .map_err(|e| format!("Reached {address}, but the oah handshake failed: {e}"))?;
     Ok(ws)
+}
+
+/// Ask the desktop to show its local approval dialog. No credentials travel in this request.
+pub async fn request_pairing(address: &str, name: &str) -> Result<(), String> {
+    let mut ws = open_ws(address).await?;
+    wire::send(&mut ws, wire::INVITE, name.as_bytes()).await?;
+    let (kind, _) = tokio::time::timeout(CONNECT_TIMEOUT, wire::recv(&mut ws))
+        .await
+        .map_err(|_| "The desktop did not acknowledge the pairing request.".to_string())??;
+    if kind != wire::INVITE {
+        return Err("The desktop needs an update to support nearby pairing.".into());
+    }
+    Ok(())
 }
 
 /// Tries every address at once; the first that works wins.
@@ -116,7 +136,7 @@ async fn handshake(address: String, me: Identity, desktop: [u8; 32]) -> Result<(
     let msg1 = wire::hs_write(&mut hs, serde_json::json!({ "protocol": crate::PROTOCOL }).to_string().as_bytes())?;
     wire::send(&mut ws, wire::HANDSHAKE, &msg1).await?;
     let (kind, msg2) =
-        tokio::time::timeout(CONNECT_TIMEOUT, wire::recv(&mut ws)).await.map_err(|_| format!("{address} didn't answer"))??;
+        tokio::time::timeout(CONNECT_TIMEOUT, wire::recv(&mut ws)).await.map_err(|_| format!("{address} did not answer in time. Check that oah allows phone access, Windows Firewall allows oah on your Private network, and Wi-Fi client isolation is off."))??;
     if kind != wire::HANDSHAKE {
         return Err("the desktop answered something else".into());
     }

@@ -100,7 +100,7 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
 
 export function PhoneSection() {
   const state = useRemote((s) => s.state)
-  const [pairing, setPairing] = useState(false)
+  const setPairing = (pairingOpen: boolean) => useRemote.setState({ pairingOpen })
   const [port, setPort] = useState("")
   const [busy, setBusy] = useState(false)
   useEffect(() => {
@@ -153,6 +153,17 @@ export function PhoneSection() {
             Pair a phone
           </Button>
         </Row>
+        {navigator.userAgent.includes("Windows") ? (
+          <Row label="Windows Firewall" description="Allow oah on Private networks for nearby discovery and phone connections. Windows will ask for administrator permission. Your trusted home network must be set to Private.">
+            <Button size="sm" disabled={busy || !state.running} onClick={async () => {
+              setBusy(true)
+              try { await remote.allowFirewall(); toast.success("Firewall rules added. Retry Connect on your phone.") }
+              catch (e) { toast.error(String(e)) }
+              finally { setBusy(false) }
+            }}>Allow connections</Button>
+          </Row>
+        ) : null}
+        {state.running && !state.discoveryAvailable ? <p className="px-4 py-2 text-[12px] text-warn">Nearby discovery could not start. You can still pair by address and code.</p> : null}
         <Row label="Port" description="The TCP port phones connect to. When it's taken, oah picks a free one.">
           <Input
             type="number"
@@ -196,7 +207,28 @@ export function PhoneSection() {
           Away from home? Put this computer and the phone on the same VPN (Tailscale, ZeroTier, WireGuard); its address shows up here and in the pairing code.
         </p>
       )}
-      <PairDialog open={pairing} onOpenChange={setPairing} />
+
     </Section>
   )
+}
+
+/** Mounted once, so a phone's request is visible even outside Settings. */
+export function PhonePairingHost() {
+  const open = useRemote((s) => s.pairingOpen)
+  const request = useRemote((s) => s.pairRequest)
+  return <>
+    <Dialog open={!!request && !open} onOpenChange={(o) => { if (!o) useRemote.setState({ pairRequest: null }) }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Connect a phone?</DialogTitle>
+          <DialogDescription>{request} is asking to pair. Continue only if you just tapped Connect on your phone. You will enter a code on the phone to finish.</DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => useRemote.setState({ pairRequest: null })}>Dismiss</Button>
+          <Button onClick={() => useRemote.setState({ pairRequest: null, pairingOpen: true })}>Connect</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    <PairDialog open={open} onOpenChange={(pairingOpen) => useRemote.setState({ pairingOpen })} />
+  </>
 }

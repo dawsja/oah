@@ -23,6 +23,7 @@ use crate::{err, AppState, CmdResult};
 #[derive(Default)]
 pub struct Remote {
     server: Mutex<Option<Server>>,
+    discovery: Mutex<Option<oah_remote::discovery::Beacon>>,
     /// Why the server isn't running when it should be.
     error: Mutex<Option<String>>,
     identity: OnceLock<Identity>,
@@ -55,6 +56,7 @@ pub struct RemoteState {
     pub devices: Vec<DeviceState>,
     pub error: Option<String>,
     pub desktop_name: String,
+    pub discovery_available: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -341,6 +343,9 @@ impl Host for AppHost {
             Event::Paired { name, .. } => {
                 let _ = self.app.emit("remote-paired", json!({ "name": name }));
             }
+            Event::PairRequested { name } => {
+                let _ = self.app.emit("remote-pair-request", json!({ "name": name }));
+            }
             Event::PairFailed { left } => {
                 let _ = self.app.emit("remote-pair-failed", json!({ "left": left }));
             }
@@ -363,7 +368,12 @@ async fn start(app: &AppHandle, port: u16) -> Result<u16, String> {
         Err(e) => return Err(format!("couldn't listen for phones on port {port}: {e}")),
     };
     let bound = server.local_addr().port();
+    let discovery = oah_remote::discovery::advertise(desktop_name(), bound).await;
+    if let Err(e) = &discovery {
+        eprintln!("oah: nearby discovery unavailable: {e}");
+    }
     let state = app.state::<AppState>();
+    *state.remote.discovery.lock().unwrap() = discovery.ok();
     *state.remote.server.lock().unwrap() = Some(server);
     if bound != port {
         let mut s = state.settings.lock().unwrap();
@@ -378,6 +388,7 @@ async fn start(app: &AppHandle, port: u16) -> Result<u16, String> {
 
 fn stop(app: &AppHandle) {
     let state = app.state::<AppState>();
+    state.remote.discovery.lock().unwrap().take();
     let server = state.remote.server.lock().unwrap().take();
     drop(server);
 }
@@ -407,6 +418,7 @@ fn state_of(app: &AppHandle) -> RemoteState {
         None => (false, s.port, vec![]),
     };
     let error = state.remote.error.lock().unwrap().clone();
+    let discovery_available = state.remote.discovery.lock().unwrap().is_some();
     RemoteState {
         enabled: s.enabled,
         running,
@@ -415,6 +427,7 @@ fn state_of(app: &AppHandle) -> RemoteState {
         devices: s.devices.into_iter().map(|d| DeviceState { connected: connected.contains(&d.id), device: d }).collect(),
         error,
         desktop_name: desktop_name(),
+        discovery_available,
     }
 }
 

@@ -5,6 +5,7 @@ mod chats;
 mod git;
 mod mcp;
 mod remote;
+mod remote_firewall;
 mod secrets;
 mod terminal;
 mod voice;
@@ -508,6 +509,7 @@ pub fn run() {
             chat_delete,
             chat_rename,
             chat_pin,
+            remote_firewall::remote_allow_firewall,
             remote::remote_state,
             remote::remote_set_enabled,
             remote::remote_set_port,

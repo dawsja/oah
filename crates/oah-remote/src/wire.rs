@@ -8,6 +8,8 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::Identity;
 
+/// Requests a desktop pairing dialog; grants no access.
+pub const INVITE: u8 = 4;
 /// A pairing step (see [`crate::pairing`]).
 pub const PAIR: u8 = 1;
 /// A Noise handshake message.

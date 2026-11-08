@@ -26,7 +26,10 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
   return invoke<T>(cmd, args)
 }
 
+export type NearbyDesktop = { name: string; address: string }
 export const native = {
+  discover: () => invoke<NearbyDesktop[]>("discover"),
+  requestPairing: (address: string, name: string) => invoke<void>("request_pairing", { address, name }),
   desktops: () => invoke<Desktop[]>("desktops"),
   /** With the address and code the desktop shows. */
   pair: (o: { addresses: string[]; code: string; name: string }) => invoke<Desktop>("pair", { addresses: o.addresses, code: o.code, name: o.name }),

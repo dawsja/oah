@@ -13,6 +13,7 @@
 //! [`server`] is the desktop's half (it calls a [`server::Host`]), [`client`] the phone's.
 
 pub mod client;
+pub mod discovery;
 pub mod pairing;
 pub mod proto;
 pub mod server;

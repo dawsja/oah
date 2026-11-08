@@ -42,6 +42,9 @@ pub enum Feed {
 /// Something the app may want to show (the Settings page, a toast).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
+    PairRequested {
+        name: String,
+    },
     Paired {
         device_id: String,
         name: String,
@@ -86,6 +89,7 @@ struct Conn {
 struct Inner {
     host: Arc<dyn Host>,
     pairing: Mutex<Option<pairing::Session>>,
+    last_invite: Mutex<Option<std::time::Instant>>,
     conns: Mutex<HashMap<u64, Conn>>,
     unauthenticated: AtomicUsize,
     next_conn: AtomicU64,
@@ -113,6 +117,7 @@ impl Server {
         let inner = Arc::new(Inner {
             host,
             pairing: Mutex::new(None),
+            last_invite: Mutex::new(None),
             conns: Mutex::new(HashMap::new()),
             unauthenticated: AtomicUsize::new(0),
             next_conn: AtomicU64::new(1),
@@ -223,6 +228,25 @@ async fn serve(inner: Arc<Inner>, stream: TcpStream) {
     .await;
     let Ok(Some((mut ws, (kind, body)))) = first else { return };
     match kind {
+        wire::INVITE => {
+            let name = String::from_utf8(body).ok().filter(|n| !n.trim().is_empty() && n.len() <= 128 && !n.chars().any(char::is_control));
+            let allowed = {
+                let mut last = inner.last_invite.lock().unwrap();
+                if name.is_some() && last.is_none_or(|t| t.elapsed() >= Duration::from_secs(30)) {
+                    *last = Some(std::time::Instant::now());
+                    true
+                } else {
+                    false
+                }
+            };
+            if allowed {
+                inner.host.event(Event::PairRequested { name: name.unwrap() });
+                let _ = wire::send(&mut ws, wire::INVITE, b"ok").await;
+            } else {
+                wire::fail(&mut ws, "A pairing request was sent recently. Check the desktop, or wait 30 seconds and retry.").await;
+            }
+            let _ = ws.close(None).await;
+        }
         wire::PAIR => {
             let _ = tokio::time::timeout(PAIR_TIMEOUT, pair(&inner, &mut ws, body)).await;
             let _ = ws.close(None).await;

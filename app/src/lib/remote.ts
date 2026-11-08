@@ -13,6 +13,7 @@ export type RemoteState = {
   addresses: RemoteAddress[]
   devices: RemoteDevice[]
   error: string | null
+  discoveryAvailable: boolean
   desktopName: string
 }
 export type PairingInfo = { code: string; expiresAt: number; addresses: string[] }
@@ -23,6 +24,7 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const remote = {
+  allowFirewall: () => call<void>("remote_allow_firewall"),
   state: () => call<RemoteState>("remote_state"),
   setEnabled: (enabled: boolean) => call<RemoteState>("remote_set_enabled", { enabled }),
   setPort: (port: number) => call<RemoteState>("remote_set_port", { port }),
@@ -34,6 +36,8 @@ export const remote = {
 type Store = {
   state: RemoteState | null
   /** The last phone that paired (the pair dialog shows it, then closes). */
+  pairingOpen: boolean
+  pairRequest: string | null
   paired: string | null
   /** Tries left after a wrong code, while the dialog is open. */
   failedLeft: number | null
@@ -42,6 +46,8 @@ type Store = {
 
 export const useRemote = create<Store>((set) => ({
   state: null,
+  pairingOpen: false,
+  pairRequest: null,
   paired: null,
   failedLeft: null,
   async refresh() {
@@ -56,6 +62,10 @@ export async function initRemote() {
   if (listening) return
   listening = true
   const { listen } = await import("@tauri-apps/api/event")
+  await listen<{ name: string }>("remote-pair-request", (e) => {
+    const s = useRemote.getState()
+    if (!s.pairingOpen && !s.pairRequest) useRemote.setState({ pairRequest: e.payload.name })
+  })
   await listen("remote-state", () => void useRemote.getState().refresh())
   await listen<{ name: string }>("remote-paired", (e) => useRemote.setState({ paired: e.payload.name, failedLeft: null }))
   await listen<{ left: number }>("remote-pair-failed", (e) => useRemote.setState({ failedLeft: e.payload.left }))
