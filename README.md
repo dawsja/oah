@@ -79,6 +79,10 @@ Electron.
   or a VPN such as Tailscale; pairing runs SPAKE2 on the one-time code (five
   tries, five minutes), and every session after it is Noise `IK` with keys only the two of them
   hold. Settings → Phone lists the paired phones; Forget disconnects one for good.
+  Image attachments and agent image files (including WSL/SSH projects) open in the full-screen
+  viewer, with fit/actual size, copy to the phone clipboard, and Save as to a phone destination.
+  Attach PNG, JPEG, GIF or WebP by picker, paste or drop (up to eight, 5 MB each).
+  Both desktop and Android must be updated for agent file images to load.
 - **Settings.** Providers, Voice, Appearance (dark, light, system), Usage, SSH Hosts, Projects, MCP,
   Phone.
 

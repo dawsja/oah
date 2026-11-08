@@ -2,6 +2,8 @@
 //! session at a time (reconnecting on its own). The UI calls the desktop through `rpc` and gets
 //! its pushes, and the connection's ups and downs, on the channel it passed to `connect`.
 
+mod appearance;
+mod images;
 mod voice;
 
 use std::path::PathBuf;
@@ -283,6 +285,8 @@ async fn rpc(state: State<'_, AppState>, method: String, params: Value) -> Resul
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(appearance::init())
+        .plugin(images::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -292,6 +296,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            appearance::phone_theme,
+            images::image_action,
             desktops,
             discover,
             request_pairing,

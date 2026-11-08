@@ -27,6 +27,7 @@ function useModels(agent: AgentInfo | undefined, projectId: string | null, live:
 }
 
 export function ChatScreen({ chatId }: { chatId: string }) {
+  const desktopId = useMobile((s) => s.desktopId)
   const meta = useMobile((s) => s.metas.find((m) => m.id === chatId))
   const transcript = useMobile((s) => s.transcripts[chatId])
   const link = useMobile((s) => s.link)
@@ -46,8 +47,8 @@ export function ChatScreen({ chatId }: { chatId: string }) {
   const t = transcript ?? emptyTranscript()
   const { models, load } = useModels(agent, meta?.projectId ?? null, t.models)
   const source = useMemo<ImageSource>(
-    () => ({ key: `phone:${chatId}`, chatImage: (file) => api.image(chatId, file), readImage: () => Promise.reject(new Error("files aren't shared with the phone")) }),
-    [chatId],
+    () => ({ key: `phone:${desktopId}:${chatId}`, chatImage: (file) => api.image(chatId, file), readImage: (path) => api.readImage(chatId, path) }),
+    [desktopId, chatId],
   )
   const model = meta?.model || t.model || agent?.defaultModel || ""
   const modelName = models.find((m) => m.id === model)?.name ?? model
@@ -110,6 +111,7 @@ export function ChatScreen({ chatId }: { chatId: string }) {
         onModelsOpen={load}
         permission={permission ?? agent?.permissionMode ?? null}
         onPermission={(m) => st.setPermission(chatId, m)}
+        context={t.context}
         onCompact={() => void st.compact(chatId)}
         onClear={() => void st.clear(chatId)}
       />

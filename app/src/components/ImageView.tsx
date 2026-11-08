@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useState } from "react"
 import { ChevronLeft, ChevronRight, Copy, Download, Maximize2, Minimize2, X } from "lucide-react"
 import { create } from "zustand"
 import { toast } from "sonner"
@@ -6,12 +6,15 @@ import { Tip } from "@/components/Tip"
 import { cn } from "@/lib/utils"
 import { copyImageLocally, saveImageLocally } from "@/lib/image-download"
 
+export const ImageActionsContext = createContext({ copy: copyImageLocally, save: saveImageLocally })
+
 /** An image to show: a `data:` URL (or any URL the webview can load) and a name. */
 export type ShownImage = { src: string; name: string }
 
 /** The image on a checkerboard, fitted to the space or at its actual size (click to switch),
  *  with its size and Copy / Save. */
 export function ImageStage({ image, className, toolbar = true }: { image: ShownImage; className?: string; toolbar?: boolean }) {
+  const actions = useContext(ImageActionsContext)
   const [actual, setActual] = useState(false)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   useEffect(() => {
@@ -21,17 +24,17 @@ export function ImageStage({ image, className, toolbar = true }: { image: ShownI
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
       {toolbar ? (
-        <div className="flex h-9 shrink-0 items-center gap-1 px-3 text-[11.5px] text-muted-foreground">
+        <div className="flex h-9 [@media(pointer:coarse)]:h-12 shrink-0 items-center gap-1 px-3 text-[11.5px] text-muted-foreground">
           <span className="truncate font-mono">{image.name}</span>
           {size ? <span className="shrink-0 font-mono text-faint">· {size.w}×{size.h}</span> : null}
-          <span className="ml-auto flex items-center gap-0.5">
+          <span className="ml-auto flex shrink-0 items-center gap-0.5">
             <IconButton label={actual ? "Fit to window" : "Actual size"} onClick={() => setActual(!actual)}>
               {actual ? <Minimize2 /> : <Maximize2 />}
             </IconButton>
-            <IconButton label="Copy image" onClick={() => void copyImage(image)}>
+            <IconButton label="Copy image" onClick={() => void copyImage(image, actions.copy)}>
               <Copy />
             </IconButton>
-            <IconButton label="Save as…" onClick={() => void saveImage(image)}>
+            <IconButton label="Save as…" onClick={() => void saveImage(image, actions.save)}>
               <Download />
             </IconButton>
           </span>
@@ -54,7 +57,7 @@ export function ImageStage({ image, className, toolbar = true }: { image: ShownI
 function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (
     <Tip content={label}>
-      <button className="rounded-md grid size-7 place-items-center hover:bg-accent hover:text-foreground [&_svg]:size-3.5" aria-label={label} onClick={onClick}>
+      <button className="rounded-md grid size-7 [@media(pointer:coarse)]:size-11 place-items-center hover:bg-accent hover:text-foreground [&_svg]:size-3.5" aria-label={label} onClick={onClick}>
         {children}
       </button>
     </Tip>
@@ -63,9 +66,9 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
 
 /** Copies the picture itself, as PNG, through the clipboard plugin (the webview's own clipboard
  *  can refuse images). */
-async function copyImage(image: ShownImage) {
+async function copyImage(image: ShownImage, copy: typeof copyImageLocally) {
   try {
-    await copyImageLocally(image.src)
+    await copy(image.src)
     toast.success("Image copied")
   } catch (e) {
     toast.error(`Couldn't copy the image: ${e}`)
@@ -73,9 +76,9 @@ async function copyImage(image: ShownImage) {
 }
 
 /** Saves through the system's Save dialog. */
-async function saveImage(image: ShownImage) {
+async function saveImage(image: ShownImage, save: typeof saveImageLocally) {
   try {
-    if (await saveImageLocally(image)) toast.success("Image saved")
+    if (await save(image)) toast.success("Image saved")
   } catch (e) {
     toast.error(`Couldn't save the image: ${e}`)
   }
@@ -110,10 +113,10 @@ export function ImageLightbox() {
   if (!images.length) return null
   const image = images[Math.min(index, images.length - 1)]
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background/95 backdrop-blur-sm" role="dialog" aria-label={image.name} onClick={(e) => e.target === e.currentTarget && close()}>
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-[12px]">
+    <div className="safe fixed inset-0 z-50 flex flex-col bg-background/95 backdrop-blur-sm" role="dialog" aria-label={image.name} onClick={(e) => e.target === e.currentTarget && close()}>
+      <div className="flex h-10 [@media(pointer:coarse)]:h-12 shrink-0 items-center gap-2 border-b px-3 text-[12px]">
         <span className="text-muted-foreground">{images.length > 1 ? `${index + 1} of ${images.length}` : "Image"}</span>
-        <button className="rounded-md ml-auto grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Close" onClick={close}>
+        <button className="rounded-md ml-auto grid size-7 [@media(pointer:coarse)]:size-11 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Close" onClick={close}>
           <X className="size-4" />
         </button>
       </div>

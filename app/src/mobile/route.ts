@@ -2,6 +2,7 @@
 //   #/            the open desktop's chats (or pairing, with no desktop yet)
 //   #/pair        pair a desktop
 //   #/desktops    paired desktops
+//   #/settings    this phone's settings
 //   #/chat/<id>   a chat
 //   #/new/<projectId>   a new chat in a project
 
@@ -11,6 +12,7 @@ export type Route =
   | { screen: "chats" }
   | { screen: "pair" }
   | { screen: "desktops" }
+  | { screen: "settings" }
   | { screen: "chat"; chatId: string }
   | { screen: "new"; projectId: string }
 
@@ -18,6 +20,7 @@ export function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent)
   if (parts[0] === "pair") return { screen: "pair" }
   if (parts[0] === "desktops") return { screen: "desktops" }
+  if (parts[0] === "settings") return { screen: "settings" }
   if (parts[0] === "chat" && parts[1]) return { screen: "chat", chatId: parts[1] }
   if (parts[0] === "new" && parts[1]) return { screen: "new", projectId: parts[1] }
   return { screen: "chats" }

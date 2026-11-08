@@ -82,8 +82,15 @@ pub const HOST_METHODS: &[&str] = &[
     "chat.clear",
     // {chatId, file} → data: URL
     "chat.image",
+    "chat.readImage",
     // {chatId, title} → meta
     "chat.rename",
+    // {chatId, pinned} → meta
+    "chat.pin",
+    // {chatId}: ends the agent's process; the next message resumes the session
+    "chat.sleep",
+    // {chatId}
+    "chat.delete",
     // {kind, projectId?} → {models, commands}
     "provider.catalog",
 ];

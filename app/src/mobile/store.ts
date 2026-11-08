@@ -55,6 +55,11 @@ type Store = {
   setPermission(chatId: string, mode: PermissionMode): void
   compact(chatId: string): Promise<void>
   clear(chatId: string): Promise<void>
+  rename(chatId: string, title: string): Promise<void>
+  pin(chatId: string, pinned: boolean): Promise<void>
+  /** Ends the agent's process; the next message resumes the session. */
+  sleep(chatId: string): Promise<void>
+  remove(chatId: string): Promise<void>
   catalog(agent: AgentInfo, projectId: string | null): Promise<Catalog | null>
 }
 
@@ -227,6 +232,28 @@ export const useMobile = create<Store>((set, get) => ({
   },
   async clear(chatId) {
     await api.clear(chatId).catch(fail)
+  },
+
+  async rename(chatId, title) {
+    const next = await api.rename(chatId, title).catch((e) => (fail(e), null))
+    if (next) set((s) => ({ metas: s.metas.map((m) => (m.id === chatId ? next : m)) }))
+  },
+  async pin(chatId, pinned) {
+    const next = await api.pin(chatId, pinned).catch((e) => (fail(e), null))
+    if (next) set((s) => ({ metas: s.metas.map((m) => (m.id === chatId ? next : m)) }))
+  },
+  async sleep(chatId) {
+    // The desktop announces the change, and the list reloads with the chat asleep.
+    await api.sleep(chatId).catch(fail)
+  },
+  async remove(chatId) {
+    const ok = await api.remove(chatId).then(() => true, (e) => (fail(e), false))
+    if (!ok) return
+    set((s) => {
+      const transcripts = { ...s.transcripts }
+      delete transcripts[chatId]
+      return { metas: s.metas.filter((m) => m.id !== chatId), transcripts }
+    })
   },
 
   async catalog(agent, projectId) {

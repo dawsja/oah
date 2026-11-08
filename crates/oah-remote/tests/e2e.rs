@@ -55,6 +55,12 @@ impl Host for Mock {
     fn call(&self, device: &str, method: &str, params: Value) -> Result<Value, String> {
         match method {
             "chats.list" => Ok(json!({ "metas": [], "running": [], "device": device })),
+            "chat.readImage" => {
+                if params["chatId"] != "c1" || params["path"] != "/tmp/preview.png" {
+                    return Err("image unavailable".into());
+                }
+                Ok(json!(format!("data:image/png;base64,{}", "AAAA".repeat(400_000))))
+            }
             "chat.send" => {
                 let text = params["prompt"]["text"].as_str().unwrap_or("").to_string();
                 if text == "big" {
@@ -125,6 +131,14 @@ async fn pairs_by_code_then_connects() {
     assert!(c.call("settings.set", Value::Null).await.unwrap_err().contains("unknown method"));
     assert!(c.call("chat.rename", Value::Null).await.unwrap_err().contains("mock"), "allowed methods reach the host");
     // Bigger than one Noise message, both ways.
+    let image = c.call("chat.readImage", json!({ "chatId": "c1", "path": "/tmp/preview.png" })).await.unwrap();
+    assert_eq!(image.as_str().unwrap(), format!("data:image/png;base64,{}", "AAAA".repeat(400_000)));
+    assert!(c
+        .call("chat.readImage", json!({ "chatId": "missing", "path": "/tmp/preview.png" }))
+        .await
+        .unwrap_err()
+        .contains("image unavailable"));
+
     let big = c.call("chat.send", json!({ "prompt": { "text": "big" } })).await.unwrap();
     assert_eq!(big.as_str().unwrap().len(), 200_000);
     wait_for(|| server.connected() == ["dev1"]).await;

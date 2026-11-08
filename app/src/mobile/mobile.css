@@ -13,6 +13,12 @@ html.phone body {
 html.phone {
   --oah-chat-size: 15px;
 }
+/* It's an app, not a page: no pinch or double-tap zoom (the viewport tag says so too). Panning
+   and scrolling still work. */
+html.phone,
+html.phone body {
+  touch-action: pan-x pan-y;
+}
 /* Key hints (Allow Enter, Deny Esc…) mean nothing on a touchscreen; numbered options stay. */
 html.phone button > kbd:last-child {
   display: none;

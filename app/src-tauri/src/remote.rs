@@ -301,12 +301,32 @@ impl Host for AppHost {
                 chats.compact(app, &settings(), &str_param(&p, "chatId")?, instructions, permission).map(|_| Value::Null)
             }
             "chat.clear" => chats.clear(app, &str_param(&p, "chatId")?).map(|_| Value::Null),
+            "chat.readImage" => {
+                let meta = chats.store.get(&str_param(&p, "chatId")?).map_err(err)?;
+                let settings = settings();
+                let project = settings.projects.iter().find(|project| project.id == meta.project_id).ok_or("no such project")?;
+                let cwd = if meta.cwd.is_empty() { project.path.clone() } else { meta.cwd };
+                let repo = oah_git::Repo::new(project.location.clone(), cwd);
+                oah_git::read_image(&repo, &str_param(&p, "path")?, 20 * 1024 * 1024).map(Value::String)
+            }
             "chat.image" => chats.image(&str_param(&p, "chatId")?, &str_param(&p, "file")?).map(Value::String),
             "chat.rename" => {
                 let title = str_param(&p, "title")?;
                 let m = chats.edit(&str_param(&p, "chatId")?, |m| m.title = title.trim().to_string())?;
                 chats.changed(app);
                 to_value(m)
+            }
+            "chat.pin" => {
+                let pinned: bool = param(&p, "pinned")?;
+                let m = chats.edit(&str_param(&p, "chatId")?, |m| m.pinned = pinned)?;
+                chats.changed(app);
+                to_value(m)
+            }
+            "chat.sleep" => chats.sleep(app, &str_param(&p, "chatId")?, std::time::Duration::ZERO).map(|_| Value::Null),
+            "chat.delete" => {
+                chats.delete(&str_param(&p, "chatId")?)?;
+                chats.changed(app);
+                Ok(Value::Null)
             }
             "provider.catalog" => {
                 let kind: AgentKind = param(&p, "kind")?;

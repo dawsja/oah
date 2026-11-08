@@ -2,14 +2,16 @@
 <html lang="en" class="phone dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>oah</title>
     <script>
-      // The phone follows the system theme (dark until it says otherwise).
+      // Paint the saved phone theme before React loads.
       try {
-        document.documentElement.classList.toggle("dark", !matchMedia("(prefers-color-scheme: light)").matches);
+        var theme = localStorage.getItem("oah.phone.theme");
+        var dark = theme === "dark" || (theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
       } catch (e) {}
     </script>
   </head>

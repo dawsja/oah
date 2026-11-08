@@ -13,7 +13,7 @@ export async function imageBlob(src: string): Promise<Blob> {
   return response.blob()
 }
 
-function filename(image: Image): string {
+export function filename(image: Image): string {
   const name = image.name.split(/[\\/]/).pop()?.replace(/[<>:"|?*\x00-\x1f]/g, "_").trim().replace(/[. ]+$/, "") || "Image"
   if (/\.(png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i.test(name)) return name
   const mime = /^data:image\/([^;,]+)/i.exec(image.src)?.[1].toLowerCase()
@@ -40,7 +40,7 @@ export async function copyImageLocally(src: string): Promise<void> {
   await writeImage(new Uint8Array(await png.arrayBuffer()))
 }
 
-async function toPng(blob: Blob): Promise<Blob> {
+export async function toPng(blob: Blob): Promise<Blob> {
   const bmp = await createImageBitmap(blob)
   const canvas = document.createElement("canvas")
   canvas.width = bmp.width

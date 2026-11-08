@@ -11,7 +11,6 @@ export function usePhoneVoice(onText: (text: string) => void) {
   const state = useVoice((s) => s.state)
   const [phase, setPhase] = useState<Phase>("idle")
   const [seconds, setSeconds] = useState(0)
-  const [changing, setChanging] = useState(false)
   const callback = useRef(onText)
   callback.current = onText
   const [session] = useState(() => new PhoneDictation(
@@ -46,16 +45,6 @@ export function usePhoneVoice(onText: (text: string) => void) {
     return () => { clearInterval(timer); clearTimeout(limit) }
   }, [phase])
 
-  const change = async (enable: boolean) => {
-    if (changing || session.phase !== "idle") return
-    setChanging(true)
-    try {
-      await (enable ? voice.enable() : voice.disable())
-    } catch (e) {
-      toast.error("Couldn't change voice settings", { description: String(e) })
-    } finally { setChanging(false) }
-  }
-
   const busy = phase !== "idle"
   return {
     busy,
@@ -63,7 +52,7 @@ export function usePhoneVoice(onText: (text: string) => void) {
       <button
         className={`rounded-md grid size-10 shrink-0 place-items-center active:bg-accent ${phase === "recording" ? "bg-red text-white" : "text-muted-foreground"}`}
         aria-label={phase === "recording" ? "Stop dictation" : "Dictate on this phone"}
-        disabled={phase === "starting" || phase === "working" || changing}
+        disabled={phase === "starting" || phase === "working"}
         onClick={() => void (phase === "recording" ? stop() : start())}
       >
         {phase === "working" || phase === "starting" ? <LoaderCircle className="size-5 animate-spin" /> : phase === "recording" ? <Square className="size-4 fill-current" /> : <Mic className="size-5" />}
@@ -75,24 +64,42 @@ export function usePhoneVoice(onText: (text: string) => void) {
         {phase !== "working" ? <button className="grid size-10 place-items-center rounded-md active:bg-accent" aria-label="Cancel dictation" onClick={cancel}><X className="size-4" /></button> : null}
       </div>
     ) : null,
-    settings: (
-      <section className="px-4 pb-4">
-        <h3 className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Voice on this phone</h3>
-        <p className="mb-2 text-[13px] text-muted-foreground">English dictation, processed on your phone. Download the 731 MB model once, then dictate offline. Record up to 30 seconds at a time.</p>
-        {!isTauri() ? <p className="text-[13px] text-muted-foreground">Available in the Android app.</p> : state.state === "unsupported" ? <p className="text-[13px] text-muted-foreground">{state.error}</p> : (
-          <>
-            {state.state === "error" ? <p className="mb-2 text-[13px] text-red" role="alert">{state.error}</p> : null}
-            {state.state === "downloading" ? <p className="mb-2 text-[13px]" role="status">Downloading… {state.percent}%</p> : null}
-            <button
-              className="h-10 rounded-md border px-3 text-[13px] active:bg-accent disabled:opacity-50"
-              disabled={busy || changing}
-              onClick={() => void change(state.state !== "ready" && state.state !== "downloading")}
-            >
-              {changing ? "Please wait…" : state.state === "ready" ? "Turn off and remove model" : state.state === "downloading" ? "Cancel download" : state.state === "error" ? "Retry download" : "Download voice model"}
-            </button>
-          </>
-        )}
-      </section>
-    ),
   }
+}
+
+/** The phone's own voice model: download it, cancel, retry, or turn it off and remove it. */
+export function VoiceSettings() {
+  const state = useVoice((s) => s.state)
+  const [changing, setChanging] = useState(false)
+  useEffect(() => {
+    if (isTauri()) void initVoice().catch((e) => toast.error("Couldn't load voice settings", { description: String(e) }))
+  }, [])
+  const change = async (enable: boolean) => {
+    if (changing) return
+    setChanging(true)
+    try {
+      await (enable ? voice.enable() : voice.disable())
+    } catch (e) {
+      toast.error("Couldn't change voice settings", { description: String(e) })
+    } finally { setChanging(false) }
+  }
+  return (
+    <section className="px-4 py-4">
+      <h3 className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Voice on this phone</h3>
+      <p className="mb-2 text-[13px] text-muted-foreground">English dictation, processed on your phone. Download the 731 MB model once, then dictate offline. Record up to 30 seconds at a time.</p>
+      {!isTauri() ? <p className="text-[13px] text-muted-foreground">Available in the Android app.</p> : state.state === "unsupported" ? <p className="text-[13px] text-muted-foreground">{state.error}</p> : (
+        <>
+          {state.state === "error" ? <p className="mb-2 text-[13px] text-red" role="alert">{state.error}</p> : null}
+          {state.state === "downloading" ? <p className="mb-2 text-[13px]" role="status">Downloading… {state.percent}%</p> : null}
+          <button
+            className="h-10 rounded-md border px-3 text-[13px] active:bg-accent disabled:opacity-50"
+            disabled={changing}
+            onClick={() => void change(state.state !== "ready" && state.state !== "downloading")}
+          >
+            {changing ? "Please wait…" : state.state === "ready" ? "Turn off and remove model" : state.state === "downloading" ? "Cancel download" : state.state === "error" ? "Retry download" : "Download voice model"}
+          </button>
+        </>
+      )}
+    </section>
+  )
 }

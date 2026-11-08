@@ -64,8 +64,12 @@ export const api = {
   setPermission: (chatId: string, mode: PermissionMode) => rpc<void>("chat.setPermission", { chatId, mode }),
   compact: (chatId: string, instructions: string, permission: PermissionMode | null) => rpc<void>("chat.compact", { chatId, instructions, permission }),
   clear: (chatId: string) => rpc<void>("chat.clear", { chatId }),
+  readImage: (chatId: string, path: string) => rpc<string>("chat.readImage", { chatId, path }),
   image: (chatId: string, file: string) => rpc<string>("chat.image", { chatId, file }),
   rename: (chatId: string, title: string) => rpc<ChatMeta>("chat.rename", { chatId, title }),
+  pin: (chatId: string, pinned: boolean) => rpc<ChatMeta>("chat.pin", { chatId, pinned }),
+  sleep: (chatId: string) => rpc<void>("chat.sleep", { chatId }),
+  remove: (chatId: string) => rpc<void>("chat.delete", { chatId }),
   catalog: (kind: AgentKind, projectId: string | null) => rpc<Catalog>("provider.catalog", { kind, projectId }),
 }
 
@@ -74,17 +78,4 @@ export function phoneName(ua = navigator.userAgent): string {
   const m = /Android [\d.]+; ([^;)]+?)(?: Build\/[^;)]*)?[;)]/.exec(ua)
   const model = m?.[1]?.trim()
   return model && model !== "K" && !/^wv$/i.test(model) ? model : "Android phone"
-}
-
-/** Reads a picked file as `{mime, data}` (base64, no `data:` prefix). */
-export function readImage(file: File): Promise<Image> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader()
-    r.onload = () => {
-      const s = String(r.result)
-      resolve({ mime: file.type || "image/png", data: s.slice(s.indexOf(",") + 1) })
-    }
-    r.onerror = () => reject(r.error)
-    r.readAsDataURL(file)
-  })
 }
