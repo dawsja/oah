@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react"
-import { ChevronRight, Plus, RefreshCw, Trash2, X } from "lucide-react"
+import { Check, ChevronRight, Copy, ExternalLink, Plus, RefreshCw, Trash2, X } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { ipc } from "@/lib/ipc"
+import { copyText } from "@/lib/clipboard"
 import { promptText } from "@/components/Prompt"
 import { PERMISSION_ICON } from "@/components/permission"
 import { AGENTS, AGENT_LABEL, PERMISSION_LABEL, type Account, type AcpAgent, type AgentKind, type PermissionMode, type Probe, type Provider, type Settings } from "@/lib/types"
@@ -19,10 +20,30 @@ const BLURB: Record<AgentKind, string> = {
   acp: "An agent that speaks the Agent Client Protocol on stdio.",
 }
 
-const INSTALL: Partial<Record<AgentKind, string>> = {
-  claude: "npm i -g @anthropic-ai/claude-code",
-  codex: "npm i -g @openai/codex",
-  opencode: "npm i -g opencode-ai",
+/** Each built-in CLI's docs, and the commands that install it. */
+type Installer = { label: string; os: "unix" | "windows" | "any"; command: string }
+const INSTALL: Partial<Record<AgentKind, { url: string; options: Installer[] }>> = {
+  claude: {
+    url: "https://code.claude.com/docs/en/setup",
+    options: [
+      { label: "macOS / Linux / WSL", os: "unix", command: "curl -fsSL https://claude.ai/install.sh | bash" },
+      { label: "Windows", os: "windows", command: "irm https://claude.ai/install.ps1 | iex" },
+    ],
+  },
+  codex: {
+    url: "https://learn.chatgpt.com/docs/codex/cli",
+    options: [
+      { label: "macOS / Linux / WSL", os: "unix", command: "curl -fsSL https://chatgpt.com/codex/install.sh | sh" },
+      { label: "Windows", os: "windows", command: 'powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"' },
+    ],
+  },
+  opencode: {
+    url: "https://opencode.ai/docs",
+    options: [
+      { label: "macOS / Linux / WSL", os: "unix", command: "curl -fsSL https://opencode.ai/v2/install | bash" },
+      { label: "npm", os: "any", command: "npm install -g opencode-ai" },
+    ],
+  },
 }
 
 /** Edits one agent's settings: a built-in by kind, or an added ACP agent by id. */
@@ -133,6 +154,15 @@ function ProviderCard({ target, provider }: { target: Target; provider: Provider
     // Re-check when the binary path changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider.binary])
+  // Not installed: look again when the user comes back from the terminal they installed it in.
+  const missing = probe !== null && !probe.found
+  useEffect(() => {
+    if (!missing) return
+    const again = () => void check()
+    window.addEventListener("focus", again)
+    return () => window.removeEventListener("focus", again)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missing, provider.binary])
 
   const status = !probe ? (
     <span className="text-faint">Checking…</span>
@@ -173,6 +203,11 @@ function ProviderCard({ target, provider }: { target: Target; provider: Provider
           </div>
           <div className="mt-0.5 truncate text-[12px] text-muted-foreground">{probe?.path ?? BLURB[kind]}</div>
         </div>
+        {INSTALL[kind] ? (
+          <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => import("@tauri-apps/plugin-opener").then((o) => o.openUrl(INSTALL[kind]!.url))}>
+            Docs <ExternalLink className="size-3" />
+          </Button>
+        ) : null}
         <Button variant="ghost" size="icon-sm" aria-label="Check again" onClick={check} disabled={checking}>
           <RefreshCw className={checking ? "animate-spin" : undefined} />
         </Button>
@@ -184,7 +219,7 @@ function ProviderCard({ target, provider }: { target: Target; provider: Provider
         ) : null}
       </div>
       {probe?.outdated ? <div className="border-t border-warn/30 bg-warn/10 px-4 py-2.5 text-[12px] text-warn">{probe.outdated}</div> : null}
-      {!probe?.found && probe && INSTALL[kind] ? <div className="bg-del/40 px-4 py-2.5 font-mono text-[12px] text-muted-foreground">Install: {INSTALL[kind]}</div> : null}
+      {probe && !probe.found && INSTALL[kind] ? <InstallHelp kind={kind} /> : null}
       {acp ? null : <SignIn kind={kind} installed={!!probe?.found} />}
       <details className="group/advanced">
         <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
@@ -230,6 +265,40 @@ function ProviderCard({ target, provider }: { target: Target; provider: Provider
         </div>
       </details>
     </Group>
+  )
+}
+
+/** How to install a missing CLI: the command for this OS, copyable. */
+function InstallHelp({ kind }: { kind: AgentKind }) {
+  const { options } = INSTALL[kind]!
+  const platform = useApp((s) => s.info?.platform)
+  const os = platform === "windows" ? "windows" : "unix"
+  const [label, setLabel] = useState(() => (options.find((o) => o.os === os) ?? options.find((o) => o.os === "any") ?? options[0]).label)
+  const [copied, setCopied] = useState(false)
+  const command = (options.find((o) => o.label === label) ?? options[0]).command
+  const copy = () => {
+    copyText(command)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <div className="flex flex-col gap-2 bg-muted/40 px-4 py-3">
+      <span className="text-[13px] font-medium">Install {AGENT_LABEL[kind]}</span>
+      {options.length > 1 ? (
+        <div className="self-start">
+          <Segmented value={label} options={options.map((o) => ({ value: o.label, label: o.label }))} onChange={setLabel} />
+        </div>
+      ) : null}
+      <div className="flex items-center rounded-md border bg-background">
+        <code className="min-w-0 flex-1 truncate px-2.5 py-1.5 font-mono text-[12px] select-all" title={command}>
+          {command}
+        </code>
+        <Button variant="ghost" size="icon-sm" className="mr-0.5" aria-label={copied ? "Copied" : "Copy install command"} onClick={copy}>
+          {copied ? <Check className="text-green" /> : <Copy />}
+        </Button>
+      </div>
+      <p className="text-[11.5px] text-faint">Run it in a terminal, then switch back here to re-check. Still not found? Restart oah.</p>
+    </div>
   )
 }
 
