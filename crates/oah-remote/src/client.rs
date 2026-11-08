@@ -43,7 +43,11 @@ async fn open_ws(address: &str) -> Result<Ws, String> {
     let config = WebSocketConfig::default().max_message_size(Some(wire::MAX_MESSAGE)).max_frame_size(Some(1 << 20));
     let stream = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(address)).await
         .map_err(|_| format!("Cannot reach {address}: the TCP connection timed out. On the desktop, allow oah through Windows Firewall on your Private network. Also check guest Wi-Fi/client isolation."))?
-        .map_err(|e| format!("Cannot reach {address}: {e}. Check that phone access is enabled and the address and port match the desktop."))?;
+        .map_err(|e| match e.kind() {
+            // Android 17+ refuses LAN sockets until the user grants local network access.
+            std::io::ErrorKind::PermissionDenied => format!("Cannot reach {address}: {e}. Allow oah to find and connect to devices on your local network (Android Settings → Apps → oah → Permissions → Nearby devices)."),
+            _ => format!("Cannot reach {address}: {e}. Check that phone access is enabled and the address and port match the desktop."),
+        })?;
     let _ = stream.set_nodelay(true);
     let (ws, _) = tokio::time::timeout(
         CONNECT_TIMEOUT,
