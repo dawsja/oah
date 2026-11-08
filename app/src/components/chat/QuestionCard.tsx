@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils"
 import { useTouch } from "./touch"
 
 /** The agent's questions, docked above the composer, one at a time. Number keys pick an option
- *  (a single pick moves on by itself), Enter goes to the next question or submits, Backspace or
+ *  (a single pick moves on to the next question by itself; on the last one it waits for Submit),
+ *  Enter goes to the next question or submits, Backspace or
  *  ← goes back, Esc dismisses them all. Unanswered questions can be skipped; Submit sends what
  *  was answered. */
 export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; onAnswer: (answers: Record<string, string[]>) => void }) {
@@ -47,10 +48,10 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
     const nextPicked = { ...picked, [q.id]: [label] }
     setPicked(nextPicked)
     setTyped((t) => ({ ...t, [q.id]: "" }))
-    // A single pick answers the question: move on after a beat, so the pick shows.
+    // A single pick answers the question: move on after a beat, so the pick shows. The last
+    // question never sends by itself; Submit (or Enter) does, so the answers can be checked.
     if (advance.current) clearTimeout(advance.current)
-    const a = { ...answers, [q.id]: [label] }
-    advance.current = window.setTimeout(() => (last ? onAnswer(a) : setStep((s) => s + 1)), 160)
+    if (!last) advance.current = window.setTimeout(() => setStep((s) => s + 1), 160)
   }
 
   useEffect(() => {
