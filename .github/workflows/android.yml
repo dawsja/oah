@@ -1,0 +1,77 @@
+name: Android
+
+# The phone app (android/): a v* tag builds the APK and attaches it (and its sha256) to the
+# GitHub release release.yml makes for the same tag; a manual run leaves it as an artifact.
+# It's sideloaded: there's no Play Store listing.
+#
+# Secrets (without them the APK is unsigned, which Android won't install):
+#   ANDROID_KEYSTORE_BASE64    the release keystore (.jks), base64
+#   ANDROID_KEYSTORE_PASSWORD  its password (store and key)
+#   ANDROID_KEY_ALIAS          the key's alias
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: NDK
+        run: |
+          sdkmanager --install "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - name: Install
+        run: |
+          (cd app && bun install --frozen-lockfile)
+          (cd android && bun install --frozen-lockfile)
+      - name: Signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::warning::ANDROID_KEYSTORE_BASE64 isn't set: the APK is unsigned"
+            exit 0
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/oah-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/oah-release.jks" >> "$GITHUB_ENV"
+      - name: Build
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: bun tauri android build --apk --target aarch64 --target armv7
+      - name: Collect
+        run: |
+          version=$(node -p "require('./app/package.json').version")
+          mkdir -p release
+          apk=$(ls android/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk | head -1)
+          cp "$apk" "release/oah-android-$version.apk"
+          (cd release && sha256sum "oah-android-$version.apk" > "oah-android-$version.apk.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oah-android
+          path: release/
+          if-no-files-found: error
+      # Only a signed APK goes on the release: Android won't install an unsigned one.
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v') && env.ANDROID_KEYSTORE_PATH != ''
+        with:
+          name: oah ${{ github.ref_name }}
+          files: release/oah-android-*

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Copy, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, LoaderCircle, MoreHorizontal, Plus, Settings, SquarePen, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Copy, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, LoaderCircle, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Settings, SquarePen, Trash2 } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { confirmAction, promptText } from "@/components/Prompt"
 import { Tip } from "@/components/Tip"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ago, waiting, type ChatMeta } from "@/lib/chat"
 import { samePath, worktrees as wt, type Worktree } from "@/lib/git"
@@ -121,7 +122,8 @@ function ProjectGroup({ project }: { project: Project }) {
     if (awake) useGit.getState().loadWorktrees(project.id)
   }, [project.id, awake])
 
-  const chats = metas.filter((m) => m.projectId === project.id)
+  // Pinned chats first; otherwise the store's order (newest activity first).
+  const chats = metas.filter((m) => m.projectId === project.id).sort((a, b) => Number(b.pinned) - Number(a.pinned))
   const extra = (trees ?? []).filter((w) => !w.main)
   const inMain = (m: ChatMeta) => !extra.some((w) => samePath(m.cwd, w.path))
   // With worktrees listed, the main checkout's row shows the selection instead.
@@ -280,34 +282,54 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
   const view = useApp((s) => s.view)
   const t = useChats((s) => s.transcripts[meta.id])
   const active = chatId === meta.id && view === "chat"
+  const rename = () =>
+    void promptText({ title: "Rename chat", value: meta.title, confirm: "Rename" }).then((title) => {
+      if (title) void useChats.getState().rename(meta.id, title)
+    })
   return (
-    <div
-      className={cn("mx-1 rounded-md group/chat flex h-7 cursor-pointer items-center gap-2 pr-1 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", active && "row-active")}
-      style={{ paddingLeft: indent }}
-      onClick={() => {
-        useApp.getState().selectProject(meta.projectId)
-        useChats.getState().open(meta.id)
-      }}
-    >
-      {waiting(t) ? (
-        <span className="rounded-full size-1.5 shrink-0 bg-primary" />
-      ) : t?.running ? (
-        <LoaderCircle className="size-3 shrink-0 animate-spin text-muted-foreground" />
-      ) : (
-        <AgentGlyph agent={meta.agent} className="size-3 shrink-0 opacity-70" />
-      )}
-      <span className="truncate">{meta.title || "New chat"}</span>
-      <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint group-hover/chat:hidden">{ago(meta.updatedAt)}</span>
-      <button
-        className="rounded-md hidden size-5 shrink-0 place-items-center text-faint group-hover/chat:grid hover:text-red"
-        aria-label="Delete chat"
-        onClick={(e) => {
-          e.stopPropagation()
-          useChats.getState().remove(meta.id)
-        }}
-      >
-        <Trash2 className="size-3" />
-      </button>
-    </div>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            "mx-1 rounded-md flex h-7 cursor-pointer items-center gap-2 pr-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground",
+            active && "row-active"
+          )}
+          style={{ paddingLeft: indent }}
+          onClick={() => {
+            useApp.getState().selectProject(meta.projectId)
+            useChats.getState().open(meta.id)
+          }}
+        >
+          {waiting(t) ? (
+            <span className="rounded-full size-1.5 shrink-0 bg-primary" />
+          ) : meta.sleeping ? (
+            <Moon className="size-3 shrink-0 text-faint" aria-label="Sleeping; send a message to resume" />
+          ) : t?.running ? (
+            <LoaderCircle className="size-3 shrink-0 animate-spin text-muted-foreground" />
+          ) : (
+            <AgentGlyph agent={meta.agent} className="size-3 shrink-0 opacity-70" />
+          )}
+          <span className="truncate">{meta.title || "New chat"}</span>
+          {meta.pinned ? <Pin className="ml-auto size-3 shrink-0 text-faint" aria-label="Pinned" /> : null}
+          <span className={cn("shrink-0 font-mono text-[10.5px] text-faint", !meta.pinned && "ml-auto")}>{ago(meta.updatedAt)}</span>
+        </div>
+      </ContextMenuTrigger>
+      {/* React bubbles portal clicks to the row, whose onClick would open the chat. */}
+      <ContextMenuContent className="w-44" onClick={(e) => e.stopPropagation()}>
+        <ContextMenuItem onSelect={() => useChats.getState().pin(meta.id, !meta.pinned)}>
+          {meta.pinned ? <PinOff /> : <Pin />} {meta.pinned ? "Unpin" : "Pin"}
+        </ContextMenuItem>
+        <ContextMenuItem disabled={meta.sleeping || t?.running || waiting(t) || !meta.agentSessionId} onSelect={() => useChats.getState().sleep(meta.id)}>
+          <Moon /> {meta.sleeping ? "Sleeping" : "Sleep"}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={rename}>
+          <Pencil /> Rename…
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onSelect={() => useChats.getState().remove(meta.id)}>
+          <Trash2 /> Delete chat
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

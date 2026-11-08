@@ -76,13 +76,27 @@ export type Project = {
   git: ProjectGit
 }
 
+/** A phone paired with this desktop (the oah Android app). */
+export type PairedDevice = { id: string; name: string; publicKey: string; pairedAt: number; lastSeen: number }
+/** Phones controlling this app. Changed only through `remote_*` commands, never `settings_set`. */
+export type Remote = { enabled: boolean; port: number; devices: PairedDevice[] }
+
 export type Settings = {
   providers: Providers
   voice: Voice
   appearance: Appearance
   sshHosts: SshHost[]
   projects: Project[]
+  agentSleepMinutes: number
+  mcp: Mcp
+  remote: Remote
 }
+
+/** Another agent driving oah's chats over MCP (`oah mcp`). */
+export type Mcp = { enabled: boolean; allowFullAccess: boolean; allowDelete: boolean }
+
+/** Where MCP listens, and who's connected. */
+export type McpStatus = { socket: string; clients: number; exe: string }
 
 export type AppInfo = { version: string; platform: "windows" | "linux" | "macos" | "web"; dataDir: string; home: string; bundle: string | null }
 

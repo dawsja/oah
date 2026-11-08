@@ -1,22 +1,28 @@
-import { Activity, AudioLines, Bot, FolderGit2, Palette, Server, X, type LucideIcon } from "lucide-react"
+import { Activity, AudioLines, Bot, FolderGit2, Moon, Palette, Plug, Server, Smartphone, X, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { updater, useUpdates } from "@/lib/updates"
 import { updateStatus } from "@/components/shell/Updates"
 import { type SettingsSection, useApp } from "@/store/app"
 import { AppearanceSection } from "./AppearanceSection"
+import { McpSection } from "./McpSection"
+import { PhoneSection } from "./PhoneSection"
 import { ProjectsSection } from "./ProjectsSection"
 import { ProvidersSection } from "./ProvidersSection"
 import { SshSection } from "./SshSection"
 import { UsageSection } from "./UsageSection"
+import { SessionsSection } from "./SessionsSection"
 import { VoiceSection } from "./VoiceSection"
 
 const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
   { id: "providers", label: "Providers", icon: Bot },
+  { id: "sessions", label: "Sessions", icon: Moon },
   { id: "voice", label: "Voice", icon: AudioLines },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "usage", label: "Usage", icon: Activity },
   { id: "ssh", label: "SSH Hosts", icon: Server },
   { id: "projects", label: "Projects", icon: FolderGit2 },
+  { id: "mcp", label: "MCP", icon: Plug },
+  { id: "phone", label: "Phone", icon: Smartphone },
 ]
 
 export function SettingsPage() {
@@ -57,11 +63,14 @@ export function SettingsPage() {
           <X className="size-4" />
         </button>
         {section === "providers" ? <ProvidersSection /> : null}
+        {section === "sessions" ? <SessionsSection /> : null}
         {section === "voice" ? <VoiceSection /> : null}
         {section === "appearance" ? <AppearanceSection /> : null}
         {section === "usage" ? <UsageSection /> : null}
         {section === "ssh" ? <SshSection /> : null}
         {section === "projects" ? <ProjectsSection /> : null}
+        {section === "mcp" ? <McpSection /> : null}
+        {section === "phone" ? <PhoneSection /> : null}
       </div>
     </div>
   )

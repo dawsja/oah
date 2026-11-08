@@ -1,8 +1,9 @@
-import { PanelLeft, PanelRight } from "lucide-react"
+import { PanelLeft, PanelRight, Smartphone } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { Mark, WinClose, WinMax, WinMin } from "@/components/icons"
 import { isRemote, locationLabel } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useRemote } from "@/lib/remote"
 import { useApp, useProject } from "@/store/app"
 import { UpdateButton } from "./Updates"
 import { UsageButton } from "./UsageButton"
@@ -47,6 +48,7 @@ export function TitleBar() {
       </div>
       <div data-tauri-drag-region className="h-full flex-1" onDoubleClick={() => win().then((w) => w.toggleMaximize())} />
       <UpdateButton />
+      <PhoneButton />
       <UsageButton />
       <TerminalButton />
       {view === "chat" ? (
@@ -72,5 +74,21 @@ export function TitleBar() {
         </button>
       </div>
     </header>
+  )
+}
+
+/** Shown while a paired phone is connected; opens Settings → Phone. */
+function PhoneButton() {
+  const devices = useRemote((s) => s.state?.devices)
+  const connected = devices?.filter((d) => d.connected) ?? []
+  const open = useApp((s) => s.openSettings)
+  if (connected.length === 0) return null
+  const names = connected.map((d) => d.name).join(", ")
+  return (
+    <Tip content={`${names} connected`} side="bottom">
+      <button className="rounded-md mr-1 grid size-7 place-items-center text-green hover:bg-accent" aria-label={`${names} connected`} onClick={() => open("phone")}>
+        <Smartphone className="size-3.5" />
+      </button>
+    </Tip>
   )
 }

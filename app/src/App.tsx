@@ -11,9 +11,10 @@ import { Resizer } from "@/components/shell/Resizer"
 import { Sidebar } from "@/components/shell/Sidebar"
 import { TitleBar } from "@/components/shell/TitleBar"
 import { TerminalPanel } from "@/components/terminal/TerminalPanel"
-import { useApp } from "@/store/app"
+import { defaultLayout, useApp } from "@/store/app"
 import { useChats } from "@/store/chats"
 import { initVoice } from "@/lib/voice"
+import { initRemote } from "@/lib/remote"
 import { inTerminal } from "@/lib/terminal"
 import { useTerminals } from "@/store/terminals"
 
@@ -28,6 +29,7 @@ export function App() {
     load().then(() => {
       useChats.getState().init()
       initVoice()
+      initRemote()
     })
   }, [load])
 
@@ -56,7 +58,7 @@ export function App() {
 
   return (
     <TooltipProvider delayDuration={400}>
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-h-0 flex-col overflow-clip">
         <TitleBar />
         {ready ? (
           <div className="flex min-h-0 flex-1">
@@ -65,7 +67,7 @@ export function App() {
                 <div style={{ width: layout.sidebarWidth }} className="shrink-0">
                   <Sidebar />
                 </div>
-                <Resizer side="left" width={layout.sidebarWidth} min={200} max={460} onWidth={(w) => setLayout({ sidebarWidth: w })} />
+                <Resizer side="left" defaultWidth={defaultLayout.sidebarWidth} width={layout.sidebarWidth} min={200} max={460} onWidth={(w) => setLayout({ sidebarWidth: w })} />
               </>
             ) : null}
             <main className="flex min-w-0 flex-1 flex-col">
@@ -74,7 +76,7 @@ export function App() {
             </main>
             {view === "chat" && layout.rightOpen ? (
               <>
-                <Resizer side="right" width={layout.rightWidth} min={260} max={640} onWidth={(w) => setLayout({ rightWidth: w })} />
+                <Resizer side="right" defaultWidth={defaultLayout.rightWidth} width={layout.rightWidth} min={260} max={640} onWidth={(w) => setLayout({ rightWidth: w })} />
                 <div style={{ width: layout.rightWidth }} className="shrink-0">
                   <RightPanel />
                 </div>

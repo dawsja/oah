@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { Markdown } from "./Markdown"
 import { MessageImages } from "./ChatImages"
 import { WorkGroup } from "./Work"
+import { useTouch } from "./touch"
 
 /** Blocks mounted at once; older ones come in by this many. */
 const WINDOW = 150
@@ -13,6 +14,7 @@ const WINDOW = 150
 /** The conversation: user prompts on the right, the agent's work and answers on the left. */
 export function Transcript({ transcript, className }: { transcript: T; className?: string }) {
   const scroller = useRef<HTMLDivElement>(null)
+  const touch = useTouch()
   const [stuck, setStuck] = useState(true)
   const all = blocks(transcript.items)
   // Long chats mount only their latest blocks; older ones load on request.
@@ -22,6 +24,8 @@ export function Transcript({ transcript, className }: { transcript: T; className
   const lastWork = list.findLastIndex((b) => b.kind === "work")
 
   // Follow new content while the view is at the bottom.
+  const stuckRef = useRef(stuck)
+  stuckRef.current = stuck
   useLayoutEffect(() => {
     const el = scroller.current
     if (el && stuck) el.scrollTop = el.scrollHeight
@@ -31,13 +35,24 @@ export function Transcript({ transcript, className }: { transcript: T; className
     if (!el) return
     const onScroll = () => setStuck(el.scrollHeight - el.scrollTop - el.clientHeight < 48)
     el.addEventListener("scroll", onScroll, { passive: true })
-    return () => el.removeEventListener("scroll", onScroll)
+    // Sizes change without a render here too: a card docking under the chat (or the phone's
+    // keyboard) shrinks the view, and blocks that skip layout off-screen grow as they come in.
+    // While at the bottom, stay there.
+    const pin = new ResizeObserver(() => {
+      if (stuckRef.current) el.scrollTop = el.scrollHeight
+    })
+    pin.observe(el)
+    if (el.firstElementChild) pin.observe(el.firstElementChild)
+    return () => {
+      el.removeEventListener("scroll", onScroll)
+      pin.disconnect()
+    }
   }, [])
 
   return (
     <div className={cn("relative min-h-0", className)}>
       <div ref={scroller} className="h-full overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-4 px-6 pt-6 pb-10">
+        <div className={cn("mx-auto flex w-full max-w-[46rem] flex-col gap-4", touch ? "px-4 pt-4 pb-6" : "px-6 pt-6 pb-10")}>
           {hidden ? (
             <button
               className="self-center rounded-md border px-3 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -63,14 +78,14 @@ export function Transcript({ transcript, className }: { transcript: T; className
       </div>
       {!stuck ? (
         <button
-          className="rounded-full absolute bottom-3 left-1/2 flex h-7 -translate-x-1/2 items-center gap-1.5 border bg-popover px-3 text-[12px] text-muted-foreground shadow-lg hover:text-foreground"
+          className={cn("rounded-full absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 border bg-popover px-3 text-muted-foreground shadow-lg hover:text-foreground", touch ? "h-10 px-4 text-[13px]" : "h-7 text-[12px]")}
           onClick={() => {
             const el = scroller.current
             if (el) el.scrollTop = el.scrollHeight
             setStuck(true)
           }}
         >
-          <ArrowDown className="size-3.5" /> Latest
+          <ArrowDown className="size-3.5" /> Jump to latest
         </button>
       ) : null}
     </div>
@@ -124,7 +139,7 @@ function PlanCard({ text, decision }: { text: string; decision: Decision }) {
   const [open, setOpen] = useState(decision !== "deny")
   return (
     <div className="rounded-lg border bg-card">
-      <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px]" onClick={() => setOpen(!open)}>
+      <button className="flex min-h-10 w-full items-center gap-2 px-3 py-2 text-left text-[12.5px]" onClick={() => setOpen(!open)}>
         <ListChecks className="size-3.5 text-muted-foreground" />
         <span className="font-medium">Plan</span>
         <span className="text-faint">{decision === "deny" ? "· kept planning" : "· approved"}</span>
@@ -137,11 +152,12 @@ function PlanCard({ text, decision }: { text: string; decision: Decision }) {
 
 function AssistantText({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
+  const touch = useTouch()
   return (
     <div className="group/msg relative">
       <Markdown text={text} />
       <button
-        className="rounded-md mt-1 flex h-6 items-center gap-1 text-[11.5px] text-faint opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
+        className={cn("rounded-md mt-1 flex items-center gap-1 text-faint hover:text-foreground", touch ? "h-10 pr-3 text-[12.5px]" : "h-6 text-[11.5px] opacity-0 group-hover/msg:opacity-100")}
         onClick={() => {
           copyText(text)
           setCopied(true)

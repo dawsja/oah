@@ -1,0 +1,14 @@
+[package]
+name = "oah-mcp"
+description = "oah: an MCP server that lets another agent drive oah's chats, and the stdio bridge to it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oah-core.workspace = true
+oah-agents.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+interprocess = "2.4"

@@ -1,13 +1,14 @@
 import { useEffect } from "react"
 import { ChevronRight, Gauge, RefreshCw } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
+import { Tip } from "@/components/Tip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { LIMIT_AGENTS, LIMIT_LABEL, type Limits } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp } from "@/store/app"
 import { nextReset, resetsIn, shortLabel, useUsage } from "@/store/usage"
 
-/** The title bar's usage: the highest limit in use, and a popover with each agent's windows. */
+/** The title bar's usage icon and a popover with each agent's windows. */
 export function UsageButton() {
   const { limits, loading, load } = useUsage()
   useEffect(() => {
@@ -20,12 +21,13 @@ export function UsageButton() {
 
   return (
     <Popover onOpenChange={(o) => o && void load()}>
-      <PopoverTrigger asChild>
-        <button className="rounded-md flex h-7 items-center gap-1.5 px-2 text-[11.5px] text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Usage">
-          <Gauge className={cn("size-3.5", tone)} />
-          <span className="font-mono">{Object.keys(limits).length ? `${Math.round(top)}%` : "…"}</span>
-        </button>
-      </PopoverTrigger>
+      <Tip content="Usage" side="bottom">
+        <PopoverTrigger asChild>
+          <button className="rounded-md flex h-7 items-center px-2 text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Usage">
+            <Gauge className={cn("size-3.5", tone)} />
+          </button>
+        </PopoverTrigger>
+      </Tip>
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center px-3 pt-2.5 pb-1.5 text-[12.5px] font-semibold">
           Usage

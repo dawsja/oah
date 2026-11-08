@@ -1,0 +1,19 @@
+/* The phone: the screen's notch and gesture bar stay clear, text is a touch larger, and text
+   in answers can be selected (the desktop's body is unselectable by default). */
+.safe {
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+html.phone body {
+  font-size: 14px;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+html.phone {
+  --oah-chat-size: 15px;
+}
+/* Key hints (Allow Enter, Deny Esc…) mean nothing on a touchscreen; numbered options stay. */
+html.phone button > kbd:last-child {
+  display: none;
+}

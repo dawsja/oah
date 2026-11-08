@@ -6,7 +6,7 @@ import { Resizer } from "@/components/shell/Resizer"
 import { baseName, locationKey, shellLabel } from "@/lib/terminal"
 import { isRemote, locationLabel, type Location, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { useApp, useProject } from "@/store/app"
+import { defaultLayout, useApp, useProject } from "@/store/app"
 import { currentScope } from "@/store/git"
 import { attachTerminal, detachTerminal, fitTab, focusTerminal, learnLocalShell, useTerminals, type TermTab } from "@/store/terminals"
 
@@ -74,7 +74,7 @@ export function TerminalPanel() {
   if (!tabs.length) return null
   return (
     <div className={cn("flex shrink-0 flex-col", !visible && "hidden")} style={{ height: visible ? height : undefined }}>
-      <Resizer side="top" width={height} min={120} max={Math.max(160, window.innerHeight - 220)} onWidth={(h) => setLayout({ terminalHeight: h })} />
+      <Resizer side="top" defaultWidth={defaultLayout.terminalHeight} width={height} min={120} max={Math.max(160, window.innerHeight - 220)} onWidth={(h) => setLayout({ terminalHeight: h })} />
       <div className="flex min-h-0 flex-1 flex-col border-t bg-sidebar">
         <div className="flex h-8 shrink-0 items-stretch border-b" role="tablist" aria-label="Terminals">
           <div className="flex min-w-0 items-stretch overflow-x-auto">

@@ -140,7 +140,7 @@ function WslLimits({ distro, refresh }: { distro: string; refresh: boolean }) {
       }
       Promise.all([ipc.providerAccount(a, location).catch(() => null), ipc.providerAccount(a).catch(() => null)]).then(async ([there, here]) => {
         if (!there?.signedIn) return setRows((r) => ({ ...r, [a]: { same: null, limits: { windows: [], error: there?.error ?? `Not signed in in ${distro}.`, extra: [] } } }))
-        // Only an email says which account it is (Codex's "ChatGPT" doesn't).
+        // Only an email says which account it is (an API key doesn't).
         if (here?.signedIn && there.label?.includes("@") && there.label === here.label) return setRows((r) => ({ ...r, [a]: { same: there.label, limits: null } }))
         const limits = await ipc.providerLimits(a, location).catch((e) => ({ windows: [], error: String(e), extra: [] }))
         setRows((r) => ({ ...r, [a]: { same: null, limits } }))

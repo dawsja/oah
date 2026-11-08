@@ -23,6 +23,9 @@ jobs:
       - name: Typecheck and build
         working-directory: app
         run: bun run web:build
+      - name: Phone app build (android/)
+        working-directory: app
+        run: bun run mobile:build
       - name: Tests
         working-directory: app
         run: bun run test && bun test scripts
@@ -48,7 +51,10 @@ jobs:
         run: cargo fmt --all --check
       - name: Frontend dist for tauri::generate_context
         shell: bash
-        run: mkdir -p app/dist && echo '<!doctype html>' > app/dist/index.html
+        run: |
+          mkdir -p app/dist app/dist-mobile
+          echo '<!doctype html>' > app/dist/index.html
+          echo '<!doctype html>' > app/dist-mobile/mobile.html
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests

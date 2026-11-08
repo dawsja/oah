@@ -1,0 +1,23 @@
+[package]
+name = "oah-remote"
+description = "oah: phones controlling the desktop app; pairing (SPAKE2), encrypted sessions (Noise IK) over WebSocket, the desktop's server and the phone's client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+base64 = "0.22"
+tokio = { version = "1", features = ["rt", "net", "sync", "macros", "time"] }
+tokio-tungstenite = "0.28"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+snow = "0.10"
+spake2 = "0.4"
+chacha20poly1305 = "0.10"
+getrandom = "0.3"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "time"] }

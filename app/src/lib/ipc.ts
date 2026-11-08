@@ -1,7 +1,7 @@
 // The commands the Rust side exposes (app/src-tauri/src/lib.rs).
 
-import type { ChatEvent, ChatMeta, Decision, ModelOption, SlashCommand } from "./chat"
-import type { Account, AgentKind, AppInfo, Distro, HostCheck, Limits, Location, PermissionMode, Probe, Project, Settings } from "./types"
+import type { ChatEvent, ChatMeta, Decision, ModelOption, SlashCommand, Snapshot } from "./chat"
+import type { Account, AgentKind, AppInfo, Distro, HostCheck, Limits, Location, McpStatus, PermissionMode, Probe, Project, Settings } from "./types"
 
 /** An agent's models and slash commands, for a chat that hasn't started. */
 export type Catalog = { models: ModelOption[]; commands: SlashCommand[] }
@@ -34,6 +34,8 @@ export const ipc = {
     call<ChatMeta>("chat_create", { projectId, agent, acpAgent, model, effort, cwd }),
   providerCatalog: (kind: AgentKind, projectId: string | null) => call<Catalog>("provider_catalog", { kind, projectId }),
   chatEvents: (chatId: string) => call<ChatEvent[]>("chat_events", { chatId }),
+  /** The chat as it is now, mid-turn included. */
+  chatSnapshot: (chatId: string) => call<Snapshot>("chat_snapshot", { chatId }),
   chatSend: (chatId: string, prompt: { id: string; text: string; images: { mime: string; data: string }[] }, permission: PermissionMode | null) =>
     call<void>("chat_send", { chatId, prompt, permission }),
   chatCompact: (chatId: string, instructions: string, permission: PermissionMode | null) => call<void>("chat_compact", { chatId, instructions, permission }),
@@ -46,9 +48,12 @@ export const ipc = {
   chatSetEffort: (chatId: string, effort: string) => call<ChatMeta>("chat_set_effort", { chatId, effort }),
   /** An image saved with a chat, as a `data:` URL. */
   chatImage: (chatId: string, file: string) => call<string>("chat_image", { chatId, file }),
+  chatSleep: (chatId: string) => call<void>("chat_sleep", { chatId }),
   chatClose: (chatId: string) => call<void>("chat_close", { chatId }),
   chatDelete: (chatId: string) => call<void>("chat_delete", { chatId }),
   chatRename: (chatId: string, title: string) => call<ChatMeta>("chat_rename", { chatId, title }),
+  chatPin: (chatId: string, pinned: boolean) => call<ChatMeta>("chat_pin", { chatId, pinned }),
+  mcpStatus: () => call<McpStatus>("mcp_status"),
 }
 
 /** What a terminal's shell sends: output, then its exit. */
@@ -69,10 +74,18 @@ export const terminal = {
   close: (id: string) => call<void>("terminal_close", { id }),
 }
 
-/** Calls `fn` for every chat event the app emits; returns the unsubscribe. */
-export async function onChatEvent(fn: (chatId: string, event: ChatEvent) => void): Promise<() => void> {
+/** Calls `fn` for every chat event the app emits (`seq`: its number in the chat, as in a
+ *  snapshot); returns the unsubscribe. */
+export async function onChatEvent(fn: (chatId: string, event: ChatEvent, seq: number) => void): Promise<() => void> {
   const { listen } = await import("@tauri-apps/api/event")
-  return listen<{ chatId: string; event: ChatEvent }>("chat-event", (e) => fn(e.payload.chatId, e.payload.event))
+  return listen<{ chatId: string; event: ChatEvent; seq: number }>("chat-event", (e) => fn(e.payload.chatId, e.payload.event, e.payload.seq))
+}
+
+/** Calls `fn` when chats were added, renamed or removed outside the window (over MCP, or from
+ *  a phone), or a turn started or ended. */
+export async function onChatsChanged(fn: () => void): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event")
+  return listen("chats-changed", () => fn())
 }
 
 /** Picks a folder on this computer; null when cancelled. */

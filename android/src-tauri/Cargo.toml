@@ -1,0 +1,25 @@
+[package]
+name = "oah-android"
+description = "oah for Android: pair with the oah desktop app and continue its chats on the phone"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "oah_android_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+oah-remote.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.12", features = [] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-opener = "2"
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"

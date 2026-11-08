@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "oah",
+  "version": "../../app/package.json",
+  "identifier": "dev.oah.mobile",
+  "build": {
+    "beforeDevCommand": "bun --cwd ../app run mobile:web",
+    "devUrl": "http://localhost:1422",
+    "beforeBuildCommand": "bun --cwd ../app run mobile:build",
+    "frontendDist": "../../app/dist-mobile"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "url": "mobile.html",
+        "title": "oah",
+        "width": 412,
+        "height": 900,
+        "backgroundColor": "#121214"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "shortDescription": "oah \u2014 open agent harness, on your phone",
+    "copyright": "MIT License",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ]
+  }
+}

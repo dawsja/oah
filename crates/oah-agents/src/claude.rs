@@ -249,8 +249,13 @@ impl Driver for ClaudeDriver {
         Ok(true)
     }
 
+    fn resumable(&self) -> bool {
+        true
+    }
+
     fn idle(&self) -> bool {
-        self.state.lock().unwrap().turn_id.is_none()
+        let s = self.state.lock().unwrap();
+        s.turn_id.is_none() && s.waiting.is_empty() && s.pending.is_empty() && s.questions.is_empty()
     }
 
     fn stop(&mut self) {

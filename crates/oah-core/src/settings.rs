@@ -15,6 +15,57 @@ pub struct Settings {
     pub appearance: Appearance,
     pub ssh_hosts: Vec<SshHost>,
     pub projects: Vec<Project>,
+    pub mcp: Mcp,
+    /// Zero disables automatic sleep; otherwise minutes since the last idle activity.
+    pub agent_sleep_minutes: u32,
+    pub remote: Remote,
+}
+
+// ---- MCP -------------------------------------------------------------------------------------
+
+/// Another agent driving oah's chats over MCP (`oah mcp`). Off until turned on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Mcp {
+    pub enabled: bool,
+    /// It may run chats in Full access (never asks).
+    pub allow_full_access: bool,
+    /// It may delete chats.
+    pub allow_delete: bool,
+}
+
+// ---- Remote (phones) -------------------------------------------------------------------------
+
+/// Phones that control this app over the network (the oah Android app). Off until turned on;
+/// only a phone that paired with a code shown here may connect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Remote {
+    pub enabled: bool,
+    /// The TCP port phones connect to.
+    pub port: u16,
+    /// Paired phones. Only pairing adds one and only Revoke removes one; the Settings page
+    /// can't edit this list.
+    pub devices: Vec<PairedDevice>,
+}
+
+impl Default for Remote {
+    fn default() -> Self {
+        Remote { enabled: false, port: 7787, devices: Vec::new() }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PairedDevice {
+    pub id: String,
+    /// What the phone calls itself ("Pixel 8").
+    pub name: String,
+    /// The phone's X25519 public key, base64: its identity on every connection.
+    pub public_key: String,
+    pub paired_at: u64,
+    /// When it last connected (ms), 0 if never.
+    pub last_seen: u64,
 }
 
 // ---- Providers -------------------------------------------------------------------------------

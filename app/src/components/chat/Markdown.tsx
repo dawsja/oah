@@ -5,7 +5,9 @@ import rehypeHighlight from "rehype-highlight"
 import remarkGfm from "remark-gfm"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
-import { openImages } from "@/components/ImageView"
+import { markdownUrlTransform } from "@/lib/images"
+import { MarkdownImage } from "./MarkdownImage"
+import { useTouch } from "./touch"
 
 function text(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node)
@@ -17,14 +19,15 @@ function text(node: ReactNode): string {
 /** A fenced code block: language label and a copy button over the code. */
 function Pre({ children }: { children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
+  const touch = useTouch()
   const code = children as { props?: { className?: string } } | undefined
   const lang = /language-([\w+-]+)/.exec(code?.props?.className ?? "")?.[1]
   return (
     <div className="overflow-hidden rounded-lg group/code relative mb-3 border bg-card">
-      <div className="flex h-7 items-center border-b px-3 font-mono text-[11px] text-faint">
+      <div className={cn("flex items-center border-b px-3 font-mono text-faint", touch ? "h-11 text-[12px]" : "h-7 text-[11px]")}>
         {lang ?? "text"}
         <button
-          className="ml-auto flex items-center gap-1 text-muted-foreground opacity-0 group-hover/code:opacity-100 hover:text-foreground"
+          className="ml-auto -mr-2 flex h-full items-center gap-1 px-2 text-muted-foreground opacity-0 group-hover/code:opacity-100 hover:text-foreground [@media(hover:none)]:opacity-100"
           onClick={() => {
             copyText(text(children).replace(/\n$/, ""))
             setCopied(true)
@@ -44,16 +47,12 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
   return (
     <div className={cn("md", className)}>
       <ReactMarkdown
+        urlTransform={markdownUrlTransform}
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
         components={{
           pre: Pre,
-          img: ({ src, alt }) =>
-            typeof src === "string" && src ? (
-              <button className="my-1 block" onClick={() => openImages([{ src, name: alt || "Image" }])} aria-label={`Open ${alt || "image"}`}>
-                <img src={src} alt={alt ?? ""} loading="lazy" className="rounded-md max-h-96 max-w-full border object-contain" />
-              </button>
-            ) : null,
+          img: ({ src, alt }) => <MarkdownImage src={typeof src === "string" ? src : undefined} alt={alt} />,
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noreferrer">
               {children}

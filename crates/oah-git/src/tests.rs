@@ -120,6 +120,23 @@ fn files_and_grep() {
 }
 
 #[test]
+fn image_files_inside_and_outside_the_project() {
+    use base64::Engine;
+    let (_dir, r) = repo();
+    let outside = tempfile::tempdir().unwrap();
+    let bytes = b"\x89PNG\r\n\x1a\n\0\xff\xfe";
+    let path = outside.path().join("a picture's.PNG");
+    std::fs::write(&path, bytes).unwrap();
+    std::fs::write(std::path::Path::new(&r.path).join("picture.png"), bytes).unwrap();
+    let expected = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
+    assert_eq!(read_image(&r, "picture.png", bytes.len()).unwrap(), expected);
+    assert_eq!(read_image(&r, path.to_str().unwrap(), bytes.len()).unwrap(), expected);
+    assert!(read_image(&r, "picture.png", bytes.len() - 1).unwrap_err().contains("too big"));
+    assert!(read_image(&r, "missing.png", 1024).is_err());
+    assert!(read_image(&r, "not-an-image.txt", 1024).is_err());
+}
+
+#[test]
 fn ahead_of_a_bare_remote() {
     let (dir, r) = repo();
     let remote = tempfile::tempdir().unwrap();

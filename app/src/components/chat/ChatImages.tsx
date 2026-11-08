@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useState } from "react"
 import { Image as ImageIcon, ImageOff } from "lucide-react"
 import { openImages, type ShownImage } from "@/components/ImageView"
 import { git } from "@/lib/git"
@@ -6,6 +6,11 @@ import { ipc } from "@/lib/ipc"
 import { useApp } from "@/store/app"
 import { useScope } from "@/store/git"
 import { cn } from "@/lib/utils"
+
+/** Where a chat's images come from when it isn't this window's own open chat (the phone app
+ *  reads them from the desktop). `key` keeps one source's images apart from another's. */
+export type ImageSource = { key: string; chatImage: (file: string) => Promise<string>; readImage: (path: string) => Promise<string> }
+export const ImageSourceContext = createContext<ImageSource | null>(null)
 
 /** Saved chat images and files the agent read, as `data:` URLs, kept for the session. */
 const cache = new Map<string, Promise<string>>()
@@ -60,9 +65,10 @@ function Thumbs({ srcs, names, size = "size-20" }: { srcs: (string | null | "gon
 /** The images a message was sent with. Messages from before images were saved say how many. */
 export function MessageImages({ files, count }: { files: string[]; count: number }) {
   const chatId = useApp((s) => s.chatId)
+  const source = useContext(ImageSourceContext)
   const srcs = useSources(
-    files.map((f) => `${chatId}/${f}`),
-    (i) => ipc.chatImage(chatId!, files[i]),
+    files.map((f) => `${source?.key ?? chatId}/${f}`),
+    (i) => (source ? source.chatImage(files[i]) : ipc.chatImage(chatId!, files[i])),
   )
   if (!files.length) {
     return count ? (
@@ -81,7 +87,10 @@ export function MessageImages({ files, count }: { files: string[]; count: number
 /** An image file the agent looked at (a Read of a .png…), shown without opening the step. */
 export function ReadImage({ path }: { path: string }) {
   const scope = useScope()
-  const srcs = useSources([`${scope?.projectId}|${scope?.cwd}|${path}`], () => (scope ? git.readImage(scope, path) : Promise.reject(new Error("no project"))))
+  const source = useContext(ImageSourceContext)
+  const srcs = useSources([source ? `${source.key}|${path}` : `${scope?.projectId}|${scope?.cwd}|${path}`], () =>
+    source ? source.readImage(path) : scope ? git.readImage(scope, path) : Promise.reject(new Error("no project")),
+  )
   if (srcs[0] === "gone") return null
   return (
     <div className="mt-1 mb-1.5">

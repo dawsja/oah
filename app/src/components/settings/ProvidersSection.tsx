@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react"
-import { Plus, RefreshCw, Trash2, X } from "lucide-react"
+import { ChevronRight, Plus, RefreshCw, Trash2, X } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { ipc } from "@/lib/ipc"
 import { promptText } from "@/components/Prompt"
@@ -37,11 +38,21 @@ export function ProvidersSection() {
     <Section title="Providers" description="The agent CLIs oah chats through. Each one runs on the machine the project is on, with its own sign-in.">
       <Group>
         <Row label="Default agent" description="New chats start with this agent unless the project picks another.">
-          <Segmented
+          <Select
             value={settings.providers.defaultAgent}
-            options={AGENTS.filter((a) => settings.providers[a].enabled).map((a) => ({ value: a, label: AGENT_LABEL[a] }))}
-            onChange={(v) => update((s) => void (s.providers.defaultAgent = v))}
-          />
+            onValueChange={(v) => update((s) => void (s.providers.defaultAgent = v as Settings["providers"]["defaultAgent"]))}
+          >
+            <SelectTrigger size="sm" className="w-48" aria-label="Default agent">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AGENTS.filter((a) => settings.providers[a].enabled).map((a) => (
+                <SelectItem key={a} value={a}>
+                  {AGENT_LABEL[a]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Row>
       </Group>
       {AGENTS.map((a) => (
@@ -175,41 +186,49 @@ function ProviderCard({ target, provider }: { target: Target; provider: Provider
       {probe?.outdated ? <div className="border-t border-warn/30 bg-warn/10 px-4 py-2.5 text-[12px] text-warn">{probe.outdated}</div> : null}
       {!probe?.found && probe && INSTALL[kind] ? <div className="bg-del/40 px-4 py-2.5 font-mono text-[12px] text-muted-foreground">Install: {INSTALL[kind]}</div> : null}
       {acp ? null : <SignIn kind={kind} installed={!!probe?.found} />}
-      <Row label="Default model" description="Empty uses the CLI's own default.">
-        <Input
-          className="h-7 w-56 font-mono text-[12px]"
-          placeholder={kind === "claude" ? "e.g. opus, sonnet" : kind === "codex" ? "e.g. gpt-5.5-codex" : kind === "opencode" ? "e.g. anthropic/claude-sonnet-5" : "the agent's model id"}
-          defaultValue={provider.defaultModel}
-          onBlur={(e) => edit((p) => void (p.defaultModel = e.target.value.trim()))}
-        />
-      </Row>
-      <Row label="Permissions" description="What the agent may do without asking.">
-        <Segmented<PermissionMode>
-          value={provider.permissionMode}
-          options={(["ask", "acceptEdits", "plan", "fullAccess"] as const).map((m) => {
-            const Icon = PERMISSION_ICON[m]
-            return { value: m, label: <span className="flex items-center gap-1.5"><Icon className="size-3.5" />{PERMISSION_LABEL[m]}</span> }
-          })}
-          onChange={(v) => edit((p) => void (p.permissionMode = v))}
-        />
-      </Row>
-      <Row label={acp ? "Command" : "Executable"} description={acp ? "The program, and the arguments that start it in ACP mode." : "Leave empty to use the one on PATH."}>
-        <Input
-          className="h-7 w-48 font-mono text-[12px]"
-          placeholder={acp ? "command" : kind}
-          defaultValue={provider.binary}
-          onBlur={(e) => edit((p) => void (p.binary = e.target.value.trim()))}
-        />
-        {acp ? (
-          <Input
-            className="h-7 w-48 font-mono text-[12px]"
-            placeholder="--acp"
-            defaultValue={acp.args.join(" ")}
-            onBlur={(e) => editAcp((a) => void (a.args = e.target.value.split(/\s+/).filter(Boolean)))}
-          />
-        ) : null}
-      </Row>
-      <EnvRows target={target} label={acp?.name ?? AGENT_LABEL[kind]} provider={provider} />
+      <details className="group/advanced">
+        <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+          <ChevronRight className="size-4 shrink-0 transition-transform group-open/advanced:rotate-90" />
+          Advanced Settings
+        </summary>
+        <div className="divide-y border-t">
+          <Row label="Default model" description="Empty uses the CLI's own default.">
+            <Input
+              className="h-7 w-56 font-mono text-[12px]"
+              placeholder={kind === "claude" ? "e.g. opus, sonnet" : kind === "codex" ? "e.g. gpt-5.5-codex" : kind === "opencode" ? "e.g. anthropic/claude-sonnet-5" : "the agent's model id"}
+              defaultValue={provider.defaultModel}
+              onBlur={(e) => edit((p) => void (p.defaultModel = e.target.value.trim()))}
+            />
+          </Row>
+          <Row label="Permissions" description="What the agent may do without asking.">
+            <Segmented<PermissionMode>
+              value={provider.permissionMode}
+              options={(["ask", "acceptEdits", "plan", "fullAccess"] as const).map((m) => {
+                const Icon = PERMISSION_ICON[m]
+                return { value: m, label: <span className="flex items-center gap-1.5"><Icon className="size-3.5" />{PERMISSION_LABEL[m]}</span> }
+              })}
+              onChange={(v) => edit((p) => void (p.permissionMode = v))}
+            />
+          </Row>
+          <Row label={acp ? "Command" : "Executable"} description={acp ? "The program, and the arguments that start it in ACP mode." : "Leave empty to use the one on PATH."}>
+            <Input
+              className="h-7 w-48 font-mono text-[12px]"
+              placeholder={acp ? "command" : kind}
+              defaultValue={provider.binary}
+              onBlur={(e) => edit((p) => void (p.binary = e.target.value.trim()))}
+            />
+            {acp ? (
+              <Input
+                className="h-7 w-48 font-mono text-[12px]"
+                placeholder="--acp"
+                defaultValue={acp.args.join(" ")}
+                onBlur={(e) => editAcp((a) => void (a.args = e.target.value.split(/\s+/).filter(Boolean)))}
+              />
+            ) : null}
+          </Row>
+          <EnvRows target={target} label={acp?.name ?? AGENT_LABEL[kind]} provider={provider} />
+        </div>
+      </details>
     </Group>
   )
 }

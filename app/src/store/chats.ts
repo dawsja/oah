@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { create } from "zustand"
 import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript } from "@/lib/chat"
 import { providerFor } from "@/lib/agents"
-import { ipc, onChatEvent } from "@/lib/ipc"
+import { ipc, onChatEvent, onChatsChanged } from "@/lib/ipc"
 import { notify } from "@/lib/notify"
 import type { AgentKind, PermissionMode } from "@/lib/types"
 import { useApp } from "./app"
@@ -37,6 +37,7 @@ type ChatsStore = {
   compact(chatId: string, instructions: string, permission: PermissionMode): Promise<void>
   /** `/clear`: the agent starts a fresh session from the next message. */
   clear(chatId: string): Promise<void>
+  sleep(chatId: string): Promise<void>
   interrupt(chatId: string): Promise<void>
   answer(chatId: string, requestId: string, decision: Decision): Promise<void>
   answerQuestion(chatId: string, requestId: string, answers: Record<string, string[]>): Promise<void>
@@ -45,6 +46,7 @@ type ChatsStore = {
   setEffort(chatId: string, effort: string): Promise<void>
   remove(chatId: string): Promise<void>
   rename(chatId: string, title: string): Promise<void>
+  pin(chatId: string, pinned: boolean): Promise<void>
   setPermission(chatId: string, mode: PermissionMode): void
   /** Holds a message until the chat's turn ends; then the first waiting one is sent. */
   enqueue(chatId: string, text: string, images: Image[]): void
@@ -68,7 +70,9 @@ export const useChats = create<ChatsStore>((set, get) => ({
   async init() {
     if (started) return
     started = true
-    await onChatEvent((chatId, event) => apply(chatId, event))
+    await onChatEvent((chatId, event, seq) => apply(chatId, event, seq))
+    // A chat started, renamed or deleted elsewhere (a phone) shows up here too.
+    await onChatsChanged(() => void get().refresh())
     await get().refresh()
   },
 
@@ -80,11 +84,14 @@ export const useChats = create<ChatsStore>((set, get) => ({
   async open(chatId) {
     useApp.setState({ chatId, view: "chat" })
     import("./git").then((m) => m.useGit.getState().open(null))
-    if (get().transcripts[chatId]) return
-    const events = await ipc.chatEvents(chatId).catch(() => [] as ChatEvent[])
-    const running = await ipc.chatRunning().catch(() => [] as string[])
-    const t = replay(events)
-    set((s) => ({ transcripts: { ...s.transcripts, [chatId]: { ...t, running: running.includes(chatId) && t.running } } }))
+    if (get().transcripts[chatId] || loading.has(chatId)) return
+    // Events that arrive while the snapshot loads wait, then the ones it doesn't have apply.
+    loading.set(chatId, [])
+    const snap = await ipc.chatSnapshot(chatId).catch(() => ({ events: [] as ChatEvent[], seq: 0, live: false, busy: false }))
+    const held = loading.get(chatId) ?? []
+    loading.delete(chatId)
+    const t = held.filter(([seq]) => seq > snap.seq).reduce((t, [, e]) => reduce(t, e), replay(snap.events, snap.busy))
+    set((s) => ({ transcripts: { ...s.transcripts, [chatId]: t } }))
   },
 
   async send(chatId, text, opts) {
@@ -129,6 +136,15 @@ export const useChats = create<ChatsStore>((set, get) => ({
     get().refresh()
   },
 
+  async sleep(chatId) {
+    try {
+      await ipc.chatSleep(chatId)
+      await get().refresh()
+    } catch (e) {
+      toast.error(String(e))
+    }
+  },
+
   async interrupt(chatId) {
     await ipc.chatInterrupt(chatId).catch((e) => toast.error(String(e)))
   },
@@ -164,6 +180,11 @@ export const useChats = create<ChatsStore>((set, get) => ({
 
   async rename(chatId, title) {
     const meta = await ipc.chatRename(chatId, title).catch(() => null)
+    if (meta) set((s) => ({ metas: s.metas.map((m) => (m.id === chatId ? meta : m)) }))
+  },
+
+  async pin(chatId, pinned) {
+    const meta = await ipc.chatPin(chatId, pinned).catch((e) => (toast.error(String(e)), null))
     if (meta) set((s) => ({ metas: s.metas.map((m) => (m.id === chatId ? meta : m)) }))
   },
 
@@ -209,12 +230,20 @@ function sendOpts(chatId: string, images: Image[]) {
   return { agent: meta.agent, acpId: meta.acpAgent, permission, images: images.map(({ mime, data }) => ({ mime, data })) }
 }
 
+/** Chats whose snapshot is loading, and the events (with their numbers) that came meanwhile. */
+const loading = new Map<string, [number, ChatEvent][]>()
+
 /** Batches events per animation frame so streaming text doesn't re-render per token. */
 let queue: [string, ChatEvent][] = []
 let scheduled = false
-function apply(chatId: string, event: ChatEvent) {
+function apply(chatId: string, event: ChatEvent, seq?: number) {
   notify(event, useChats.getState().metas.find((m) => m.id === chatId))
   if (event.type === "permissionChanged") useChats.setState((s) => ({ permission: { ...s.permission, [chatId]: event.mode } }))
+  const held = loading.get(chatId)
+  if (held) {
+    if (seq !== undefined) held.push([seq, event])
+    return
+  }
   queue.push([chatId, event])
   if (scheduled) return
   scheduled = true
@@ -224,7 +253,8 @@ function apply(chatId: string, event: ChatEvent) {
     queue = []
     useChats.setState((s) => {
       const transcripts = { ...s.transcripts }
-      for (const [id, e] of batch) transcripts[id] = reduce(transcripts[id] ?? emptyTranscript(), e)
+      // A chat that isn't open here (a phone drives it) loads whole when it's opened.
+      for (const [id, e] of batch) if (transcripts[id]) transcripts[id] = reduce(transcripts[id], e)
       return { transcripts }
     })
     if (batch.some(([, e]) => e.type === "turnFinished" || e.type === "started")) useChats.getState().refresh()

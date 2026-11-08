@@ -76,6 +76,9 @@ export type ChatMeta = {
   updatedAt: number
   tokens: number
   costUsd: number
+  /** Listed first in its project. */
+  sleeping?: boolean
+  pinned: boolean
 }
 
 export type ToolItem = { kind: "tool"; id: string; tool: ToolCall; status: "running" | "ok" | "error"; output: string; diff: FileDiff | null }
@@ -208,10 +211,16 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
   }
 }
 
-export function replay(events: ChatEvent[]): Transcript {
-  // A reopened chat isn't running, whatever its log ended with.
-  return { ...events.reduce(reduce, emptyTranscript()), running: false, approvals: [], questions: [] }
+/** A chat from its events. `busy`: its agent is mid-turn right now (a snapshot says so), so it
+ *  stays running with its open approvals and questions; otherwise it's idle, whatever the log
+ *  ended with. */
+export function replay(events: ChatEvent[], busy = false): Transcript {
+  const t = events.reduce(reduce, emptyTranscript())
+  return busy ? { ...t, running: true } : { ...t, running: false, approvals: [], questions: [] }
 }
+
+/** A chat as the desktop has it now (`chat_snapshot`, or a phone's `chat.open`). */
+export type Snapshot = { events: ChatEvent[]; seq: number; live: boolean; busy: boolean }
 
 /** A turn's items between its user message and its end, grouped for display: each run of
  *  reasoning and tool calls becomes one "work" block; text, approvals and notices stand alone. */

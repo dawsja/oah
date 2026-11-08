@@ -35,6 +35,22 @@ pub fn chats_dir() -> PathBuf {
     app_dir().join("chats")
 }
 
+/// The local socket the app serves MCP on (`oah mcp` connects to it): a socket file in the app
+/// folder on Unix (only this user may open it), a named pipe on Windows. Its name follows the
+/// data folder, so a second `$OAH_HOME` gets its own.
+pub fn mcp_socket() -> String {
+    if cfg!(windows) {
+        // FNV-1a of the folder: short, stable, and a valid pipe name.
+        let mut h: u64 = 0xcbf29ce484222325;
+        for b in app_dir().to_string_lossy().to_lowercase().bytes() {
+            h = (h ^ b as u64).wrapping_mul(0x100000001b3);
+        }
+        format!("oah-mcp-{h:016x}")
+    } else {
+        app_dir().join("mcp.sock").to_string_lossy().into_owned()
+    }
+}
+
 /// `~/…` for display.
 pub fn short_path(p: &str) -> String {
     let home = home_dir();

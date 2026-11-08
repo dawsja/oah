@@ -24,6 +24,7 @@ import { ContextRing } from "./ContextRing"
 import { filterCommands, menuCommands, ownCommand, slashQuery, type MenuCommand, type OwnCommand } from "@/lib/commands"
 import { fuzzyPaths, mention, mentionAt } from "@/lib/fuzzy"
 import { git } from "@/lib/git"
+import { attachmentMime, readAttachment, MAX_IMAGE, type Attachment } from "@/lib/attachments"
 import { PERMISSION_LABEL, type PermissionMode } from "@/lib/types"
 import { PERMISSION_ICON, PERMISSION_TONE } from "@/components/permission"
 import { useApp } from "@/store/app"
@@ -73,10 +74,7 @@ export type ComposerProps = {
 
 const PERMISSIONS: PermissionMode[] = ["ask", "acceptEdits", "plan", "fullAccess"]
 
-/** An image to send with the prompt: its type and base64 bytes. */
-export type Attachment = { mime: string; data: string; name: string }
-
-const MAX_IMAGE = 5 * 1024 * 1024
+export type { Attachment } from "@/lib/attachments"
 const MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
 /** The send-now chord's modifier, as shown. */
 export const STEER_KEY = MAC ? "⌘" : "Ctrl"
@@ -86,16 +84,6 @@ export function editInComposer(text: string, images: Attachment[]) {
   window.dispatchEvent(new CustomEvent("oah:edit", { detail: { text, images } }))
 }
 const MAX_IMAGES = 8
-
-function readImage(file: File): Promise<Attachment | null> {
-  if (!file.type.startsWith("image/") || file.size > MAX_IMAGE) return Promise.resolve(null)
-  return new Promise((resolve) => {
-    const r = new FileReader()
-    r.onload = () => resolve({ mime: file.type, data: String(r.result).split(",")[1] ?? "", name: file.name || "pasted image" })
-    r.onerror = () => resolve(null)
-    r.readAsDataURL(file)
-  })
-}
 
 /** Files for the @ menu, per folder, kept briefly. */
 const fileCache = new Map<string, { at: number; files: Promise<string[]> }>()
@@ -126,7 +114,7 @@ export function Composer(p: ComposerProps) {
     setText((t) => t.slice(0, menu.start) + insert + t.slice(end))
     setMenu(null)
     requestAnimationFrame(() => {
-      el?.focus()
+      el?.focus({ preventScroll: true })
       el?.setSelectionRange(menu.start + insert.length, menu.start + insert.length)
     })
   }
@@ -182,7 +170,7 @@ export function Composer(p: ComposerProps) {
     const insert = c.skill && p.agent.kind === "codex" ? `$${c.name} ` : `/${c.name} `
     setText(insert)
     requestAnimationFrame(() => {
-      el?.focus()
+      el?.focus({ preventScroll: true })
       el?.setSelectionRange(insert.length, insert.length)
     })
   }
@@ -193,13 +181,21 @@ export function Composer(p: ComposerProps) {
   }, [p.draftKey, text, images])
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (p.autoFocus) ref.current?.focus({ preventScroll: true })
+  }, [p.autoFocus])
   const picker = useRef<HTMLInputElement>(null)
   const addFiles = async (files: Iterable<File>) => {
     const all = [...files]
-    const tooBig = all.filter((f) => f.type.startsWith("image/") && f.size > MAX_IMAGE)
+    const tooBig = all.filter((f) => attachmentMime(f) && f.size > MAX_IMAGE)
     if (tooBig.length) toast.error(`${tooBig.map((f) => f.name || "That image").join(", ")} is over 5 MB`)
-    if (all.some((f) => !f.type.startsWith("image/"))) toast.info("Only images can be attached (PNG, JPEG, GIF, WebP)")
-    const read = (await Promise.all(all.map(readImage))).filter((a): a is Attachment => !!a)
+    if (all.some((f) => !attachmentMime(f))) toast.info("Only images can be attached (PNG, JPEG, GIF, WebP)")
+    const results = await Promise.allSettled(all.filter((f) => attachmentMime(f) && f.size <= MAX_IMAGE).map(readAttachment))
+    const read = results.flatMap((r) => {
+      if (r.status === "fulfilled") return [r.value]
+      toast.error(String(r.reason))
+      return []
+    })
     if (read.length) setImages((cur) => [...cur, ...read].slice(0, MAX_IMAGES))
   }
   // "Add to chat" from the side panel puts `@path ` at the cursor.
@@ -209,7 +205,7 @@ export function Composer(p: ComposerProps) {
       const el = ref.current
       const at = el?.selectionStart ?? text.length
       setText((t) => t.slice(0, at) + (at > 0 && !/\s$/.test(t.slice(0, at)) ? " " : "") + add + t.slice(at))
-      requestAnimationFrame(() => el?.focus())
+      requestAnimationFrame(() => el?.focus({ preventScroll: true }))
     }
     window.addEventListener("oah:insert", onInsert)
     return () => window.removeEventListener("oah:insert", onInsert)
@@ -222,7 +218,7 @@ export function Composer(p: ComposerProps) {
       setImages((cur) => [...back.images, ...cur].slice(0, MAX_IMAGES))
       requestAnimationFrame(() => {
         const el = ref.current
-        el?.focus()
+        el?.focus({ preventScroll: true })
         el?.setSelectionRange(back.text.length, back.text.length)
       })
     }
@@ -248,7 +244,7 @@ export function Composer(p: ComposerProps) {
     <div
       className={cn("rounded-xl border border-input bg-card focus-within:border-ring/70", dragging && "border-primary", p.className)}
       onDragOver={(e) => {
-        if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) {
+        if ([...e.dataTransfer.items].some((i) => i.kind === "file")) {
           e.preventDefault()
           setDragging(true)
         }
@@ -319,10 +315,12 @@ export function Composer(p: ComposerProps) {
           </div>
         </div>
       ) : null}
-      <input ref={picker} type="file" accept="image/*" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
+      <input ref={picker} type="file" accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp" multiple hidden onChange={(e) => {
+        if (e.target.files) void addFiles(e.target.files)
+        e.target.value = ""
+      }} />
       <textarea
         ref={ref}
-        autoFocus={p.autoFocus}
         value={text}
         rows={3}
         placeholder={p.placeholder ?? "Ask anything, @ to add files, / for commands"}
@@ -340,7 +338,7 @@ export function Composer(p: ComposerProps) {
           }, 150)
         }
         onPaste={(e) => {
-          const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"))
+          const files = [...e.clipboardData.files].filter((f) => attachmentMime(f))
           if (files.length) {
             e.preventDefault()
             addFiles(files)

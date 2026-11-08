@@ -29,6 +29,7 @@
   "include": [
     "src",
     "scripts",
-    "vite.config.ts"
+    "vite.config.ts",
+    "vite.mobile.config.ts"
   ]
 }

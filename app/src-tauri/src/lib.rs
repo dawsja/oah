@@ -3,6 +3,8 @@
 
 mod chats;
 mod git;
+mod mcp;
+mod remote;
 mod secrets;
 mod terminal;
 mod voice;
@@ -22,9 +24,10 @@ use tauri::{AppHandle, Manager, State};
 /// The settings as last saved, shared by every command.
 pub(crate) struct AppState {
     pub(crate) settings: Mutex<Settings>,
-    chats: chats::Chats,
+    pub(crate) chats: chats::Chats,
     terminals: terminal::Terminals,
     voice: voice::Voice,
+    remote: remote::Remote,
 }
 
 pub(crate) type CmdResult<T> = Result<T, String>;
@@ -84,6 +87,8 @@ fn settings_set(state: State<AppState>, mut settings: Settings) -> CmdResult<Set
     let before = state.settings.lock().unwrap().clone();
     // Voice on/off follows the model download (voice.rs), not the page's copy.
     settings.voice.enabled = before.voice.enabled;
+    // Phones: on/off, port and paired devices change only through the remote_* commands.
+    settings.remote = before.remote.clone();
     secrets::stash(&mut settings, &before)?;
     settings.save(&paths::settings_file()).map_err(err)?;
     *state.settings.lock().unwrap() = settings.clone();
@@ -208,23 +213,26 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: 
 }
 
 #[derive(serde::Serialize)]
-struct Catalog {
-    models: Vec<oah_agents::event::ModelOption>,
-    commands: Vec<oah_agents::event::SlashCommand>,
+pub(crate) struct Catalog {
+    pub(crate) models: Vec<oah_agents::event::ModelOption>,
+    pub(crate) commands: Vec<oah_agents::event::SlashCommand>,
 }
 
 /// The models and slash commands an agent offers, for a chat that hasn't started (run where
 /// `project_id` is). A chat's own agent keeps both up to date once it runs.
 #[tauri::command]
 async fn provider_catalog(state: State<'_, AppState>, kind: AgentKind, project_id: Option<String>) -> CmdResult<Catalog> {
-    let (binary, location, cwd) = {
-        let s = state.settings.lock().unwrap();
-        let p = project_id.and_then(|id| s.projects.iter().find(|p| p.id == id).cloned());
-        let location = p.as_ref().map(|p| p.location.clone()).unwrap_or(Location::Local);
-        let cwd = p.map(|p| p.path).unwrap_or_else(|| paths::home_dir().to_string_lossy().into_owned());
-        (s.providers.get(kind).binary_on(&location), location, cwd)
-    };
-    tauri::async_runtime::spawn_blocking(move || match kind {
+    let settings = state.settings.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || catalog(&settings, kind, project_id.as_deref())).await.map_err(err)?
+}
+
+/// What [`provider_catalog`] returns; blocking (it runs the CLI).
+pub(crate) fn catalog(s: &Settings, kind: AgentKind, project_id: Option<&str>) -> CmdResult<Catalog> {
+    let p = project_id.and_then(|id| s.projects.iter().find(|p| p.id == id).cloned());
+    let location = p.as_ref().map(|p| p.location.clone()).unwrap_or(Location::Local);
+    let cwd = p.map(|p| p.path).unwrap_or_else(|| paths::home_dir().to_string_lossy().into_owned());
+    let binary = s.providers.get(kind).binary_on(&location);
+    match kind {
         AgentKind::Claude => oah_agents::claude::catalog(&binary, &location, &cwd).map(|(models, commands)| Catalog { models, commands }),
         AgentKind::Codex => {
             let prog = if binary.trim().is_empty() { "codex".to_string() } else { binary };
@@ -240,9 +248,7 @@ async fn provider_catalog(state: State<'_, AppState>, kind: AgentKind, project_i
             commands: oah_agents::acp::opencode_commands(),
         }),
         AgentKind::Acp => Ok(Catalog { models: vec![], commands: vec![] }),
-    })
-    .await
-    .map_err(err)?
+    }
 }
 
 /// Opens a terminal running the CLI's sign-in (on this computer, or in a WSL distro).
@@ -267,7 +273,9 @@ fn chat_running(state: State<AppState>) -> Vec<String> {
 
 /// A new, empty chat in `project_id` (its agent starts with the first message).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn chat_create(
+    app: AppHandle,
     state: State<AppState>,
     project_id: String,
     agent: Option<AgentKind>,
@@ -276,20 +284,39 @@ fn chat_create(
     effort: Option<String>,
     cwd: Option<String>,
 ) -> CmdResult<ChatMeta> {
+    create_chat(&app, &state, NewChat { project_id, agent, acp_agent, model, effort, cwd })
+}
+
+/// What `chat_create` (and a phone's `chat.create`) takes.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NewChat {
+    project_id: String,
+    agent: Option<AgentKind>,
+    acp_agent: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+    cwd: Option<String>,
+}
+
+pub(crate) fn create_chat(app: &AppHandle, state: &AppState, c: NewChat) -> CmdResult<ChatMeta> {
+    let NewChat { project_id, agent, acp_agent, model, effort, cwd } = c;
     let s = state.settings.lock().unwrap().clone();
-    let project = s.projects.iter().find(|p| p.id == project_id).ok_or("no such project")?;
-    let agent = agent.or(project.default_agent).unwrap_or(s.providers.default_agent);
-    let cwd = cwd.unwrap_or_else(|| project.path.clone());
-    if agent == AgentKind::Acp && acp_agent.as_deref().and_then(|id| s.providers.acp_agent(id)).is_none() {
-        return Err("no such ACP agent".into());
-    }
-    state.chats.create(&project_id, agent, acp_agent, model.as_deref().unwrap_or(""), effort.as_deref().unwrap_or(""), &cwd)
+    let meta = state.chats.create_in(&s, oah_mcp::host::NewChat { project_id, agent, acp_agent, model, effort, cwd })?;
+    state.chats.changed(app);
+    Ok(meta)
 }
 
 /// The chat's events so far, to replay into the transcript.
 #[tauri::command]
 fn chat_events(state: State<AppState>, chat_id: String) -> CmdResult<Vec<serde_json::Value>> {
     state.chats.store.events(&chat_id).map_err(err)
+}
+
+/// The chat as it is now: its log, the text still streaming, and whether a turn is running.
+#[tauri::command]
+fn chat_snapshot(state: State<AppState>, chat_id: String) -> CmdResult<chats::Snapshot> {
+    state.chats.snapshot(&chat_id)
 }
 
 #[tauri::command]
@@ -358,8 +385,13 @@ fn chat_set_effort(state: State<AppState>, chat_id: String, effort: String) -> C
 }
 
 #[tauri::command]
-fn chat_set_permission(state: State<AppState>, chat_id: String, mode: PermissionMode) -> CmdResult<()> {
-    state.chats.set_permission(&chat_id, mode)
+fn chat_set_permission(app: AppHandle, state: State<AppState>, chat_id: String, mode: PermissionMode) -> CmdResult<()> {
+    state.chats.set_permission(&app, &chat_id, mode, false)
+}
+
+#[tauri::command]
+fn chat_sleep(app: AppHandle, state: State<AppState>, chat_id: String) -> CmdResult<()> {
+    state.chats.sleep(&app, &chat_id, std::time::Duration::ZERO)
 }
 
 #[tauri::command]
@@ -368,16 +400,27 @@ fn chat_close(state: State<AppState>, chat_id: String) {
 }
 
 #[tauri::command]
-fn chat_delete(state: State<AppState>, chat_id: String) -> CmdResult<()> {
-    state.chats.delete(&chat_id)
+fn chat_delete(app: AppHandle, state: State<AppState>, chat_id: String) -> CmdResult<()> {
+    state.chats.delete(&chat_id)?;
+    state.chats.changed(&app);
+    Ok(())
 }
 
 #[tauri::command]
-fn chat_rename(state: State<AppState>, chat_id: String, title: String) -> CmdResult<ChatMeta> {
-    let mut m = state.chats.store.get(&chat_id).map_err(err)?;
-    m.title = title.trim().to_string();
-    state.chats.store.save(&m).map_err(err)?;
+fn chat_rename(app: AppHandle, state: State<AppState>, chat_id: String, title: String) -> CmdResult<ChatMeta> {
+    let m = state.chats.edit(&chat_id, |m| m.title = title.trim().to_string())?;
+    state.chats.changed(&app);
     Ok(m)
+}
+
+#[tauri::command]
+fn chat_pin(state: State<AppState>, chat_id: String, pinned: bool) -> CmdResult<ChatMeta> {
+    state.chats.edit(&chat_id, |m| m.pinned = pinned)
+}
+
+/// `oah mcp`: passes stdio through to the running app's MCP socket; the exit code.
+pub fn mcp_bridge() -> i32 {
+    oah_mcp::bridge::run()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -405,10 +448,22 @@ pub fn run() {
             chats: chats::Chats::new(ChatStore::new(paths::chats_dir())),
             terminals: terminal::Terminals::default(),
             voice: voice::Voice::default(),
+            remote: remote::Remote::default(),
         })
         .setup(|app| {
             // Voice state (and with it the microphone answer) before the page asks.
             let _ = voice::voice_state(app.handle().clone());
+            // MCP's socket (it refuses clients while Settings → MCP is off).
+            mcp::listen(app.handle());
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(15));
+                let state = handle.state::<AppState>();
+                let minutes = state.settings.lock().unwrap().agent_sleep_minutes;
+                state.chats.sleep_idle(&handle, minutes);
+            });
+            // Phones can connect from the start when Settings → Phone has it on.
+            remote::start_if_enabled(app.handle());
             #[cfg(windows)]
             if let Some(w) = app.get_webview_window("main") {
                 voice::answer_microphone(&w);
@@ -437,6 +492,7 @@ pub fn run() {
             chat_running,
             chat_create,
             chat_events,
+            chat_snapshot,
             chat_send,
             chat_interrupt,
             chat_compact,
@@ -448,8 +504,16 @@ pub fn run() {
             chat_answer_question,
             chat_set_model,
             chat_close,
+            chat_sleep,
             chat_delete,
             chat_rename,
+            chat_pin,
+            remote::remote_state,
+            remote::remote_set_enabled,
+            remote::remote_set_port,
+            remote::remote_pair_start,
+            remote::remote_pair_cancel,
+            remote::remote_revoke,
             git::git_status,
             git::git_diff,
             git::git_stage,
@@ -481,6 +545,7 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            mcp::mcp_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oah")

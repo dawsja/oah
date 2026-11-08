@@ -4,6 +4,7 @@ import { create } from "zustand"
 import { toast } from "sonner"
 import { Tip } from "@/components/Tip"
 import { cn } from "@/lib/utils"
+import { copyImageLocally, saveImageLocally } from "@/lib/image-download"
 
 /** An image to show: a `data:` URL (or any URL the webview can load) and a name. */
 export type ShownImage = { src: string; name: string }
@@ -60,43 +61,21 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
   )
 }
 
-async function blobOf(image: ShownImage): Promise<Blob> {
-  return (await fetch(image.src)).blob()
-}
-
 /** Copies the picture itself, as PNG, through the clipboard plugin (the webview's own clipboard
  *  can refuse images). */
 async function copyImage(image: ShownImage) {
   try {
-    const blob = await blobOf(image)
-    const png = blob.type === "image/png" ? blob : await toPng(blob)
-    const { writeImage } = await import("@tauri-apps/plugin-clipboard-manager")
-    await writeImage(new Uint8Array(await png.arrayBuffer()))
+    await copyImageLocally(image.src)
     toast.success("Image copied")
   } catch (e) {
     toast.error(`Couldn't copy the image: ${e}`)
   }
 }
 
-async function toPng(blob: Blob): Promise<Blob> {
-  const bmp = await createImageBitmap(blob)
-  const canvas = document.createElement("canvas")
-  canvas.width = bmp.width
-  canvas.height = bmp.height
-  canvas.getContext("2d")!.drawImage(bmp, 0, 0)
-  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("no PNG"))), "image/png"))
-}
-
 /** Saves through the system's Save dialog. */
 async function saveImage(image: ShownImage) {
   try {
-    const { save } = await import("@tauri-apps/plugin-dialog")
-    const path = await save({ defaultPath: image.name, title: "Save image" })
-    if (!path) return
-    const bytes = new Uint8Array(await (await blobOf(image)).arrayBuffer())
-    const { invoke } = await import("@tauri-apps/api/core")
-    await invoke("save_bytes", { path, data: Array.from(bytes) })
-    toast.success("Image saved")
+    if (await saveImageLocally(image)) toast.success("Image saved")
   } catch (e) {
     toast.error(`Couldn't save the image: ${e}`)
   }

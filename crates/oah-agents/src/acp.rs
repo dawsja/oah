@@ -45,6 +45,7 @@ struct State {
     /// A prompt is running.
     busy: bool,
     alive: bool,
+    resumable: bool,
     /// `session/load` replays history as updates; the chat already has it.
     loading: bool,
     /// Text and thought chunks without a message id are grouped per stretch between tool calls.
@@ -178,6 +179,7 @@ impl AcpDriver {
             return Err(msg);
         }
         let caps = &init["agentCapabilities"];
+        d.state.lock().unwrap().resumable = caps["loadSession"].as_bool() == Some(true) || !caps["sessionCapabilities"]["resume"].is_null();
         let auth_methods = init["authMethods"].as_array().cloned().unwrap_or_default();
         let not_signed_in = || sign_in_message(&name, opencode, &auth_methods);
         // Reopen the chat's session if we can; otherwise start a new one.
@@ -474,8 +476,13 @@ impl Driver for AcpDriver {
         Ok(true)
     }
 
+    fn resumable(&self) -> bool {
+        self.state.lock().unwrap().resumable
+    }
+
     fn idle(&self) -> bool {
-        !self.state.lock().unwrap().busy
+        let s = self.state.lock().unwrap();
+        !s.busy && s.pending.is_empty() && s.questions.is_empty() && self.queue.lock().unwrap().is_empty()
     }
 
     fn set_permission(&mut self, mode: PermissionMode) -> DriverResult<()> {

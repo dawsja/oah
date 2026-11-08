@@ -54,7 +54,24 @@ Electron.
   and turning it off deletes the model.
 - **Usage.** Plan limits for Claude, Codex and OpenCode Go (session, week, month), in a title bar
   popover and in Settings → Usage, with tokens and cost per project.
-- **Settings.** Providers, Voice, Appearance (dark, light, system), Usage, SSH Hosts, Projects.
+- **MCP (optional).** Another agent (Claude Code, Codex, any MCP client) can drive oah: list
+  projects, the agents and their models with effort levels, start chats (in a worktree too), send
+  messages and wait for the turn, read transcripts and diffs, stop turns, and answer approvals,
+  plans and questions. Its chats show in the sidebar as they run, and whoever answers an approval
+  first, there or in oah, wins. Off until you turn it on in Settings → MCP, which also has the
+  config to paste: clients run `oah mcp`, which talks to the open app over a local socket
+  (a named pipe on Windows) that only you can open. Full access and deleting chats are separate
+  switches, both off.
+- **Phone (Android, optional).** The oah app for Android continues your chats away from the
+  desk: projects and chats, answers streaming in, replies (queued or sent into the running
+  turn), photos, approvals and questions, stop, new chats, and the model, effort and permission.
+  Turn it on in Settings → Phone, choose Pair a phone, and scan the QR code with the app (or
+  type the 8-character code and the address). The phone connects to this computer directly, on
+  the same Wi-Fi or a VPN such as Tailscale; pairing runs SPAKE2 on the one-time code (five
+  tries, five minutes), and every session after it is Noise `IK` with keys only the two of them
+  hold. Settings → Phone lists the paired phones; Forget disconnects one for good.
+- **Settings.** Providers, Voice, Appearance (dark, light, system), Usage, SSH Hosts, Projects, MCP,
+  Phone.
 
 Corners are subtle: 2px tags, 4px controls and rows, 6px cards and panels.
 
@@ -70,9 +87,19 @@ crates/
                  (OAH_MOCK_AGENT=1)
   oah-git        git and gh: status, diffs, commits, branches, sync, graph, worktrees, PRs
   oah-voice      speech to text (transcribe.cpp; needs CMake to build)
+  oah-mcp        the MCP server another agent drives oah's chats with (tools, live chat status,
+                 transcripts), and `oah mcp`, the stdio bridge to the running app
+  oah-remote     phones: pairing (SPAKE2 on a one-time code, QR links), encrypted sessions
+                 (Noise IK over WebSocket), the desktop's server and the phone's client
 app/
-  src-tauri      the Tauri shell: commands, chat-event / voice-state events, terminal channels
+  src-tauri      the Tauri shell: commands, chat-event / voice-state events, terminal channels;
+                 remote.rs answers phones with the same chats
   src            React + Tailwind (shadcn primitives, 6px radius scale)
+  src/mobile     the phone app's UI (mobile.html, built to dist-mobile/), sharing the chat
+                 components and `reduce` with the desktop
+android/
+  src-tauri      the Android app (Tauri 2): the phone's key, paired desktops, the session that
+                 reconnects by itself; gen/android is the Gradle project
 ```
 
 ## Develop
@@ -89,10 +116,22 @@ bun run dev:debug        # the app with DevTools on 127.0.0.1:9223, data in ../.
 `scripts/dev-cdp.ts` drives a `dev:debug` window without touching your mouse or keyboard
 (`shot`, `eval`, `click`, `type`, `key`). `OAH_MOCK_AGENT=1` swaps both agents for a scripted one.
 
+The phone app needs a JDK 17, the Android SDK and NDK, and the Rust Android targets
+(`rustup target add aarch64-linux-android armv7-linux-androideabi`):
+
+```sh
+cd android
+bun install
+bun tauri android dev                # on a connected phone or emulator
+bun tauri android build --apk        # signed when gen/android/keystore.properties exists
+```
+
+`cd app && bun run mobile:web` serves the phone UI alone (localhost:1422/mobile.html).
+
 Checks, as CI runs them:
 
 ```sh
-(cd app && bun run web:build && bun run test)
+(cd app && bun run web:build && bun run mobile:build && bun run test)
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace

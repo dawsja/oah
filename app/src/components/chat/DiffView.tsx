@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, FileDiff as FileDiffIcon } from "lucide-reac
 import type { FileDiff } from "@/lib/chat"
 import { cn } from "@/lib/utils"
 import { useRelative } from "./cwd"
+import { useTouch } from "./touch"
 
 type Line = { cls: "a" | "d" | "h" | "c"; text: string; old?: number; new?: number }
 
@@ -62,13 +63,14 @@ export function DiffStat({ added, removed }: { added: number; removed: number })
 export function DiffCard({ diff, defaultOpen = true }: { diff: FileDiff; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
   const rel = useRelative()
+  const touch = useTouch()
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
-      <button className="flex h-8 w-full items-center gap-2 px-3 text-left text-[12px] hover:bg-accent" onClick={() => setOpen(!open)}>
+      <button className={cn("flex w-full items-center gap-2 px-3 text-left hover:bg-accent", touch ? "h-11 text-[13px]" : "h-8 text-[12px]")} onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3 text-faint" /> : <ChevronRight className="size-3 text-faint" />}
         <FileDiffIcon className="size-3.5 text-muted-foreground" />
-        <span className="truncate font-mono">{rel(diff.path)}</span>
-        <span className="ml-auto">
+        <span className="min-w-0 truncate font-mono">{rel(diff.path)}</span>
+        <span className="ml-auto shrink-0 pl-1">
           <DiffStat added={diff.added} removed={diff.removed} />
         </span>
       </button>

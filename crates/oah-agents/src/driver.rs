@@ -81,6 +81,10 @@ pub trait Driver: Send {
     fn idle(&self) -> bool {
         true
     }
+    /// Whether this CLI can reopen its saved session after stopping.
+    fn resumable(&self) -> bool {
+        false
+    }
     /// `/compact`: summarizes the conversation so far, when the agent has a way to (Codex's
     /// `thread/compact/start`). `false`: it takes `/compact` as a message instead.
     fn compact(&mut self, _instructions: &str) -> DriverResult<bool> {

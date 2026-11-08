@@ -5,3 +5,4 @@ src-tauri/binaries/
 src-tauri/gen/
 target/
 release/
+dist-mobile/

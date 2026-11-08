@@ -4,7 +4,7 @@ import { create } from "zustand"
 import { ipc } from "@/lib/ipc"
 import { BASE_UI_SIZE, type AppInfo, type Appearance, type Location, type Settings } from "@/lib/types"
 
-export type SettingsSection = "providers" | "voice" | "appearance" | "usage" | "ssh" | "projects"
+export type SettingsSection = "sessions" | "providers" | "voice" | "appearance" | "usage" | "ssh" | "projects" | "mcp" | "phone"
 export type RightTab = "files" | "scm" | "history" | "pr"
 
 type Layout = {
@@ -41,7 +41,7 @@ type AppStore = {
 }
 
 const LAYOUT_KEY = "oah.layout"
-const defaultLayout: Layout = { sidebarWidth: 272, rightWidth: 340, rightOpen: true, rightTab: "scm", terminalOpen: false, terminalHeight: 280 }
+export const defaultLayout: Readonly<Layout> = { sidebarWidth: 272, rightWidth: 340, rightOpen: true, rightTab: "scm", terminalOpen: false, terminalHeight: 280 }
 
 function loadLayout(): Layout {
   try {

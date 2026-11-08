@@ -1,6 +1,7 @@
 //! Who each CLI is signed in as, and its plan limits.
 //!
-//! - Sign-in: `claude auth status --json` and `codex login status` (run where the project is).
+//! - Sign-in: `claude auth status --json` and `codex login status` (run where the project is);
+//!   a ChatGPT sign-in's email and plan come from `codex app-server`'s `account/read`.
 //! - Claude limits: `GET https://api.anthropic.com/api/oauth/usage` with the CLI's own OAuth
 //!   token from `~/.claude/.credentials.json` (this computer only).
 //! - Codex limits: `account/read` and `account/rateLimits/read` from a short-lived
@@ -80,7 +81,16 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
             error: Some(first_line(&out.stderr).unwrap_or("couldn't read `claude auth status`").into()),
             ..Default::default()
         }),
-        AgentKind::Codex => parse_codex_status(&format!("{}\n{}", out.stdout, out.stderr)),
+        AgentKind::Codex => {
+            let mut a = parse_codex_status(&format!("{}\n{}", out.stdout, out.stderr));
+            // `login status` only says "ChatGPT"; the app-server knows which account.
+            if a.signed_in && a.label.as_deref() == Some("ChatGPT") {
+                if let Ok(v) = codex_once(&prog, location, "account/read", json!({})) {
+                    apply_codex_account(&mut a, &v);
+                }
+            }
+            a
+        }
         AgentKind::Opencode | AgentKind::Acp => parse_opencode_auth(&format!("{}\n{}", out.stdout, out.stderr)),
     }
 }
@@ -112,6 +122,17 @@ pub fn parse_codex_status(text: &str) -> Account {
             plan: None,
             error: (!line.is_empty() && !lower.contains("not logged in")).then(|| line.to_string()),
         }
+    }
+}
+
+/// `account/read`'s ChatGPT email and plan, over `login status`'s "ChatGPT".
+pub fn apply_codex_account(a: &mut Account, v: &Value) {
+    let acct = &v["account"];
+    if let Some(email) = acct["email"].as_str().filter(|e| e.contains('@')) {
+        a.label = Some(email.to_string());
+    }
+    if let Some(plan) = acct["planType"].as_str() {
+        a.plan = Some(plan.to_string());
     }
 }
 
@@ -505,6 +526,12 @@ mod tests {
         assert_eq!(a.plan.as_deref(), Some("max"));
         let c = parse_codex_status("Logged in using ChatGPT\n");
         assert!(c.signed_in && c.label.as_deref() == Some("ChatGPT"));
+        let mut c = c;
+        apply_codex_account(&mut c, &json!({"account":{"type":"chatgpt","email":"me@x.dev","planType":"pro"}}));
+        assert_eq!((c.label.as_deref(), c.plan.as_deref()), (Some("me@x.dev"), Some("pro")));
+        let mut k = parse_codex_status("Logged in using an API key\n");
+        apply_codex_account(&mut k, &json!({"account":{"type":"apiKey"}}));
+        assert_eq!(k.label.as_deref(), Some("an API key"));
         assert!(!parse_codex_status("Not logged in").signed_in);
     }
 

@@ -5,6 +5,7 @@ import { Brain, Check, ChevronDown, ChevronRight, FilePen, FileText, Globe, List
 import type { Item, ToolItem, ToolKind } from "@/lib/chat"
 import { cn } from "@/lib/utils"
 import { useRelative } from "./cwd"
+import { useTouch } from "./touch"
 import { DiffCard, DiffStat } from "./DiffView"
 
 const ICON: Record<ToolKind, LucideIcon> = {
@@ -36,6 +37,7 @@ const viewedImage = (t: ToolItem) => t.tool.kind === "read" && t.status === "ok"
 
 export function WorkGroup({ items, live }: { items: Item[]; live: boolean }) {
   const [open, setOpen] = useState(live)
+  const touch = useTouch()
   // Open while the agent works on it, folded once the turn moves on.
   useEffect(() => setOpen(live), [live])
   const tools = items.filter((i): i is ToolItem => i.kind === "tool")
@@ -48,7 +50,7 @@ export function WorkGroup({ items, live }: { items: Item[]; live: boolean }) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <button className="rounded-md group flex h-6 items-center gap-1.5 self-start text-[12.5px] text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)}>
+      <button className={cn("rounded-md group flex items-center gap-1.5 self-start text-muted-foreground hover:text-foreground", touch ? "h-10 pr-2 text-[13.5px]" : "h-6 text-[12.5px]")} onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         <span className={cn(running && "shimmer")}>{summary}</span>
         {names.length ? <span className="text-faint">· {names.join(", ")}</span> : null}
@@ -75,9 +77,10 @@ export function WorkGroup({ items, live }: { items: Item[]; live: boolean }) {
 
 function Reasoning({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
+  const touch = useTouch()
   return (
     <div className="py-0.5">
-      <button className="flex min-h-6 w-full items-start gap-2 text-left text-[12.5px] text-faint hover:text-muted-foreground" onClick={() => setOpen(!open)}>
+      <button className={cn("flex w-full items-start gap-2 text-left text-faint hover:text-muted-foreground", touch ? "min-h-10 py-2.5 text-[13.5px]" : "min-h-6 text-[12.5px]")} onClick={() => setOpen(!open)}>
         <Brain className="mt-[3px] size-3.5 shrink-0" />
         <span className={cn("italic", !open && "line-clamp-1")}>{text}</span>
       </button>
@@ -88,12 +91,13 @@ function Reasoning({ text }: { text: string }) {
 export function ToolRow({ item }: { item: ToolItem }) {
   const [open, setOpen] = useState(false)
   const rel = useRelative()
+  const touch = useTouch()
   const Icon = ICON[item.tool.kind]
   const hasOutput = !!item.output.trim()
   return (
     <div className="py-0.5">
       <button
-        className="flex min-h-6 w-full items-center gap-2 text-left text-[12.5px] hover:text-foreground disabled:cursor-default"
+        className={cn("flex w-full items-center gap-2 text-left hover:text-foreground disabled:cursor-default", touch ? "min-h-10 text-[13.5px]" : "min-h-6 text-[12.5px]")}
         onClick={() => setOpen(!open)}
         disabled={!hasOutput && !item.diff}
       >

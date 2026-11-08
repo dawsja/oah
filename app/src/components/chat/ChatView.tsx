@@ -88,7 +88,7 @@ function NewChat({ project }: { project: Project }) {
     useChats.getState().send(null, text, { agent: agent.kind, acpId: agent.acpId, model: model ?? undefined, effort: effort || undefined, permission, cwd: draftCwd ?? undefined, images })
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-[12vh]">
         <div className="w-full max-w-[46rem]">
           <div className="mb-6 flex items-end gap-3">
@@ -156,49 +156,54 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
 
   return (
     <CwdContext.Provider value={transcript.cwd ?? meta.cwd}>
-    <div className="flex h-full min-w-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
       <ChatHeader meta={meta} transcript={transcript} model={transcript.model || meta.model || d.model} />
       <Transcript transcript={transcript} className="flex-1" />
-      <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-2 px-6 pb-4">
-        {transcript.plan.length ? <PlanDock items={transcript.plan} /> : null}
-        {transcript.questions[0] ? (
-          <QuestionCard request={transcript.questions[0]} onAnswer={(a) => chats.answerQuestion(meta.id, transcript.questions[0].requestId, a)} />
-        ) : transcript.approvals[0] ? (
-          <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
-        ) : null}
-        {queued.length ? <QueueDock chatId={meta.id} items={queued} running={transcript.running} /> : null}
-        <Composer
-          key={meta.id}
-          draftKey={draftKey(meta.id, project.id)}
-          agent={agent}
-          model={meta.model || transcript.model || d.model}
-          effort={meta.effort}
-          context={transcript.context}
-          models={models}
-          onModel={(id, e) => {
-            if (id !== meta.model) void chats.setModel(meta.id, id)
-            if (e !== meta.effort) void chats.setEffort(meta.id, e)
-          }}
-          onModelsOpen={load}
-          commands={commands}
-          onClear={() => chats.clear(meta.id)}
-          onCompact={(instructions) => chats.compact(meta.id, instructions, permission)}
-          permission={permission}
-          onPermission={(m) => chats.setPermission(meta.id, m)}
-          running={transcript.running}
-          onSend={(text, images, how) => {
-            const running = useChats.getState().transcripts[meta.id]?.running
-            // A command never goes into a turn that's running: it waits its turn.
-            if (running && how === "steer" && !text.startsWith("/")) void chats.steer(meta.id, text, images)
-            else if (running) chats.enqueue(meta.id, text, images)
-            else void chats.send(meta.id, text, { agent: meta.agent, acpId: meta.acpAgent, permission, images })
-          }}
-          onSteerQueued={queued.length ? () => void chats.sendQueued(meta.id) : undefined}
-          onStop={() => chats.interrupt(meta.id)}
-          placeholder={transcript.running ? `Queue a follow-up, or ${STEER_KEY}+Enter to send it now` : "Reply, @ to add files, / for commands"}
-          lockAgent
-          autoFocus
-        />
+      {meta.sleeping && !transcript.running ? <p className="px-6 py-2 text-center text-[12px] text-muted-foreground">Sleeping · send a message to resume this session.</p> : null}
+      <div className="mx-auto flex max-h-[75%] min-h-0 w-full max-w-[46rem] shrink-0 flex-col gap-2 px-6 pb-4">
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden">
+          {transcript.plan.length ? <PlanDock items={transcript.plan} /> : null}
+          {transcript.questions[0] ? (
+            <QuestionCard request={transcript.questions[0]} onAnswer={(a) => chats.answerQuestion(meta.id, transcript.questions[0].requestId, a)} />
+          ) : transcript.approvals[0] ? (
+            <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
+          ) : null}
+        </div>
+        <div className="shrink-0">
+          {queued.length ? <QueueDock chatId={meta.id} items={queued} running={transcript.running} /> : null}
+          <Composer
+            key={meta.id}
+            draftKey={draftKey(meta.id, project.id)}
+            agent={agent}
+            model={meta.model || transcript.model || d.model}
+            effort={meta.effort}
+            context={transcript.context}
+            models={models}
+            onModel={(id, e) => {
+              if (id !== meta.model) void chats.setModel(meta.id, id)
+              if (e !== meta.effort) void chats.setEffort(meta.id, e)
+            }}
+            onModelsOpen={load}
+            commands={commands}
+            onClear={() => chats.clear(meta.id)}
+            onCompact={(instructions) => chats.compact(meta.id, instructions, permission)}
+            permission={permission}
+            onPermission={(m) => chats.setPermission(meta.id, m)}
+            running={transcript.running}
+            onSend={(text, images, how) => {
+              const running = useChats.getState().transcripts[meta.id]?.running
+              // A command never goes into a turn that's running: it waits its turn.
+              if (running && how === "steer" && !text.startsWith("/")) void chats.steer(meta.id, text, images)
+              else if (running) chats.enqueue(meta.id, text, images)
+              else void chats.send(meta.id, text, { agent: meta.agent, acpId: meta.acpAgent, permission, images })
+            }}
+            onSteerQueued={queued.length ? () => void chats.sendQueued(meta.id) : undefined}
+            onStop={() => chats.interrupt(meta.id)}
+            placeholder={transcript.running ? `Queue a follow-up, or ${STEER_KEY}+Enter to send it now` : "Reply, @ to add files, / for commands"}
+            lockAgent
+            autoFocus
+          />
+        </div>
       </div>
     </div>
     </CwdContext.Provider>
@@ -247,8 +252,8 @@ const NONE: Queued[] = []
 function QueueDock({ chatId, items, running }: { chatId: string; items: Queued[]; running: boolean }) {
   const chats = useChats.getState()
   return (
-    <div className="rounded-lg border bg-card text-[12.5px]">
-      <div className="flex h-7 items-center gap-1.5 border-b px-3 text-[11.5px] text-muted-foreground">
+    <div className="mx-auto w-[calc(100%-2rem)] max-w-[40rem] rounded-t-lg border border-b-0 bg-card text-[12.5px]">
+      <div className="flex h-6 items-center gap-1.5 px-3 pt-1 text-[10.5px] text-muted-foreground">
         {running ? null : <Pause className="size-3" />}
         <span className="font-medium text-foreground">{items.length} queued</span>
         <span className="truncate text-faint">{running ? "· sends when the agent finishes" : "· held after the stop"}</span>
@@ -258,7 +263,7 @@ function QueueDock({ chatId, items, running }: { chatId: string; items: Queued[]
           </button>
         )}
       </div>
-      <ul className="max-h-40 overflow-y-auto py-0.5">
+      <ul className="max-h-40 overflow-y-auto pb-1">
         {items.map((q, i) => (
           <li key={q.id} className="group/q flex h-8 items-center gap-2 px-3 hover:bg-accent/50">
             <span className="w-3 shrink-0 text-right font-mono text-[10.5px] text-faint">{i + 1}</span>

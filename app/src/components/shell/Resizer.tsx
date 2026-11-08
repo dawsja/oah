@@ -4,12 +4,17 @@ import { cn } from "@/lib/utils"
 /** A 1px divider with a wider invisible grab area; reports the new size while dragged. `side`
  *  is where the resized pane is: left or right of the divider, or above it ("top": a pane under
  *  the divider that grows upwards). */
-export function Resizer({ width, onWidth, side, min, max }: { width: number; onWidth: (w: number) => void; side: "left" | "right" | "top"; min: number; max: number }) {
+export function Resizer({ width, defaultWidth, onWidth, side, min, max }: { width: number; defaultWidth: number; onWidth: (w: number) => void; side: "left" | "right" | "top"; min: number; max: number }) {
   const start = useRef<{ at: number; w: number } | null>(null)
   const vertical = side === "top"
   return (
     <div
       role="separator"
+      title="Drag to resize · Double-click to reset"
+      onDoubleClick={() => {
+        start.current = null
+        onWidth(Math.min(max, Math.max(min, defaultWidth)))
+      }}
       aria-orientation={vertical ? "horizontal" : "vertical"}
       className={cn(
         "relative z-10 shrink-0 hover:bg-ring/50 active:bg-ring",
