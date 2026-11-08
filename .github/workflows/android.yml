@@ -1,6 +1,7 @@
 name: Android
 
-# The phone app (android/): a v* tag builds the APK and attaches it (and its sha256) to the
+# The phone app (android/): a v* tag builds the APK, publishes it to R2 (dl.oah.dev/android/, see
+# scripts/publish-android-r2.sh) and attaches it (and its sha256) to the
 # GitHub release release.yml makes for the same tag; a manual run leaves it as an artifact (or,
 # given `release`, attaches it to that existing release).
 # It's sideloaded: there's no Play Store listing.
@@ -73,6 +74,18 @@ jobs:
           apk=$(ls android/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk | head -1)
           cp "$apk" "release/oah-android-$version.apk"
           (cd release && sha256sum "oah-android-$version.apk" > "oah-android-$version.apk.sha256")
+      - name: Publish to R2 (dl.oah.dev)
+        if: (startsWith(github.ref, 'refs/tags/v') || inputs.release != '') && env.ANDROID_KEYSTORE_PATH != ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OAH_R2_BUCKET: ${{ vars.OAH_R2_BUCKET }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set; skipping the R2 upload"
+            exit 0
+          fi
+          bash scripts/publish-android-r2.sh
       - uses: actions/upload-artifact@v4
         with:
           name: oah-android

@@ -4,9 +4,9 @@
   "version": "../../app/package.json",
   "identifier": "dev.oah.mobile",
   "build": {
-    "beforeDevCommand": "bun --cwd ../app run mobile:web",
+    "beforeDevCommand": "cd ../app && bun run mobile:web",
     "devUrl": "http://localhost:1422",
-    "beforeBuildCommand": "bun --cwd ../app run mobile:build",
+    "beforeBuildCommand": "cd ../app && bun run mobile:build",
     "frontendDist": "../../app/dist-mobile"
   },
   "app": {
