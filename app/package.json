@@ -1,7 +1,7 @@
 {
   "name": "oah",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "oah — open agent harness: a chat-first desktop app for coding agents",
   "type": "module",
   "scripts": {
