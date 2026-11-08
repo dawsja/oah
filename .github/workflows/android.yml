@@ -1,7 +1,8 @@
 name: Android
 
 # The phone app (android/): a v* tag builds the APK and attaches it (and its sha256) to the
-# GitHub release release.yml makes for the same tag; a manual run leaves it as an artifact.
+# GitHub release release.yml makes for the same tag; a manual run leaves it as an artifact (or,
+# given `release`, attaches it to that existing release).
 # It's sideloaded: there's no Play Store listing.
 #
 # Secrets (without them the APK is unsigned, which Android won't install):
@@ -12,6 +13,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Also attach the APK to this existing release (e.g. v0.3.0)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -26,7 +32,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      # Its default package list still names the retired "tools" package, which fails now.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: NDK
         run: |
           sdkmanager --install "ndk;27.2.12479018"
@@ -71,7 +80,8 @@ jobs:
           if-no-files-found: error
       # Only a signed APK goes on the release: Android won't install an unsigned one.
       - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/v') && env.ANDROID_KEYSTORE_PATH != ''
+        if: (startsWith(github.ref, 'refs/tags/v') || inputs.release != '') && env.ANDROID_KEYSTORE_PATH != ''
         with:
-          name: oah ${{ github.ref_name }}
+          tag_name: ${{ inputs.release || github.ref_name }}
+          name: oah ${{ inputs.release || github.ref_name }}
           files: release/oah-android-*
