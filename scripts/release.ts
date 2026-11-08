@@ -101,6 +101,8 @@ async function realChanges(tag: string, file: string): Promise<string[]> {
 
 /** Which apps a changed file ships in. */
 async function appsFor(file: string, tag: string): Promise<App[]> {
+  // The phone's native voice build runs these through android/.cargo/config.toml.
+  if (/^scripts\/android-/.test(file)) return ["android"]
   // Never shipped: docs, tests, CI and the release pipeline itself.
   if (/(^|\/)(README|CHANGELOG|LICENSE)[^/]*$|\.md$/.test(file)) return NOTHING
   if (/^\.github\/|^scripts\/|^rustfmt\.toml$|^\.gitignore$|^assets\//.test(file)) return NOTHING
