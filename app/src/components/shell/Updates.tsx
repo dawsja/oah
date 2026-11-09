@@ -32,8 +32,10 @@ export function UpdateButton() {
       </span>
     )
   if (s.kind !== "ready") return null
+  // Releases so far say only "oah <version>": no news under the same heading.
+  const notes = s.notes?.trim() && s.notes.trim() !== `oah ${s.version}` ? s.notes.trim() : null
   return (
-    <Tip content={<span className="whitespace-pre-line">{`oah ${s.version}${s.notes ? `\n\n${s.notes}` : ""}`}</span>} side="bottom">
+    <Tip content={<span className="whitespace-pre-line">{`oah ${s.version}${notes ? `\n\n${notes}` : ""}`}</span>} side="bottom">
       <button className="mr-1 flex h-7 items-center gap-1.5 rounded-md bg-primary px-2 text-[11.5px] font-medium text-primary-foreground hover:bg-primary/90" onClick={() => void updater.restart()}>
         <ArrowUpCircle className="size-3.5" />
         {s.installed ? "Restart to finish update" : "Restart to update"}
