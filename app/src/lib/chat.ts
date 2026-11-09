@@ -112,9 +112,6 @@ export type Transcript = {
 
 export const emptyTranscript = (): Transcript => ({ items: [], running: false, plan: [], context: null, model: null, cwd: null, approvals: [], questions: [], models: [], commands: [] })
 
-/** Something is waiting for the user. */
-export const waiting = (t: Transcript | undefined) => !!t && (t.approvals.length > 0 || t.questions.length > 0)
-
 /** What a chat waits on the user for: an approval, a plan to approve, or a question. */
 export type Waiting = "approval" | "plan" | "question"
 

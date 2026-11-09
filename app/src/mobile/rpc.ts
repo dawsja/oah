@@ -47,7 +47,6 @@ export const native = {
 const rpc = <T>(method: string, params: Record<string, unknown> = {}) => invoke<T>("rpc", { method, params })
 
 export const api = {
-  hello: () => rpc<{ desktopName: string; protocol: number; deviceId: string }>("hello"),
   projects: () => rpc<Project[]>("projects.list"),
   agents: () => rpc<{ agents: AgentInfo[]; defaultAgent: AgentKind }>("agents.list"),
   chats: () => rpc<{ metas: ChatMeta[]; running: string[]; busy: string[]; waiting?: Record<string, Waiting> }>("chats.list"),

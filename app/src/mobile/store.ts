@@ -6,7 +6,6 @@ import { create } from "zustand"
 import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript } from "@/lib/chat"
 import type { AgentKind, PermissionMode, Project } from "@/lib/types"
 import { api, native, phoneName, type AgentInfo, type Catalog, type Desktop, type Image, type LinkEvent, type LinkState, type Push, type Waiting } from "./rpc"
-import { go } from "./route"
 
 /** A message typed while the agent worked: it goes when the turn ends, or now if asked. */
 export type Queued = { id: string; text: string; images: Image[] }
@@ -331,9 +330,4 @@ function push(chatId: string, event: ChatEvent) {
     const st = useMobile.getState()
     for (const id of ended) if (st.queued[id]?.length && !st.transcripts[id]?.running) void st.sendQueued(id)
   })
-}
-
-/** Leaves for the desktops list (the link stays up). */
-export function toDesktops() {
-  go("/desktops")
 }

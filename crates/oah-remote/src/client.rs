@@ -258,10 +258,6 @@ impl Client {
         why
     }
 
-    pub fn is_closed(&self) -> bool {
-        self.closed.borrow().is_some()
-    }
-
     /// Ends the session now (a link that went quiet while the phone slept).
     pub fn close(&self, why: &str) {
         self.close_tx.send_if_modified(|c| {

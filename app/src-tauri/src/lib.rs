@@ -345,12 +345,6 @@ pub(crate) fn create_chat(app: &AppHandle, state: &AppState, c: NewChat) -> CmdR
     Ok(meta)
 }
 
-/// The chat's events so far, to replay into the transcript.
-#[tauri::command]
-fn chat_events(state: State<AppState>, chat_id: String) -> CmdResult<Vec<serde_json::Value>> {
-    state.chats.store.events(&chat_id).map_err(err)
-}
-
 /// The chat as it is now: its log, the text still streaming, and whether a turn is running.
 #[tauri::command]
 fn chat_snapshot(state: State<AppState>, chat_id: String) -> CmdResult<chats::Snapshot> {
@@ -430,11 +424,6 @@ fn chat_set_permission(app: AppHandle, state: State<AppState>, chat_id: String, 
 #[tauri::command]
 fn chat_sleep(app: AppHandle, state: State<AppState>, chat_id: String) -> CmdResult<()> {
     state.chats.sleep(&app, &chat_id, std::time::Duration::ZERO)
-}
-
-#[tauri::command]
-fn chat_close(state: State<AppState>, chat_id: String) {
-    state.chats.close(&chat_id)
 }
 
 #[tauri::command]
@@ -534,7 +523,6 @@ pub fn run() {
             chat_markdown,
             attention::app_set_badge,
             chat_create,
-            chat_events,
             chat_snapshot,
             chat_send,
             chat_interrupt,
@@ -546,7 +534,6 @@ pub fn run() {
             chat_image,
             chat_answer_question,
             chat_set_model,
-            chat_close,
             chat_sleep,
             chat_delete,
             chat_rename,

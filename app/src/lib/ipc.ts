@@ -40,7 +40,6 @@ export const ipc = {
   chatCreate: (projectId: string, agent: AgentKind | null, acpAgent: string | null, model: string | null, effort: string | null, cwd: string | null) =>
     call<ChatMeta>("chat_create", { projectId, agent, acpAgent, model, effort, cwd }),
   providerCatalog: (kind: AgentKind, projectId: string | null) => call<Catalog>("provider_catalog", { kind, projectId }),
-  chatEvents: (chatId: string) => call<ChatEvent[]>("chat_events", { chatId }),
   /** The chat as it is now, mid-turn included. */
   chatSnapshot: (chatId: string) => call<Snapshot>("chat_snapshot", { chatId }),
   chatSend: (chatId: string, prompt: { id: string; text: string; images: { mime: string; data: string }[] }, permission: PermissionMode | null) =>
@@ -56,7 +55,6 @@ export const ipc = {
   /** An image saved with a chat, as a `data:` URL. */
   chatImage: (chatId: string, file: string) => call<string>("chat_image", { chatId, file }),
   chatSleep: (chatId: string) => call<void>("chat_sleep", { chatId }),
-  chatClose: (chatId: string) => call<void>("chat_close", { chatId }),
   chatDelete: (chatId: string) => call<void>("chat_delete", { chatId }),
   chatRename: (chatId: string, title: string) => call<ChatMeta>("chat_rename", { chatId, title }),
   chatPin: (chatId: string, pinned: boolean) => call<ChatMeta>("chat_pin", { chatId, pinned }),
