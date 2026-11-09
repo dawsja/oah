@@ -53,6 +53,8 @@ pub struct Chats {
     pub store: ChatStore,
     /// What each running chat is doing, for MCP (`oah_mcp::Hub`); fed every event.
     pub hub: Arc<oah_mcp::Hub>,
+    /// Every chat's text, for search.
+    pub index: oah_mcp::search::Index,
     live: Mutex<HashMap<String, Box<dyn Driver>>>,
     activity: Mutex<HashMap<String, Arc<Mutex<Activity>>>>,
     /// Metas of chats with a live driver, updated as events arrive.
@@ -119,6 +121,7 @@ impl Chats {
         Chats {
             store,
             hub: Arc::new(oah_mcp::Hub::new()),
+            index: oah_mcp::search::Index::new(),
             live: Mutex::new(HashMap::new()),
             activity: Mutex::new(HashMap::new()),
             metas: Arc::new(Mutex::new(HashMap::new())),

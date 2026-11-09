@@ -1,6 +1,6 @@
 // The commands the Rust side exposes (app/src-tauri/src/lib.rs).
 
-import type { ChatEvent, ChatMeta, Decision, ModelOption, SlashCommand, Snapshot } from "./chat"
+import type { ChatEvent, ChatMeta, Decision, ModelOption, SearchHit, SlashCommand, Snapshot } from "./chat"
 import type { Account, AgentKind, AppInfo, Distro, HostCheck, Limits, Location, McpStatus, PermissionMode, Probe, Project, Settings } from "./types"
 
 /** An agent's models and slash commands, for a chat that hasn't started. */
@@ -30,6 +30,8 @@ export const ipc = {
 
   chatList: () => call<ChatMeta[]>("chat_list"),
   chatRunning: () => call<string[]>("chat_running"),
+  /** Chats whose text has every word of `query`, newest first. */
+  chatSearch: (query: string) => call<SearchHit[]>("chat_search", { query }),
   /** The chat as Markdown, for an issue or a PR description. */
   chatMarkdown: (chatId: string) => call<string>("chat_markdown", { chatId }),
   chatCreate: (projectId: string, agent: AgentKind | null, acpAgent: string | null, model: string | null, effort: string | null, cwd: string | null) =>

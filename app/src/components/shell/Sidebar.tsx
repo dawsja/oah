@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Copy, FileText, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, LoaderCircle, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Settings, SquarePen, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Copy, FileText, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, LoaderCircle, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Search, Settings, SquarePen, Trash2 } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { confirmAction, promptText } from "@/components/Prompt"
 import { Tip } from "@/components/Tip"
@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { useApp } from "@/store/app"
 import { copyChatMarkdown, useChats } from "@/store/chats"
+import { openChatSearch } from "./ChatSearch"
 import { useGit } from "@/store/git"
 
 /** Projects, each with its worktrees and their chats; Settings at the bottom. */
@@ -40,6 +41,14 @@ export function Sidebar() {
           <SquarePen className="size-3.5 text-muted-foreground" />
           New chat
           <span className="ml-auto font-mono text-[10.5px] text-faint">Ctrl N</span>
+        </button>
+        <button
+          className="rounded-md mt-1 flex h-8 w-full items-center gap-2 px-2.5 text-left text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          onClick={() => openChatSearch()}
+        >
+          <Search className="size-3.5" />
+          Search chats
+          <span className="ml-auto font-mono text-[10.5px] text-faint">Ctrl K</span>
         </button>
       </div>
 

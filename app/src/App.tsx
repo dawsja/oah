@@ -16,6 +16,7 @@ import { defaultLayout, useApp } from "@/store/app"
 import { useChats } from "@/store/chats"
 import { initVoice } from "@/lib/voice"
 import { initRemote } from "@/lib/remote"
+import { ChatSearch, openChatSearch } from "@/components/shell/ChatSearch"
 import { inTerminal } from "@/lib/terminal"
 import { useTerminals } from "@/store/terminals"
 
@@ -43,6 +44,9 @@ export function App() {
       } else if (inTerminal(e.target) && e.key !== ",") {
         // The shell's keys (Ctrl+N is its own); only the terminal toggle and Settings get out.
         return
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "k" || e.key === "K")) {
+        e.preventDefault()
+        openChatSearch()
       } else if (e.ctrlKey && (e.key === "n" || e.key === "N")) {
         e.preventDefault()
         useApp.setState({ chatId: null, draftCwd: null, view: "chat" })
@@ -92,6 +96,7 @@ export function App() {
       <PromptHost />
       <PhonePairingHost />
       <ImageLightbox />
+      <ChatSearch />
       <RemoteFolderHost />
     </TooltipProvider>
   )

@@ -8,6 +8,7 @@
 pub mod bridge;
 pub mod host;
 pub mod hub;
+pub mod search;
 pub mod server;
 pub mod tools;
 pub mod transcript;

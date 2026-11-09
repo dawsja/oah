@@ -283,6 +283,17 @@ fn chat_running(state: State<AppState>) -> Vec<String> {
     state.chats.running()
 }
 
+/// Chats whose text has every word of `query`, newest first.
+#[tauri::command]
+async fn chat_search(app: AppHandle, query: String) -> CmdResult<Vec<oah_mcp::search::Hit>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.chats.index.search(&state.chats.store, &query, 50)
+    })
+    .await
+    .map_err(err)
+}
+
 /// The chat as Markdown for people (an issue, a PR description): its title, what was asked and
 /// answered, one line per tool, failures' output.
 #[tauri::command]
@@ -514,6 +525,7 @@ pub fn run() {
             provider_catalog,
             chat_list,
             chat_running,
+            chat_search,
             chat_markdown,
             chat_create,
             chat_events,

@@ -115,6 +115,9 @@ export const emptyTranscript = (): Transcript => ({ items: [], running: false, p
 /** Something is waiting for the user. */
 export const waiting = (t: Transcript | undefined) => !!t && (t.approvals.length > 0 || t.questions.length > 0)
 
+/** A chat found by its text (`chat_search`): the line around the match, and where it was. */
+export type SearchHit = { chatId: string; part: "user" | "agent" | "tool"; snippet: string; matches: number }
+
 let seq = 0
 const uid = (p: string) => `${p}-${++seq}`
 
