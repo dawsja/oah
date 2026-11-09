@@ -2835,7 +2835,7 @@ dependencies = [
 
 [[package]]
 name = "oah-agents"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "base64 0.22.1",
  "keyring",
@@ -2848,7 +2848,7 @@ dependencies = [
 
 [[package]]
 name = "oah-android"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "base64 0.22.1",
  "oah-remote",
@@ -2864,7 +2864,7 @@ dependencies = [
 
 [[package]]
 name = "oah-app"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "base64 0.22.1",
  "gethostname",
@@ -2895,7 +2895,7 @@ dependencies = [
 
 [[package]]
 name = "oah-core"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "dirs 6.0.0",
  "serde",
@@ -2907,7 +2907,7 @@ dependencies = [
 
 [[package]]
 name = "oah-git"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "base64 0.22.1",
  "oah-core",
@@ -2919,7 +2919,7 @@ dependencies = [
 
 [[package]]
 name = "oah-mcp"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "getrandom 0.3.4",
  "httparse",
@@ -2935,7 +2935,7 @@ dependencies = [
 
 [[package]]
 name = "oah-remote"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -2952,7 +2952,7 @@ dependencies = [
 
 [[package]]
 name = "oah-transport"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "oah-core",
  "portable-pty",
@@ -2963,7 +2963,7 @@ dependencies = [
 
 [[package]]
 name = "oah-voice"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "oah-core",
  "serde",
