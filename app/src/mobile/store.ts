@@ -4,7 +4,7 @@
 import { toast } from "sonner"
 import { create } from "zustand"
 import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript } from "@/lib/chat"
-import type { AgentKind, PermissionMode, Project } from "@/lib/types"
+import { isOpencode, type AgentKind, type PermissionMode, type Project } from "@/lib/types"
 import { api, native, phoneName, type AgentInfo, type Catalog, type Desktop, type Image, type LinkEvent, type LinkState, type Push, type Waiting } from "./rpc"
 
 /** A message typed while the agent worked: it goes when the turn ends, or now if asked. */
@@ -163,7 +163,7 @@ export const useMobile = create<Store>((set, get) => ({
     try {
       if (!id) {
         if (!o.projectId || !o.agent) return null
-        const meta = await api.create(o.projectId, o.agent.kind, o.agent.acpId, o.model || null)
+        const meta = await api.create(o.projectId, o.agent.kind, o.model || null)
         id = meta.id
         // Open it before sending, so every event of the first turn arrives here.
         const snap = await api.open(meta.id)
@@ -183,7 +183,7 @@ export const useMobile = create<Store>((set, get) => ({
   async steer(chatId, text, images) {
     const meta = get().metas.find((m) => m.id === chatId)
     // An agent that can't take a message mid-turn is stopped first (as on the desktop).
-    if (get().transcripts[chatId]?.running && (meta?.agent === "opencode" || meta?.agent === "acp")) await get().interrupt(chatId)
+    if (get().transcripts[chatId]?.running && isOpencode(meta?.agent)) await get().interrupt(chatId)
     await get().send(chatId, text, images)
   },
 
@@ -256,7 +256,7 @@ export const useMobile = create<Store>((set, get) => ({
   },
 
   async catalog(agent, projectId) {
-    const key = `${agent.kind}:${agent.acpId ?? ""}:${projectId ?? ""}`
+    const key = `${agent.kind}:${projectId ?? ""}`
     if (get().catalogs[key]) return get().catalogs[key]
     const c = await api.catalog(agent.kind, projectId).catch(() => null)
     if (c) set((s) => ({ catalogs: { ...s.catalogs, [key]: c } }))

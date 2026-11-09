@@ -71,8 +71,7 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
     let args: Vec<String> = match kind {
         AgentKind::Claude => vec!["auth".into(), "status".into(), "--json".into()],
         AgentKind::Codex => vec!["login".into(), "status".into()],
-        AgentKind::Opencode => vec!["auth".into(), "list".into()],
-        AgentKind::Acp => return Account { error: Some("sign in with the agent's own command".into()), ..Default::default() },
+        AgentKind::Opencode | AgentKind::Opencode2 => vec!["auth".into(), "list".into()],
     };
     let cwd = if matches!(location, Location::Local) { oah_core::paths::home_dir().to_string_lossy().into_owned() } else { "~".into() };
     let out = match oah_transport::run(&Spec { location, cwd: &cwd, program: &prog, args, env: &[] }, None, Duration::from_secs(20)) {
@@ -94,7 +93,7 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
             }
             a
         }
-        AgentKind::Opencode | AgentKind::Acp => parse_opencode_auth(&format!("{}\n{}", out.stdout, out.stderr)),
+        AgentKind::Opencode | AgentKind::Opencode2 => parse_opencode_auth(&format!("{}\n{}", out.stdout, out.stderr)),
     }
 }
 
@@ -401,28 +400,71 @@ pub fn opencode_go_answer(status: u16, body: &str, v: &Value) -> Result<Vec<Limi
     Ok(out)
 }
 
-/// The `opencode-go` API key: `$OPENCODE_AUTH_CONTENT`, else `auth.json` in OpenCode's data
-/// folder (`$XDG_DATA_HOME/opencode`, or `~/.local/share/opencode`).
+/// Where 2.x keeps credentials (`opencode.db`, table `credential`): the `opencode-go` one's
+/// value (`{"type": "api", "key": …}`), read with `sqlite3`, else Python, wherever OpenCode is.
+const GO_KEY_FROM_DB: &str = r#"db="${OPENCODE_DB:-${XDG_DATA_HOME:-$HOME/.local/share}/opencode/opencode.db}"
+[ -f "$db" ] || exit 0
+q="SELECT value FROM credential WHERE integration_id='opencode-go' ORDER BY active DESC, time_created DESC LIMIT 1"
+if command -v sqlite3 >/dev/null 2>&1; then sqlite3 -readonly "$db" "$q"
+elif command -v python3 >/dev/null 2>&1; then python3 -I -c 'import sqlite3, sys
+c = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)
+r = c.execute(sys.argv[2]).fetchone()
+print(r[0] if r else "")' "$db" "$q"
+fi"#;
+
+/// The `opencode-go` API key: `$OPENCODE_AUTH_CONTENT`; else 2.x's `opencode.db`; else 1.x's
+/// `auth.json` (both in OpenCode's data folder, `$XDG_DATA_HOME/opencode` or
+/// `~/.local/share/opencode`); else `$OPENCODE_API_KEY`.
 fn opencode_go_key(location: &Location, env: &[EnvVar]) -> Option<String> {
-    let text = match location {
-        Location::Local => local_env(env, "OPENCODE_AUTH_CONTENT").or_else(|| {
+    let from_auth = |text: &str| -> Option<String> {
+        let v: Value = serde_json::from_str(text).ok()?;
+        let e = &v["opencode-go"];
+        (e["type"] == "api").then(|| e["key"].as_str().map(String::from)).flatten().filter(|k| !k.is_empty())
+    };
+    let from_db = |text: &str| -> Option<String> {
+        let v: Value = serde_json::from_str(text.trim()).ok()?;
+        v["key"].as_str().filter(|k| !k.is_empty()).map(String::from)
+    };
+    let sh = |script: &str| -> Option<String> {
+        let args = vec!["-c".into(), script.into()];
+        oah_transport::run(&Spec { location, cwd: "~", program: "sh", args, env }, None, Duration::from_secs(20))
+            .ok()
+            .filter(|o| o.ok() && !o.stdout.trim().is_empty())
+            .map(|o| o.stdout)
+    };
+    match location {
+        Location::Local => {
+            if let Some(k) = local_env(env, "OPENCODE_AUTH_CONTENT").and_then(|t| from_auth(&t)) {
+                return Some(k);
+            }
+            if let Some(k) = cfg!(unix).then(|| sh(GO_KEY_FROM_DB)).flatten().and_then(|t| from_db(&t)) {
+                return Some(k);
+            }
             let data = local_env(env, "XDG_DATA_HOME")
                 .filter(|s| !s.is_empty())
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| credential_home(env).join(".local").join("share"));
-            std::fs::read_to_string(data.join("opencode").join("auth.json")).ok()
-        }),
-        _ => {
-            let args = vec!["-c".into(), r#"if [ "${OPENCODE_AUTH_CONTENT+x}" = x ]; then printf '%s' "$OPENCODE_AUTH_CONTENT"; else cat "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null; fi"#.into()];
-            oah_transport::run(&Spec { location, cwd: "~", program: "sh", args, env }, None, Duration::from_secs(20))
-                .ok()
-                .filter(|o| o.ok())
-                .map(|o| o.stdout)
+            if let Some(k) = std::fs::read_to_string(data.join("opencode").join("auth.json")).ok().and_then(|t| from_auth(&t)) {
+                return Some(k);
+            }
+            local_env(env, "OPENCODE_API_KEY").filter(|k| !k.is_empty())
         }
-    }?;
-    let v: Value = serde_json::from_str(&text).ok()?;
-    let e = &v["opencode-go"];
-    (e["type"] == "api").then(|| e["key"].as_str().map(String::from)).flatten().filter(|k| !k.is_empty())
+        _ => {
+            if let Some(k) =
+                sh(r#"[ "${OPENCODE_AUTH_CONTENT+x}" = x ] && printf '%s' "$OPENCODE_AUTH_CONTENT""#).and_then(|t| from_auth(&t))
+            {
+                return Some(k);
+            }
+            if let Some(k) = sh(GO_KEY_FROM_DB).and_then(|t| from_db(&t)) {
+                return Some(k);
+            }
+            if let Some(k) = sh(r#"cat "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null"#).and_then(|t| from_auth(&t))
+            {
+                return Some(k);
+            }
+            sh(r#"printf '%s' "$OPENCODE_API_KEY""#).map(|k| k.trim().to_string()).filter(|k| !k.is_empty())
+        }
+    }
 }
 
 // ---- Codex -----------------------------------------------------------------------------------
@@ -502,8 +544,7 @@ pub fn open_login(kind: AgentKind, binary: &str, location: &Location) -> Result<
     let line = match kind {
         AgentKind::Claude => format!("{prog} auth login"),
         AgentKind::Codex => format!("{prog} login"),
-        AgentKind::Opencode => format!("{prog} auth login"),
-        AgentKind::Acp => return Err("sign in with the agent's own command".into()),
+        AgentKind::Opencode | AgentKind::Opencode2 => format!("{prog} auth login"),
     };
     match location {
         Location::Local => {}

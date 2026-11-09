@@ -56,11 +56,11 @@ pub const CHAT_CLOSE: &str = "chat.close";
 pub const HOST_METHODS: &[&str] = &[
     // → [{id, name, location, path}]
     "projects.list",
-    // → {agents: [{kind, acpId, name, defaultModel, permissionMode}], defaultAgent}
+    // → {agents: [{kind, name, defaultModel, permissionMode}], defaultAgent}
     "agents.list",
     // → {metas, running, busy}
     "chats.list",
-    // {projectId, agent?, acpAgent?, model?, effort?, cwd?} → meta
+    // {projectId, agent?, model?, effort?, cwd?} → meta
     "chat.create",
     // {chatId, prompt: {id, text, images: [{mime, data}]}, permission?}
     "chat.send",

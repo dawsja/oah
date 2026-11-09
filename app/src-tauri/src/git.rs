@@ -143,7 +143,7 @@ pub async fn git_suggest_message(app: AppHandle, project_id: String, cwd: Option
         let first = project.default_agent.unwrap_or(settings.providers.default_agent);
         let mut tried = Vec::new();
         for kind in std::iter::once(first).chain([AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode]) {
-            if kind == AgentKind::Acp || tried.contains(&kind) {
+            if tried.contains(&kind) {
                 continue;
             }
             tried.push(kind);
@@ -183,7 +183,7 @@ fn kind_label(kind: AgentKind) -> &'static str {
         AgentKind::Claude => "Claude Code",
         AgentKind::Codex => "Codex",
         AgentKind::Opencode => "OpenCode",
-        AgentKind::Acp => "ACP agent",
+        AgentKind::Opencode2 => "OpenCode 2",
     }
 }
 

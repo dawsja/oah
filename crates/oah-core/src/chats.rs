@@ -15,8 +15,6 @@ pub struct ChatMeta {
     pub id: String,
     pub project_id: String,
     pub agent: AgentKind,
-    /// Which added ACP agent, when `agent` is `Acp`.
-    pub acp_agent: Option<String>,
     /// Empty: the agent's default.
     pub model: String,
     /// Reasoning effort (`low` … `max`); empty: the model's default.
@@ -43,7 +41,6 @@ impl Default for ChatMeta {
             id: String::new(),
             project_id: String::new(),
             agent: AgentKind::Claude,
-            acp_agent: None,
             model: String::new(),
             effort: String::new(),
             title: String::new(),

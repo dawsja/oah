@@ -62,17 +62,9 @@ impl Host for AppHost {
         worktree::add(&r, &path, branch.trim(), &base).map(info)
     }
 
-    fn check_agent(&self, kind: AgentKind, acp_agent: Option<&str>, location: &Location) -> AgentCheck {
+    fn check_agent(&self, kind: AgentKind, location: &Location) -> AgentCheck {
         let s = self.settings();
-        let Some(provider) = s.providers.for_chat(kind, acp_agent) else {
-            return AgentCheck { error: Some("no such agent".into()), ..Default::default() };
-        };
-        let binary = provider.binary_on(location);
-        if kind == AgentKind::Acp {
-            // Only starting it tells whether an added agent works.
-            let p = probe::probe(kind, &binary);
-            return AgentCheck { installed: p.found, version: p.version, error: p.error.or(p.outdated), ..Default::default() };
-        }
+        let binary = s.providers.get(kind).binary_on(location);
         let acct = account::account(kind, &binary, location);
         // `probe` looks on this computer only; elsewhere, a sign-in answer means it's there.
         let (installed, version, perr) = match location {

@@ -8,7 +8,7 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use oah_core::settings::{AgentKind, Location};
+use oah_core::settings::{AgentKind, EnvVar, Location};
 use oah_transport::Spec;
 
 use crate::driver::DriverResult;
@@ -39,8 +39,9 @@ pub fn cheapest(kind: AgentKind, binary: &str, location: &Location, cwd: &str) -
                     .unwrap_or_default();
             pick_codex(&models)
         }
-        AgentKind::Opencode => pick_opencode(&crate::acp::opencode_models(binary, location, cwd).unwrap_or_default()),
-        AgentKind::Acp => Cheap { model: None, label: "default model".into() },
+        AgentKind::Opencode | AgentKind::Opencode2 => {
+            pick_opencode(&crate::acp::opencode_models(binary, location, cwd, &[]).unwrap_or_default())
+        }
     };
     PICKED.lock().unwrap().push((kind, location.clone(), c.clone()));
     c
@@ -85,8 +86,7 @@ pub fn ask(kind: AgentKind, binary: &str, location: &Location, cwd: &str, cheap:
                 .map(String::from)
                 .to_vec()
         }
-        AgentKind::Opencode => vec!["run".into()],
-        AgentKind::Acp => return Err("added ACP agents can't answer one-off questions".into()),
+        AgentKind::Opencode | AgentKind::Opencode2 => vec!["run".into()],
     };
     if let Some(m) = &cheap.model {
         args.extend(["--model".into(), m.clone()]);
@@ -95,8 +95,16 @@ pub fn ask(kind: AgentKind, binary: &str, location: &Location, cwd: &str, cheap:
         // The question comes on stdin.
         args.push("-".into());
     }
+    // OpenCode answers read-only, like the others: no edits, commands or fetches, never shared.
+    let env: Vec<EnvVar> = if kind.is_opencode() {
+        [("OPENCODE_PERMISSION", r#"{"edit":"deny","bash":"deny","webfetch":"deny"}"#), ("OPENCODE_DISABLE_SHARE", "1")]
+            .map(|(k, v)| EnvVar { key: k.into(), value: v.into(), in_keychain: false })
+            .to_vec()
+    } else {
+        vec![]
+    };
     let out =
-        oah_transport::run(&Spec { location, cwd, program: &prog, args, env: &[] }, Some(question.as_bytes()), Duration::from_secs(180))?;
+        oah_transport::run(&Spec { location, cwd, program: &prog, args, env: &env }, Some(question.as_bytes()), Duration::from_secs(180))?;
     if !out.ok() {
         let why = out.stderr.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("no answer").to_string();
         return Err(if out.code == Some(127) { format!("{prog} isn't installed there") } else { why });

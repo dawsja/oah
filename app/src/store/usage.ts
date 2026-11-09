@@ -51,7 +51,7 @@ export const useUsage = create<UsageStore>((set, get) => ({
 
 /** The agents whose limits are worth asking for: those on in Settings → Providers. */
 export function limitAgents(settings: Settings | null): AgentKind[] {
-  return LIMIT_AGENTS.filter((a) => a === "acp" || settings?.providers[a].enabled !== false)
+  return LIMIT_AGENTS.filter((a) => settings?.providers[a].enabled !== false || (a === "opencode" && settings?.providers.opencode2?.enabled !== false))
 }
 
 /** The agents with limits to show at a location: on in Settings, and installed there (an

@@ -18,16 +18,14 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { agentKey, agentName, parseAgentKey, type AgentRef } from "@/lib/agents"
 import { effortLabel, type ContextFill, type ModelOption, type SlashCommand } from "@/lib/chat"
 import { ContextRing } from "./ContextRing"
 import { filterCommands, menuCommands, ownCommand, slashQuery, type MenuCommand, type OwnCommand } from "@/lib/commands"
 import { fuzzyPaths, mention, mentionAt } from "@/lib/fuzzy"
 import { git } from "@/lib/git"
 import { attachmentMime, readAttachment, MAX_IMAGE, type Attachment } from "@/lib/attachments"
-import { PERMISSION_LABEL, type PermissionMode } from "@/lib/types"
+import { AGENT_LABEL, PERMISSION_LABEL, type AgentKind, type PermissionMode } from "@/lib/types"
 import { PERMISSION_ICON, PERMISSION_TONE } from "@/components/permission"
-import { useApp } from "@/store/app"
 import { useScope } from "@/store/git"
 import { drafts } from "@/store/drafts"
 import { cn } from "@/lib/utils"
@@ -35,10 +33,10 @@ import { PromptHistory, historyBoundary } from "@/lib/prompt-history"
 import { Dictation } from "./Dictation"
 
 export type ComposerProps = {
-  agent: AgentRef
+  agent: AgentKind
   /** Agents to pick from (a new chat). */
-  agents?: AgentRef[]
-  onAgent?: (a: AgentRef) => void
+  agents?: AgentKind[]
+  onAgent?: (a: AgentKind) => void
   model: string
   /** Reasoning effort; empty: the model's default. */
   effort?: string
@@ -106,7 +104,6 @@ export function Composer(p: ComposerProps) {
     setMenu(null)
   }
   const PermissionIcon = PERMISSION_ICON[p.permission]
-  const settings = useApp((s) => s.settings)
   const scope = useScope()
   const [menu, setMenu] = useState<{ start: number; query: string; items: string[]; index: number } | null>(null)
   const updateMenu = async (value: string, caret: number) => {
@@ -144,7 +141,7 @@ export function Composer(p: ComposerProps) {
     setSlash({ query: q, index: 0 })
   }
   // Worked out on each render, so the list fills in when the agent's commands arrive.
-  const slashItems = slashState ? filterCommands(menuCommands(p.agent.kind, p.commands ?? [], inChat), slashState.query).slice(0, 60) : []
+  const slashItems = slashState ? filterCommands(menuCommands(p.agent, p.commands ?? [], inChat), slashState.query).slice(0, 60) : []
   const slash = slashState && slashItems.length ? { items: slashItems, index: Math.min(slashState.index, slashItems.length - 1) } : null
   const [modelOpen, setModelOpen] = useState(false)
   const runOwn = (own: OwnCommand, args: string) => {
@@ -184,7 +181,7 @@ export function Composer(p: ComposerProps) {
       return
     }
     // Codex skills are mentioned with $ in the message; they don't run by themselves.
-    const insert = c.skill && p.agent.kind === "codex" ? `$${c.name} ` : `/${c.name} `
+    const insert = c.skill && p.agent === "codex" ? `$${c.name} ` : `/${c.name} `
     setText(insert)
     requestAnimationFrame(() => {
       el?.focus({ preventScroll: true })
@@ -439,17 +436,17 @@ export function Composer(p: ComposerProps) {
         <DropdownMenu>
           <DropdownMenuTrigger asChild disabled={p.lockAgent}>
             <button className="rounded-md flex h-7 items-center gap-1.5 px-2 text-[12px] font-medium hover:bg-accent disabled:hover:bg-transparent">
-              <AgentGlyph agent={p.agent.kind} className="size-3.5" />
-              {settings ? agentName(settings, p.agent) : ""}
+              <AgentGlyph agent={p.agent} className="size-3.5" />
+              {AGENT_LABEL[p.agent]}
               {p.lockAgent ? null : <ChevronDown className="size-3 text-muted-foreground" />}
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-56">
             <DropdownMenuLabel>Agent</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={agentKey(p.agent)} onValueChange={(v) => p.onAgent?.(parseAgentKey(v))}>
+            <DropdownMenuRadioGroup value={p.agent} onValueChange={(v) => p.onAgent?.(v as AgentKind)}>
               {(p.agents ?? [p.agent]).map((a) => (
-                <DropdownMenuRadioItem key={agentKey(a)} value={agentKey(a)}>
-                  <AgentGlyph agent={a.kind} className="size-3.5" /> {settings ? agentName(settings, a) : ""}
+                <DropdownMenuRadioItem key={a} value={a}>
+                  <AgentGlyph agent={a} className="size-3.5" /> {AGENT_LABEL[a]}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>

@@ -71,6 +71,9 @@ describe("shownAgents", () => {
   it("leaves out agents not installed there, and ones turned off", () => {
     expect(shownAgents(settings(true), { claude: none, codex: { ...none, missing: true }, opencode: { ...none, missing: true } })).toEqual(["claude"])
     expect(shownAgents(settings(false), {})).toEqual(["claude", "opencode"])
+    // OpenCode 2 alone still shows OpenCode Go's limits (one account).
+    const only2 = { providers: { claude: { enabled: true }, codex: { enabled: true }, opencode: { enabled: false }, opencode2: { enabled: true } } } as unknown as Settings
+    expect(shownAgents(only2, {})).toEqual(["claude", "codex", "opencode"])
     // Not loaded yet: shown (loading), until the app says they're missing.
     expect(shownAgents(settings(true), {})).toEqual(["claude", "codex", "opencode"])
   })

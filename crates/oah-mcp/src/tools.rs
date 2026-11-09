@@ -69,7 +69,7 @@ pub fn list(settings: &Settings) -> Vec<Value> {
     let (worktree, cwd) = place();
     let wait = json!({"type": "boolean", "description": "Wait for the turn to finish or to need you (an approval or a question) before returning. Default true."});
     let timeout = json!({"type": "integer", "minimum": 1, "maximum": MAX_WAIT, "description": "Longest wait, in seconds (default 300). On timeout the session keeps running: call wait_for_session."});
-    let agent = json!({"type": "string", "enum": ["claude", "codex", "opencode", "acp"], "description": "The agent CLI: Claude Code, Codex, OpenCode, or an added ACP agent (then also acp_agent). Default: the project's, else oah's default."});
+    let agent = json!({"type": "string", "enum": ["claude", "codex", "opencode", "opencode2"], "description": "The agent CLI: Claude Code, Codex, OpenCode (`opencode`) or OpenCode 2 (`opencode2`). Default: the project's, else oah's default."});
     let mut tools = vec![
         tool("list_projects", "List projects", "The projects open in oah (on this computer, in WSL or over SSH). Sessions run in one of them.", json!({}), &[], true, false),
         tool("list_worktrees", "List worktrees", "A project's git worktrees (one branch checked out per folder). A session can run in one so several work on the repo at once.",
@@ -79,7 +79,6 @@ pub fn list(settings: &Settings) -> Vec<Value> {
         tool("list_models", "List models and efforts", "The models an agent offers and each one's reasoning effort levels (low … max), plus its slash commands. Pass session_id for what a running session's agent reports.",
             json!({
                 "agent": agent.clone(),
-                "acp_agent": {"type": "string", "description": "The added ACP agent's id (list_agents)."},
                 "project_id": {"type": "string", "description": "Ask the CLI where this project runs."},
                 "session_id": {"type": "string", "description": "Instead: the models a started session's agent reported."},
             }), &[], true, false),
@@ -93,7 +92,6 @@ pub fn list(settings: &Settings) -> Vec<Value> {
             json!({
                 "project_id": {"type": "string"},
                 "agent": agent,
-                "acp_agent": {"type": "string"},
                 "model": {"type": "string", "description": "A model id from list_models. Default: the agent's."},
                 "effort": {"type": "string", "description": "A reasoning effort the model offers (list_models). Default: the model's."},
                 "permission": {"type": "string", "enum": ["ask", "acceptEdits", "plan", "fullAccess"], "description": PERMISSION},
@@ -470,7 +468,6 @@ fn session_json(m: &ChatMeta, state: &str) -> Value {
         "title": m.title,
         "projectId": m.project_id,
         "agent": m.agent,
-        "acpAgent": m.acp_agent,
         "model": m.model,
         "effort": m.effort,
         "cwd": m.cwd,
@@ -512,7 +509,7 @@ fn list_agents(ctx: &Ctx, settings: &Settings, a: Value) -> ToolResult {
         Some(id) => settings.projects.iter().find(|p| p.id == id).map(|p| p.location.clone()).ok_or("no such project")?,
         None => Location::Local,
     };
-    let mut agents: Vec<(AgentKind, Option<String>, String, bool, String)> = AgentKind::ALL
+    let agents: Vec<(AgentKind, &str, bool, String)> = AgentKind::ALL
         .iter()
         .map(|&k| {
             let p = settings.providers.get(k);
@@ -520,21 +517,18 @@ fn list_agents(ctx: &Ctx, settings: &Settings, a: Value) -> ToolResult {
                 AgentKind::Claude => "Claude Code",
                 AgentKind::Codex => "Codex",
                 AgentKind::Opencode => "OpenCode",
-                AgentKind::Acp => "ACP",
+                AgentKind::Opencode2 => "OpenCode 2",
             };
-            (k, None, name.to_string(), p.enabled, p.default_model.clone())
+            (k, name, p.enabled, p.default_model.clone())
         })
         .collect();
-    for acp in &settings.providers.acp {
-        agents.push((AgentKind::Acp, Some(acp.id.clone()), acp.name.clone(), acp.provider.enabled, acp.provider.default_model.clone()));
-    }
     // Each check runs a CLI (a few seconds); all at once.
     let checks: Vec<_> = std::thread::scope(|s| {
         let handles: Vec<_> = agents
             .iter()
-            .map(|(k, acp, _, enabled, _)| {
+            .map(|(k, _, enabled, _)| {
                 let location = &location;
-                s.spawn(move || enabled.then(|| ctx.host.check_agent(*k, acp.as_deref(), location)))
+                s.spawn(move || enabled.then(|| ctx.host.check_agent(*k, location)))
             })
             .collect();
         handles.into_iter().map(|h| h.join().unwrap_or(None)).collect()
@@ -542,11 +536,8 @@ fn list_agents(ctx: &Ctx, settings: &Settings, a: Value) -> ToolResult {
     let list: Vec<Value> = agents
         .into_iter()
         .zip(checks)
-        .map(|((kind, acp, name, enabled, model), check)| {
-            let mut v = json!({"agent": kind, "name": name, "enabled": enabled, "default": acp.is_none() && kind == settings.providers.default_agent});
-            if let Some(id) = acp {
-                v["acpAgent"] = json!(id);
-            }
+        .map(|((kind, name, enabled, model), check)| {
+            let mut v = json!({"agent": kind, "name": name, "enabled": enabled, "default": kind == settings.providers.default_agent});
             if !model.is_empty() {
                 v["defaultModel"] = json!(model);
             }
@@ -563,7 +554,6 @@ fn list_models(ctx: &Ctx, a: Value) -> ToolResult {
     #[derive(Deserialize)]
     struct A {
         agent: Option<AgentKind>,
-        acp_agent: Option<String>,
         project_id: Option<String>,
         session_id: Option<String>,
     }
@@ -573,9 +563,6 @@ fn list_models(ctx: &Ctx, a: Value) -> ToolResult {
         let s = ctx.hub.status(&id);
         if !s.models.is_empty() {
             return Ok(to_text(&json!({"agent": m.agent, "current": s.model, "models": s.models})));
-        }
-        if m.agent == AgentKind::Acp {
-            return Err("this session's agent hasn't listed its models yet: send it a message first".into());
         }
         return list_models(ctx, json!({"agent": m.agent, "project_id": m.project_id}));
     }
@@ -587,13 +574,6 @@ fn list_models(ctx: &Ctx, a: Value) -> ToolResult {
             .and_then(|p| p.default_agent)
             .unwrap_or(settings.providers.default_agent)
     });
-    if kind == AgentKind::Acp {
-        let _ = a.acp_agent;
-        return Err(
-            "an ACP agent lists its models once a session runs: create_session, send a message, then list_models with its session_id"
-                .into(),
-        );
-    }
     let key = format!("{kind:?}|{}", a.project_id.as_deref().unwrap_or(""));
     if let Some((at, v)) = ctx.catalogs.lock().unwrap().get(&key) {
         if at.elapsed() < CATALOG_TTL {
@@ -640,7 +620,6 @@ fn create_session(ctx: &Ctx, settings: &Settings, a: Value, progress: Progress) 
     struct A {
         project_id: String,
         agent: Option<AgentKind>,
-        acp_agent: Option<String>,
         model: Option<String>,
         effort: Option<String>,
         permission: Option<PermissionMode>,
@@ -657,14 +636,7 @@ fn create_session(ctx: &Ctx, settings: &Settings, a: Value, progress: Progress) 
         return Err("no such project: list_projects shows them".into());
     }
     let cwd = folder(ctx, &a.project_id, a.worktree.as_deref(), a.cwd, true)?;
-    let mut m = ctx.host.create(NewChat {
-        project_id: a.project_id,
-        agent: a.agent,
-        acp_agent: a.acp_agent,
-        model: a.model,
-        effort: a.effort,
-        cwd,
-    })?;
+    let mut m = ctx.host.create(NewChat { project_id: a.project_id, agent: a.agent, model: a.model, effort: a.effort, cwd })?;
     if let Some(t) = a.title.filter(|t| !t.trim().is_empty()) {
         m = ctx.host.rename(&m.id, &t)?;
     }

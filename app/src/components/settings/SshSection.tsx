@@ -121,6 +121,7 @@ const TOOLS = [
   ["claude", "Claude Code"],
   ["codex", "Codex"],
   ["opencode", "OpenCode"],
+  ["opencode2", "OpenCode 2"],
   ["git", "git"],
   ["gh", "gh"],
 ] as const

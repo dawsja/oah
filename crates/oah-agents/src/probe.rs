@@ -26,6 +26,7 @@ pub struct Probe {
 fn minimums(kind: AgentKind) -> &'static [&'static str] {
     match kind {
         AgentKind::Opencode => &["1.18.31", "2.0.14"],
+        AgentKind::Opencode2 => &["2.0.14"],
         _ => &[],
     }
 }
@@ -41,7 +42,9 @@ pub fn minimum(kind: AgentKind, version: &str) -> Option<&'static str> {
 pub fn outdated(kind: AgentKind, version: &str) -> Option<String> {
     let min = minimum(kind, version)?;
     older(version, min).then(|| match kind {
-        AgentKind::Opencode => format!("OpenCode {version} is too old for chats. Update to {min} or newer (`opencode upgrade`)."),
+        AgentKind::Opencode | AgentKind::Opencode2 => {
+            format!("OpenCode {version} is too old for chats. Update to {min} or newer (`opencode upgrade`).")
+        }
         _ => format!("Version {version} is too old for chats. Update to {min} or newer."),
     })
 }
@@ -65,7 +68,7 @@ pub fn older(a: &str, b: &str) -> bool {
 pub fn resolve(kind: AgentKind, binary: &str) -> Option<PathBuf> {
     let b = binary.trim();
     let b = if b.is_empty() { kind.default_binary() } else { b };
-    which::which(b).ok()
+    oah_transport::find_local(b)
 }
 
 pub fn probe(kind: AgentKind, binary: &str) -> Probe {
@@ -157,6 +160,8 @@ mod tests {
         assert_eq!(outdated(AgentKind::Opencode, "2.1.0"), None);
         assert!(outdated(AgentKind::Opencode, "0.15.0").unwrap().contains("1.18.31"));
         assert_eq!(outdated(AgentKind::Opencode, "1.19.5"), None);
+        assert!(outdated(AgentKind::Opencode2, "1.19.5").unwrap().contains("2.0.14"), "opencode2 is 2.x only");
+        assert_eq!(outdated(AgentKind::Opencode2, "2.2.6"), None);
         assert_eq!(outdated(AgentKind::Claude, "0.1.0"), None);
     }
 

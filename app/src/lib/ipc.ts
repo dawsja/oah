@@ -37,8 +37,8 @@ export const ipc = {
   chatMarkdown: (chatId: string) => call<string>("chat_markdown", { chatId }),
   /** The taskbar/dock badge and window title: how many chats wait (`icon`: Windows' overlay, square RGBA). */
   setBadge: (count: number, icon: number[] | null) => call<void>("app_set_badge", { count, icon }),
-  chatCreate: (projectId: string, agent: AgentKind | null, acpAgent: string | null, model: string | null, effort: string | null, cwd: string | null) =>
-    call<ChatMeta>("chat_create", { projectId, agent, acpAgent, model, effort, cwd }),
+  chatCreate: (projectId: string, agent: AgentKind | null, model: string | null, effort: string | null, cwd: string | null) =>
+    call<ChatMeta>("chat_create", { projectId, agent, model, effort, cwd }),
   providerCatalog: (kind: AgentKind, projectId: string | null) => call<Catalog>("provider_catalog", { kind, projectId }),
   /** The chat as it is now, mid-turn included. */
   chatSnapshot: (chatId: string) => call<Snapshot>("chat_snapshot", { chatId }),

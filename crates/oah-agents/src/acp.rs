@@ -1,5 +1,4 @@
-//! Agents over the Agent Client Protocol (ACP, v1): OpenCode (`opencode acp`) and any agent the
-//! user adds. JSON-RPC 2.0 on stdio.
+//! OpenCode over the Agent Client Protocol (ACP, v1): `opencode acp`, JSON-RPC 2.0 on stdio.
 //!
 //! We send `initialize`, then `session/new` (or `session/load` / `session/resume` to reopen a
 //! chat), and one `session/prompt` at a time: messages sent while a prompt runs wait their turn.
@@ -16,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use oah_core::settings::{AgentKind, EnvVar, PermissionMode};
+use oah_core::settings::{EnvVar, PermissionMode};
 use oah_transport::Spec;
 use serde_json::{json, Value};
 
@@ -66,9 +65,18 @@ struct State {
     /// model.
     effort_option: Option<String>,
     efforts: Vec<String>,
-    /// Cumulative cost the agent reported; turns get the difference.
-    cost: f64,
-    cost_at_turn: f64,
+    /// Cumulative cost the agent reported; turns get the difference. None until known: a
+    /// reopened session's earlier cost comes with its replay, if at all.
+    cost: Option<f64>,
+    cost_at_turn: Option<f64>,
+    /// The agent's major version (OpenCode 1.x and 2.x differ in places); 0 when unknown.
+    major: u64,
+    /// The agent takes images in prompts.
+    images: bool,
+    /// The running turn is `/compact`: its summary isn't shown, a note is.
+    compacting: bool,
+    /// The session can be deleted (`session/delete`), for the throwaway one a catalog uses.
+    deletable: bool,
     current_model: Option<String>,
     /// Set when the process starts; part of every turn id.
     nonce: String,
@@ -82,6 +90,8 @@ struct Field {
     kind: FieldKind,
     /// `<key>__other` / `<key>_custom`: where a typed answer goes.
     other_key: Option<String>,
+    /// The offered choices as (value sent back, label shown).
+    choices: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -94,26 +104,23 @@ enum FieldKind {
 
 impl AcpDriver {
     pub fn start(opts: StartOptions, sink: Sink) -> DriverResult<AcpDriver> {
-        let opencode = opts.kind == AgentKind::Opencode;
-        let name = if opencode { "OpenCode".to_string() } else { "The agent".to_string() };
+        let name = "OpenCode".to_string();
         let program = match opts.binary.trim() {
-            "" if opencode => "opencode".to_string(),
-            "" => return Err("This ACP agent has no command: set one in Settings → Providers.".into()),
+            "" => "opencode".to_string(),
             b => b.to_string(),
         };
-        let mut args = opts.args.clone();
+        let args = vec!["acp".to_string()];
         let mut env = opts.env.clone();
-        if opencode {
-            args.insert(0, "acp".into());
-            // OpenCode 1.x can't answer its question tool over ACP; 2.x uses form elicitation.
-            env.push(EnvVar { key: "OPENCODE_CLIENT".into(), value: "acp".into(), in_keychain: false });
-            env.push(EnvVar { key: "OPENCODE_ENABLE_QUESTION_TOOL".into(), value: "false".into(), in_keychain: false });
-            // OpenCode lets edits and commands through unless its config says "ask". Ask for both,
-            // and oah answers what its mode allows (Accept edits, Full access) by itself, so the
-            // mode can change mid-chat. Your own OPENCODE_PERMISSION wins.
-            if !env.iter().any(|e| e.key == "OPENCODE_PERMISSION") {
-                env.push(EnvVar { key: "OPENCODE_PERMISSION".into(), value: r#"{"edit":"ask","bash":"ask"}"#.into(), in_keychain: false });
-            }
+        // OpenCode 1.x can't answer its question tool over ACP; 2.x uses form elicitation.
+        env.push(EnvVar { key: "OPENCODE_CLIENT".into(), value: "acp".into(), in_keychain: false });
+        env.push(EnvVar { key: "OPENCODE_ENABLE_QUESTION_TOOL".into(), value: "false".into(), in_keychain: false });
+        // OpenCode lets edits and commands through unless its config says "ask". Ask for both,
+        // and oah answers what its mode allows (Accept edits, Full access) by itself, so the
+        // mode can change mid-chat. 1.x reads OPENCODE_PERMISSION; 2.x ignores it and takes the
+        // rule only as config (OPENCODE_CONFIG_CONTENT). Your own permission settings win.
+        if !env.iter().any(|e| e.key == "OPENCODE_PERMISSION") {
+            env.push(EnvVar { key: "OPENCODE_PERMISSION".into(), value: ASK_FOR_EDITS_AND_COMMANDS.into(), in_keychain: false });
+            with_ask_config(&mut env);
         }
         let mut cmd = oah_transport::command(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &env })?;
         let mut child = cmd.spawn().map_err(|e| format!("couldn't start {program}: {e}"))?;
@@ -179,9 +186,13 @@ impl AcpDriver {
             return Err(msg);
         }
         let caps = &init["agentCapabilities"];
-        d.state.lock().unwrap().resumable = caps["loadSession"].as_bool() == Some(true) || !caps["sessionCapabilities"]["resume"].is_null();
-        let auth_methods = init["authMethods"].as_array().cloned().unwrap_or_default();
-        let not_signed_in = || sign_in_message(&name, opencode, &auth_methods);
+        {
+            let mut st = d.state.lock().unwrap();
+            st.resumable = caps["loadSession"].as_bool() == Some(true) || !caps["sessionCapabilities"]["resume"].is_null();
+            st.major = major_version(init["agentInfo"]["version"].as_str().unwrap_or(""));
+            st.images = caps["promptCapabilities"]["image"].as_bool() == Some(true);
+            st.deletable = !caps["sessionCapabilities"]["delete"].is_null();
+        }
         // Reopen the chat's session if we can; otherwise start a new one.
         let mut session = None;
         if let Some(id) = &opts.resume {
@@ -209,20 +220,15 @@ impl AcpDriver {
         let new_session = || d.rpc.call("session/new", json!({"cwd": opts.cwd, "mcpServers": []}), Duration::from_secs(120));
         let session = match session {
             Some(s) => s,
+            // OpenCode's only sign-in is `opencode auth login` in a terminal: `authenticate`
+            // can't do it, so a refusal goes straight to saying how.
             None => match new_session() {
-                Ok(s) => s,
-                // Agents that can sign in by themselves (a cached token, a key in the
-                // environment) do it on `authenticate`; try what it offers once, then again.
-                Err(e) if is_auth_error(&e) => {
-                    let signed_in = auth_methods
-                        .iter()
-                        .filter_map(|m| m["id"].as_str())
-                        .any(|id| d.rpc.call("authenticate", json!({"methodId": id}), Duration::from_secs(120)).is_ok());
-                    match signed_in.then(new_session) {
-                        Some(Ok(s)) => s,
-                        _ => return Err(not_signed_in()),
-                    }
+                Ok(s) => {
+                    // A new session has cost nothing yet.
+                    d.state.lock().unwrap().cost = Some(0.0);
+                    s
                 }
+                Err(e) if is_auth_error(&e) => return Err(NOT_SIGNED_IN.to_string()),
                 Err(e) => return Err(e),
             },
         };
@@ -234,12 +240,13 @@ impl AcpDriver {
         if !models.is_empty() {
             (d.sink)(ChatEvent::Models { models, current: current.clone() });
         }
-        if opencode {
-            // The session lists only the current model's efforts; the CLI knows every model's.
-            let (sink, state, binary, location, cwd) =
-                (d.sink.clone(), d.state.clone(), program.clone(), opts.location.clone(), opts.cwd.clone());
+        if d.state.lock().unwrap().major < 2 {
+            // 1.x sessions list only the current model's efforts; its CLI knows every model's.
+            // (2.x's CLI listing leaves out providers that report late: the session's is the one.)
+            let (sink, state, binary, location, cwd, env) =
+                (d.sink.clone(), d.state.clone(), program.clone(), opts.location.clone(), opts.cwd.clone(), opts.env.clone());
             thread::spawn(move || {
-                if let Ok(models) = opencode_models(&binary, &location, &cwd) {
+                if let Ok(models) = opencode_models(&binary, &location, &cwd, &env) {
                     let current = state.lock().unwrap().current_model.clone();
                     if !models.is_empty() {
                         sink(ChatEvent::Models { models, current });
@@ -292,6 +299,24 @@ impl AcpDriver {
         (models, current)
     }
 
+    /// A config option change answers with every option as it is now: the model, its efforts.
+    fn adopt_options(&self, r: &Value) {
+        if !r["configOptions"].is_array() {
+            return;
+        }
+        let mut st = self.state.lock().unwrap();
+        read_effort(&mut st, r);
+        let (mut models, current, _) = models_from(r);
+        if current.is_some() {
+            st.current_model = current.clone();
+        }
+        add_efforts(&mut models, current.as_deref(), &st.efforts);
+        drop(st);
+        if !models.is_empty() {
+            (self.sink)(ChatEvent::Models { models, current });
+        }
+    }
+
     fn session(&self) -> DriverResult<String> {
         let s = self.state.lock().unwrap();
         if !s.alive {
@@ -325,7 +350,7 @@ impl AcpDriver {
 
 /// Starts `prompt` now; when it ends, the next queued one starts.
 fn run_prompt(rpc: Rpc, state: Arc<Mutex<State>>, sink: Sink, queue: Arc<Mutex<VecDeque<Prompt>>>, prompt: Prompt) {
-    let (sid, turn_id) = {
+    let (sid, turn_id, images) = {
         let mut s = state.lock().unwrap();
         s.busy = true;
         s.turns += 1;
@@ -335,25 +360,37 @@ fn run_prompt(rpc: Rpc, state: Arc<Mutex<State>>, sink: Sink, queue: Arc<Mutex<V
         // (text without a message id) must not land in an earlier message.
         let id = format!("turn-{}-{}", s.nonce, s.turns);
         s.turn_id = Some(id.clone());
-        (s.session_id.clone().unwrap_or_default(), id)
+        (s.session_id.clone().unwrap_or_default(), id, s.images)
     };
     sink(ChatEvent::TurnStarted { turn_id: turn_id.clone() });
     let mut blocks = vec![json!({"type": "text", "text": prompt.text})];
-    for img in &prompt.images {
-        blocks.push(json!({"type": "image", "mimeType": img.mime, "data": img.data}));
+    if images {
+        for img in &prompt.images {
+            blocks.push(json!({"type": "image", "mimeType": img.mime, "data": img.data}));
+        }
+    } else if !prompt.images.is_empty() {
+        sink(ChatEvent::Notice { level: NoticeLevel::Warn, text: "This agent doesn't take images: they weren't sent.".into() });
     }
     thread::spawn(move || {
         let started = std::time::Instant::now();
         let r = rpc.call("session/prompt", json!({"sessionId": sid, "prompt": blocks}), PROMPT_LIMIT);
-        let (cost, interrupted) = {
+        let (cost, interrupted, compacted) = {
             let mut s = state.lock().unwrap();
             s.busy = false;
             s.turn_id = None;
             s.pending.clear();
             s.questions.clear();
             let reason = r.as_ref().ok().and_then(|v| v["stopReason"].as_str()).unwrap_or("");
-            ((s.cost - s.cost_at_turn).max(0.0), reason == "cancelled")
+            // Without a cost from before the turn, its share can't be told: none, not all of it.
+            let cost = match (s.cost, s.cost_at_turn) {
+                (Some(now), Some(before)) => Some((now - before).max(0.0)),
+                _ => None,
+            };
+            (cost, reason == "cancelled", std::mem::take(&mut s.compacting))
         };
+        if compacted && r.is_ok() && !interrupted {
+            sink(ChatEvent::Notice { level: NoticeLevel::Info, text: "Context compacted.".into() });
+        }
         match &r {
             Ok(v) => {
                 if let Some(reason) = v["stopReason"].as_str().filter(|r| matches!(*r, "max_tokens" | "max_turn_requests" | "refusal")) {
@@ -367,7 +404,7 @@ fn run_prompt(rpc: Rpc, state: Arc<Mutex<State>>, sink: Sink, queue: Arc<Mutex<V
                 sink(ChatEvent::TurnFinished {
                     turn_id,
                     usage: usage_of(&v["usage"]),
-                    cost_usd: Some(cost).filter(|c| *c > 0.0),
+                    cost_usd: cost.filter(|c| *c > 0.0),
                     duration_ms: Some(started.elapsed().as_millis() as u64),
                     interrupted,
                 });
@@ -445,17 +482,10 @@ impl Driver for AcpDriver {
             ),
             None => self.rpc.call("session/set_model", json!({"sessionId": sid, "modelId": model}), Duration::from_secs(30)),
         }?;
-        // A config option change answers with the new options (and the new model's efforts).
         if r["configOptions"].is_array() {
-            let mut st = self.state.lock().unwrap();
-            read_effort(&mut st, &r);
-            st.current_model = Some(model.to_string());
-            let (mut models, current, _) = models_from(&r);
-            add_efforts(&mut models, current.as_deref(), &st.efforts);
-            drop(st);
-            if !models.is_empty() {
-                (self.sink)(ChatEvent::Models { models, current });
-            }
+            self.adopt_options(&r);
+        } else {
+            self.state.lock().unwrap().current_model = Some(model.to_string());
         }
         Ok(())
     }
@@ -472,7 +502,33 @@ impl Driver for AcpDriver {
         if !values.iter().any(|v| v == value) {
             return Ok(true);
         }
-        self.rpc.call("session/set_config_option", json!({"sessionId": sid, "configId": id, "value": value}), Duration::from_secs(30))?;
+        let r = self.rpc.call(
+            "session/set_config_option",
+            json!({"sessionId": sid, "configId": id, "value": value}),
+            Duration::from_secs(30),
+        )?;
+        // OpenCode's efforts are model variants: the answer can move the model too.
+        self.adopt_options(&r);
+        Ok(true)
+    }
+
+    /// `/compact` as OpenCode has it: a turn running its own `compact` command, which takes no
+    /// instructions. The summary isn't shown; a note says it's done.
+    fn compact(&mut self, instructions: &str) -> DriverResult<bool> {
+        if !instructions.trim().is_empty() {
+            return Err("OpenCode's /compact doesn't take instructions".into());
+        }
+        self.session()?;
+        {
+            let mut s = self.state.lock().unwrap();
+            if s.busy {
+                return Err("Wait for the agent to finish before compacting.".into());
+            }
+            s.compacting = true;
+        }
+        let prompt =
+            Prompt { id: format!("compact-{}", self.state.lock().unwrap().turns), text: "/compact".into(), images: vec![], files: vec![] };
+        run_prompt(self.rpc.clone(), self.state.clone(), self.sink.clone(), self.queue.clone(), prompt);
         Ok(true)
     }
 
@@ -538,8 +594,10 @@ impl Translator {
             return;
         }
         if method == "session/update" {
-            // A reopened session replays its history as updates; the chat already has it.
-            if self.state.lock().unwrap().loading && p["update"]["sessionUpdate"] != "available_commands_update" {
+            // A reopened session replays its history as updates; the chat already has it. Its
+            // usage still counts: the session's cost so far, so the next turn gets only its own.
+            let kind = p["update"]["sessionUpdate"].as_str().unwrap_or("");
+            if self.state.lock().unwrap().loading && !matches!(kind, "available_commands_update" | "usage_update") {
                 return;
             }
             self.update(&p["update"]);
@@ -550,6 +608,10 @@ impl Translator {
         match u["sessionUpdate"].as_str().unwrap_or("") {
             kind @ ("agent_message_chunk" | "agent_thought_chunk") => {
                 let Some(text) = u["content"]["text"].as_str().filter(|t| !t.is_empty()) else { return };
+                // `/compact`'s summary is for the agent; the chat gets a note when it's done.
+                if self.state.lock().unwrap().compacting {
+                    return;
+                }
                 let thought = kind == "agent_thought_chunk";
                 let item_id = match u["messageId"].as_str() {
                     Some(m) => format!("{m}{}", if thought { ":r" } else { "" }),
@@ -582,7 +644,7 @@ impl Translator {
             }),
             "usage_update" => {
                 if let Some(amount) = u["cost"]["amount"].as_f64() {
-                    self.state.lock().unwrap().cost = amount;
+                    self.state.lock().unwrap().cost = Some(amount);
                 }
                 if let (Some(used), Some(size)) = (u["used"].as_u64(), u["size"].as_u64()) {
                     self.emit(ChatEvent::Context { used_tokens: used, window_tokens: size, parts: vec![] });
@@ -721,11 +783,11 @@ impl Translator {
 
 /// OpenCode's models for a chat that hasn't started: `opencode models` prints `provider/model`
 /// per line.
-pub fn opencode_models(binary: &str, location: &oah_core::settings::Location, cwd: &str) -> DriverResult<Vec<ModelOption>> {
+pub fn opencode_models(binary: &str, location: &oah_core::settings::Location, cwd: &str, env: &[EnvVar]) -> DriverResult<Vec<ModelOption>> {
     let program = if binary.trim().is_empty() { "opencode" } else { binary.trim() };
     let run = |args: &[&str]| {
         let args = args.iter().map(|a| a.to_string()).collect();
-        oah_transport::run(&Spec { location, cwd, program, args, env: &[] }, None, Duration::from_secs(30))
+        oah_transport::run(&Spec { location, cwd, program, args, env }, None, Duration::from_secs(30))
     };
     // `--verbose` adds names and effort levels; OpenCode 2 dropped the flag, so then the plain list.
     let mut out = run(&["models", "--verbose"])?;
@@ -792,20 +854,87 @@ fn is_auth_error(e: &str) -> bool {
 
 /// What to do when the agent isn't signed in: its own instructions (`authMethods[].description`)
 /// and, for OpenCode, where oah's Sign in button is.
-fn sign_in_message(name: &str, opencode: bool, methods: &[Value]) -> String {
-    if opencode {
-        return format!("{name} isn't signed in. Sign in with `opencode auth login` (Settings → Providers → OpenCode → Sign in).");
+const NOT_SIGNED_IN: &str = "OpenCode isn't signed in. Sign in with `opencode auth login` (Settings → Providers → OpenCode → Sign in).";
+
+/// The models (with every model's efforts) and commands OpenCode offers, for a chat that hasn't
+/// started. 1.x lists models from its CLI (`models --verbose`); 2.x only knows them in a session
+/// (its CLI leaves out providers that report late and dropped `--verbose`), so then a throwaway
+/// session is opened, each model picked once to learn its efforts, and the session deleted.
+pub fn opencode_catalog(opts: StartOptions) -> DriverResult<(Vec<ModelOption>, Vec<SlashCommand>)> {
+    if opts.kind == oah_core::settings::AgentKind::Opencode {
+        if let Ok(models) = opencode_cli_catalog(&opts) {
+            return Ok((models, opencode_commands()));
+        }
     }
-    let how: Vec<String> = methods
-        .iter()
-        .filter_map(|m| m["description"].as_str().or(m["name"].as_str()).map(|t| t.trim().trim_end_matches('.').to_string()))
-        .filter(|t| !t.is_empty())
-        .collect();
-    if how.is_empty() {
-        format!("{name} isn't signed in. Sign in with the agent's own command first.")
-    } else {
-        format!("{name} isn't signed in. {}.", how.join(", or "))
+    opencode_session_catalog(opts)
+}
+
+fn opencode_cli_catalog(opts: &StartOptions) -> DriverResult<Vec<ModelOption>> {
+    let program = if opts.binary.trim().is_empty() { opts.kind.default_binary() } else { opts.binary.trim() };
+    let args = vec!["models".to_string(), "--verbose".to_string()];
+    let out = oah_transport::run(
+        &Spec { location: &opts.location, cwd: &opts.cwd, program, args, env: &opts.env },
+        None,
+        Duration::from_secs(30),
+    )?;
+    // 2.x rejects `--verbose` (and prints its help).
+    if !out.ok() {
+        return Err("no verbose listing".into());
     }
+    let models = parse_opencode_models(&out.stdout);
+    if models.is_empty() {
+        return Err("no models listed".into());
+    }
+    Ok(models)
+}
+
+/// How long a catalog spends picking models to learn their efforts.
+const EFFORT_PROBE_BUDGET: Duration = Duration::from_secs(6);
+
+fn opencode_session_catalog(opts: StartOptions) -> DriverResult<(Vec<ModelOption>, Vec<SlashCommand>)> {
+    // The session's models as first listed, and its commands once they come.
+    type Seen = (Vec<ModelOption>, Option<Vec<SlashCommand>>);
+    let seen: Arc<Mutex<Seen>> = Arc::new(Mutex::new((vec![], None)));
+    let s2 = seen.clone();
+    let sink: Sink = Arc::new(move |e| {
+        let mut s = s2.lock().unwrap();
+        match e {
+            ChatEvent::Models { models, .. } if s.0.is_empty() => s.0 = models,
+            ChatEvent::Commands { commands } => s.1 = Some(commands),
+            _ => {}
+        }
+    });
+    let mut d = AcpDriver::start(StartOptions { model: None, effort: None, resume: None, permission: PermissionMode::Ask, ..opts }, sink)?;
+    let mut models = seen.lock().unwrap().0.clone();
+    let started = std::time::Instant::now();
+    for m in models.iter_mut() {
+        if !m.efforts.is_empty() {
+            continue;
+        }
+        if started.elapsed() > EFFORT_PROBE_BUDGET {
+            break;
+        }
+        if d.set_model(&m.id).is_ok() {
+            m.efforts = d.state.lock().unwrap().efforts.iter().filter(|e| *e != "default").cloned().collect();
+        }
+    }
+    // The commands come right after the session starts; give them a moment if not yet.
+    for _ in 0..10 {
+        if seen.lock().unwrap().1.is_some() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    let (sid, deletable) = {
+        let s = d.state.lock().unwrap();
+        (s.session_id.clone(), s.deletable)
+    };
+    if let (Some(sid), true) = (sid, deletable) {
+        let _ = d.rpc.call("session/delete", json!({"sessionId": sid}), Duration::from_secs(10));
+    }
+    d.stop();
+    let commands = seen.lock().unwrap().1.clone().unwrap_or_else(opencode_commands);
+    Ok((models, commands))
 }
 
 /// OpenCode's commands before its first `available_commands_update` (a chat that hasn't started).
@@ -844,6 +973,8 @@ fn tool_kind(k: &str) -> ToolKind {
         "search" => ToolKind::Search,
         "execute" => ToolKind::Bash,
         "fetch" => ToolKind::Web,
+        // OpenCode's `task` tool (a subagent) comes as `think`.
+        "think" => ToolKind::Task,
         _ => ToolKind::Other,
     }
 }
@@ -1007,54 +1138,63 @@ fn form_questions(p: &Value) -> (Vec<Question>, Vec<Field>) {
         let other_key =
             others.iter().find(|o| o.as_str() == format!("{key}__other") || o.as_str() == format!("{key}_custom")).map(|s| s.to_string());
         let default = prop["default"].as_str().map(String::from);
-        let opts = |vals: Vec<(String, String)>| -> Vec<QuestionOption> {
-            vals.into_iter()
-                .map(|(v, t)| QuestionOption {
-                    label: if Some(&v) == default.as_ref() { format!("{t} (Recommended)") } else { t },
-                    description: String::new(),
-                })
-                .collect()
-        };
-        let choices = |p: &Value| -> Vec<(String, String)> {
+        // (value, label, description): a choice is sent back by its `const`, shown by its title.
+        let choices = |p: &Value| -> Vec<(String, String, String)> {
             if let Some(e) = p["enum"].as_array() {
-                return e.iter().filter_map(|x| x.as_str().map(|s| (s.to_string(), s.to_string()))).collect();
+                return e.iter().filter_map(|x| x.as_str().map(|s| (s.to_string(), s.to_string(), String::new()))).collect();
             }
             p["oneOf"]
                 .as_array()
                 .or(p["anyOf"].as_array())
                 .into_iter()
                 .flatten()
-                .filter_map(|x| Some((x["const"].as_str()?.to_string(), x["title"].as_str().or(x["const"].as_str())?.to_string())))
+                .filter_map(|x| {
+                    let value = x["const"].as_str()?.to_string();
+                    let label = x["title"].as_str().unwrap_or(&value).to_string();
+                    let description = x["description"].as_str().filter(|d| *d != label).unwrap_or("").to_string();
+                    Some((value, label, description))
+                })
                 .collect()
         };
-        let (kind, options) = match prop["type"].as_str() {
-            Some("boolean") => (FieldKind::Bool, opts(vec![("yes".into(), "Yes".into()), ("no".into(), "No".into())])),
-            Some("array") => (FieldKind::Multi, opts(choices(&prop["items"]))),
+        let (kind, offered) = match prop["type"].as_str() {
+            Some("boolean") => {
+                (FieldKind::Bool, vec![("true".into(), "Yes".into(), String::new()), ("false".into(), "No".into(), String::new())])
+            }
+            Some("array") => (FieldKind::Multi, choices(&prop["items"])),
             _ => {
                 let c = choices(prop);
-                if c.is_empty() {
-                    (FieldKind::Text, vec![])
-                } else {
-                    (FieldKind::Choice, opts(c))
-                }
+                (if c.is_empty() { FieldKind::Text } else { FieldKind::Choice }, c)
             }
         };
+        let options = offered
+            .iter()
+            .map(|(v, t, d)| QuestionOption {
+                label: if Some(v) == default.as_ref() { format!("{t} (Recommended)") } else { t.clone() },
+                description: d.clone(),
+            })
+            .collect();
         let title = prop["title"].as_str().or(prop["description"].as_str()).unwrap_or(key).to_string();
+        let ask = prop["description"]
+            .as_str()
+            .filter(|d| prop["title"].is_string() && *d != title)
+            .map(|d| format!("{title}: {d}"))
+            .unwrap_or(title);
         questions.push(Question {
             id: key.clone(),
             header: if questions.is_empty() && !message.is_empty() { String::new() } else { key.clone() },
-            question: if questions.is_empty() && !message.is_empty() { format!("{message}\n{title}") } else { title },
+            question: if questions.is_empty() && !message.is_empty() { format!("{message}\n{ask}") } else { ask },
             options,
             multi: kind == FieldKind::Multi,
             other: kind == FieldKind::Text || other_key.is_some(),
             secret: prop["format"] == "password",
         });
-        fields.push(Field { key: key.clone(), kind, other_key });
+        fields.push(Field { key: key.clone(), kind, other_key, choices: offered.into_iter().map(|(v, t, _)| (v, t)).collect() });
     }
     (questions, fields)
 }
 
-/// The answers → `{action, content}`. Nothing answered cancels.
+/// The answers → `{action, content}`. A picked label goes back as its choice's value; typed
+/// text goes to the field's `_custom` / `__other` key when it has one. Nothing answered cancels.
 fn elicitation_reply(fields: &[Field], answers: &std::collections::BTreeMap<String, Vec<String>>) -> Value {
     if answers.values().all(|a| a.is_empty()) {
         return json!({"action": "cancel"});
@@ -1063,27 +1203,78 @@ fn elicitation_reply(fields: &[Field], answers: &std::collections::BTreeMap<Stri
     let mut content = serde_json::Map::new();
     for f in fields {
         let Some(a) = answers.get(&f.key).filter(|a| !a.is_empty()) else { continue };
+        let mut picked = Vec::new();
+        let mut typed = Vec::new();
+        for answer in a {
+            match f.choices.iter().find(|(_, label)| *label == strip(answer)) {
+                Some((value, _)) => picked.push(value.clone()),
+                None => typed.push(answer.clone()),
+            }
+        }
+        let typed = Some(typed.join(", ")).filter(|t| !t.trim().is_empty());
         match f.kind {
             FieldKind::Bool => {
-                content.insert(f.key.clone(), json!(a[0] == "Yes"));
-            }
-            FieldKind::Multi => {
-                content.insert(f.key.clone(), json!(a.iter().map(|s| strip(s)).collect::<Vec<_>>()));
-            }
-            FieldKind::Choice | FieldKind::Text => {
-                content.insert(f.key.clone(), json!(strip(&a[0])));
-                if let (Some(k), Some(extra)) = (&f.other_key, a.get(1)) {
-                    content.insert(k.clone(), json!(extra));
+                if let Some(v) = picked.first() {
+                    content.insert(f.key.clone(), json!(v == "true"));
                 }
             }
+            FieldKind::Multi => {
+                content.insert(f.key.clone(), json!(picked));
+            }
+            FieldKind::Choice => {
+                if let Some(v) = picked.first() {
+                    content.insert(f.key.clone(), json!(v));
+                }
+            }
+            FieldKind::Text => {
+                if let Some(t) = &typed {
+                    content.insert(f.key.clone(), json!(t));
+                }
+                continue;
+            }
+        }
+        if let Some(t) = typed {
+            match &f.other_key {
+                Some(k) => content.insert(k.clone(), json!(t)),
+                // No field for it: the typed answer stands in for a choice.
+                None => content.insert(f.key.clone(), json!(t)),
+            };
         }
     }
     json!({"action": "accept", "content": content})
 }
 
+/// OpenCode's permission rule asking before edits and commands.
+const ASK_FOR_EDITS_AND_COMMANDS: &str = r#"{"edit":"ask","bash":"ask"}"#;
+
+/// Puts the ask-first rule in `OPENCODE_CONFIG_CONTENT`: added to your own config there when it
+/// has no `permission`, left alone when it has one (or isn't JSON oah can read).
+fn with_ask_config(env: &mut Vec<EnvVar>) {
+    let rule: Value = serde_json::from_str(ASK_FOR_EDITS_AND_COMMANDS).unwrap_or_default();
+    match env.iter_mut().rfind(|e| e.key == "OPENCODE_CONFIG_CONTENT") {
+        Some(e) => {
+            if let Ok(Value::Object(mut config)) = serde_json::from_str::<Value>(&e.value) {
+                if !config.contains_key("permission") {
+                    config.insert("permission".into(), rule);
+                    e.value = Value::Object(config).to_string();
+                }
+            }
+        }
+        None => {
+            env.push(EnvVar { key: "OPENCODE_CONFIG_CONTENT".into(), value: json!({"permission": rule}).to_string(), in_keychain: false })
+        }
+    }
+}
+
+/// `2.2.6` → 2; `v1.18.31` → 1; unknown → 0.
+fn major_version(v: &str) -> u64 {
+    v.trim().trim_start_matches('v').split('.').next().and_then(|m| m.parse().ok()).unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oah_core::settings::AgentKind;
 
     fn run(lines: &[Value], permission: PermissionMode) -> (Vec<ChatEvent>, Arc<Mutex<State>>) {
         let out = Arc::new(Mutex::new(Vec::new()));
@@ -1115,11 +1306,11 @@ mod tests {
         std::fs::write(&bin, script).unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         let loc = oah_core::settings::Location::Local;
-        let m = opencode_models(bin.to_str().unwrap(), &loc, dir.to_str().unwrap()).unwrap();
+        let m = opencode_models(bin.to_str().unwrap(), &loc, dir.to_str().unwrap(), &[]).unwrap();
         assert_eq!(m.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["opencode/big-pickle", "opencode/glm-5.3-flash-free"]);
         assert_eq!((m[0].name.as_str(), m[0].description.as_str()), ("big-pickle", "opencode"));
         std::fs::write(&bin, "#!/bin/sh\necho 'not signed in' >&2\nexit 2\n").unwrap();
-        assert_eq!(opencode_models(bin.to_str().unwrap(), &loc, dir.to_str().unwrap()).unwrap_err().to_string(), "not signed in");
+        assert_eq!(opencode_models(bin.to_str().unwrap(), &loc, dir.to_str().unwrap(), &[]).unwrap_err().to_string(), "not signed in");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1128,10 +1319,7 @@ mod tests {
         assert!(is_auth_error("Authentication required: no auth method id provided"));
         assert!(is_auth_error("provider returned 401"));
         assert!(!is_auth_error("model not found"));
-        let m = [json!({"id": "oauth", "name": "Log in with Google", "description": "Run `gemini` and pick Login with Google."})];
-        assert_eq!(sign_in_message("Gemini", false, &m), "Gemini isn't signed in. Run `gemini` and pick Login with Google.");
-        assert!(sign_in_message("OpenCode", true, &[]).contains("opencode auth login"));
-        assert!(sign_in_message("X", false, &[]).contains("own command"));
+        assert!(NOT_SIGNED_IN.contains("opencode auth login"));
     }
 
     #[test]
@@ -1259,6 +1447,107 @@ mod tests {
         assert_eq!(elicitation_reply(&fields, &Default::default())["action"], "cancel");
     }
 
+    /// Real OpenCode 2 forms (from its question tool and its web search prompt): a choice goes
+    /// back as its `const` even when its title says more, typed text as `<key>_custom`.
+    #[test]
+    fn answers_opencode_2_forms_with_values() {
+        let ask = |props: Value| {
+            let req = json!({"jsonrpc": "2.0", "id": 9, "method": "elicitation/create", "params": {"mode": "form", "message": "Questions",
+                "requestedSchema": {"type": "object", "properties": props}}});
+            let (ev, state) = run(&[req], PermissionMode::Ask);
+            let q = match &ev[0] {
+                ChatEvent::Question { request } => request.clone(),
+                e => panic!("{e:?}"),
+            };
+            let (_, fields) = state.lock().unwrap().questions.get("acpq-9").cloned().unwrap();
+            (q, fields)
+        };
+        let answer = |fields: &[Field], key: &str, a: &[&str]| {
+            let mut m = std::collections::BTreeMap::new();
+            m.insert(key.to_string(), a.iter().map(|s| s.to_string()).collect());
+            elicitation_reply(fields, &m)["content"].clone()
+        };
+
+        let (q, f) = ask(json!({"choice": {"type": "string", "description": "Allow OpenCode to search the web?", "oneOf": [
+            {"const": "allow", "title": "Allow search via Exa"}, {"const": "disable", "title": "Disable web search"}]}}));
+        assert_eq!(q.questions[0].options[0].label, "Allow search via Exa");
+        assert_eq!(answer(&f, "choice", &["Disable web search"]), json!({"choice": "disable"}));
+
+        let storage = json!({
+            "q0": {"type": "string", "title": "Storage", "description": "Which storage?", "oneOf": [
+                {"const": "SQLite", "title": "SQLite", "description": "SQLite"}, {"const": "Postgres", "title": "Postgres", "description": "Small and SQL"}]},
+            "q0_custom": {"type": "string", "title": "Storage (other)"}});
+        let (q, f) = ask(storage);
+        assert_eq!(q.questions.len(), 1, "the _custom field is the question's typed answer, not a question");
+        assert!(q.questions[0].other);
+        assert_eq!(q.questions[0].options[0].description, "", "a description repeating the title is left out");
+        assert_eq!(q.questions[0].options[1].description, "Small and SQL");
+        assert_eq!(answer(&f, "q0", &["Postgres"]), json!({"q0": "Postgres"}));
+        assert_eq!(answer(&f, "q0", &["DuckDB"]), json!({"q0_custom": "DuckDB"}));
+        assert_eq!(answer(&f, "q0", &["SQLite", "and a cache"]), json!({"q0": "SQLite", "q0_custom": "and a cache"}));
+
+        let (_, f) = ask(json!({
+            "q1": {"type": "array", "title": "Features", "items": {"anyOf": [{"const": "Search", "title": "Search"}, {"const": "Sync", "title": "Sync"}]}},
+            "q1_custom": {"type": "string"}}));
+        assert_eq!(answer(&f, "q1", &["Search", "Sync", "Offline"]), json!({"q1": ["Search", "Sync"], "q1_custom": "Offline"}));
+
+        // No choices offered: the typed answer is the answer.
+        let (q, f) = ask(json!({"q0": {"type": "string", "title": "Name", "oneOf": []}, "q0_custom": {"type": "string"}}));
+        assert!(q.questions[0].options.is_empty() && q.questions[0].other);
+        assert_eq!(answer(&f, "q0", &["oah"]), json!({"q0": "oah"}));
+    }
+
+    #[test]
+    fn asks_first_in_opencode_2_config_too() {
+        let var = |k: &str, v: &str| EnvVar { key: k.into(), value: v.into(), in_keychain: false };
+        let get = |env: &[EnvVar]| {
+            serde_json::from_str::<Value>(&env.iter().find(|e| e.key == "OPENCODE_CONFIG_CONTENT").unwrap().value).unwrap()
+        };
+        let mut env = vec![];
+        with_ask_config(&mut env);
+        assert_eq!(get(&env), json!({"permission": {"edit": "ask", "bash": "ask"}}));
+        let mut env = vec![var("OPENCODE_CONFIG_CONTENT", r#"{"model":"x/y"}"#)];
+        with_ask_config(&mut env);
+        assert_eq!(get(&env), json!({"model": "x/y", "permission": {"edit": "ask", "bash": "ask"}}));
+        let mut env = vec![var("OPENCODE_CONFIG_CONTENT", r#"{"permission":{"bash":"allow"}}"#)];
+        with_ask_config(&mut env);
+        assert_eq!(get(&env), json!({"permission": {"bash": "allow"}}), "yours wins");
+    }
+
+    #[test]
+    fn reads_major_versions() {
+        assert_eq!(major_version("2.2.6"), 2);
+        assert_eq!(major_version("v1.18.31"), 1);
+        assert_eq!(major_version(""), 0);
+    }
+
+    /// A reopened session's replay says what it cost so far; the next turn is charged only its own.
+    #[test]
+    fn cost_after_a_reopen_counts_only_new_turns() {
+        let (_, state) = run(
+            &[upd(json!({"sessionUpdate": "usage_update", "used": 10, "size": 100, "cost": {"amount": 1.5, "currency": "USD"}}))],
+            PermissionMode::Ask,
+        );
+        assert_eq!(state.lock().unwrap().cost, Some(1.5));
+        // Unknown before the turn: no share is claimed.
+        let st = State::default();
+        assert_eq!(st.cost, None);
+    }
+
+    #[test]
+    fn compact_summaries_are_not_shown() {
+        let state =
+            Arc::new(Mutex::new(State { alive: true, turn_id: Some("t".into()), stretch: 1, compacting: true, ..Default::default() }));
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let o = out.clone();
+        let mut tr = Translator { sink: Arc::new(move |e| o.lock().unwrap().push(e)), state, rpc: Rpc::new(None, "OpenCode") };
+        tr.handle(&upd(json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Summary of the chat…"}})));
+        tr.handle(&upd(json!({"sessionUpdate": "usage_update", "used": 900, "size": 200000})));
+        let ev = out.lock().unwrap().clone();
+        assert!(!ev.iter().any(|e| matches!(e, ChatEvent::TextDelta { .. })));
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Context { used_tokens: 900, .. })));
+    }
+
     #[test]
     fn reads_models_from_config_options() {
         let s = json!({"sessionId": "s", "configOptions": [
@@ -1326,6 +1615,145 @@ opencode/big-pickle
         assert!(st.effort_option.is_none());
     }
 
+    /// Against a real OpenCode (ignored): OAH_TEST_KIND `opencode` or `opencode2`, OAH_TEST_DIR a
+    /// project folder, OAH_TEST_MODEL a (free) model, OAH_TEST_DATA an XDG_DATA_HOME to keep the
+    /// test's sessions out of the real ones, OAH_TEST_BINARY another build (a 1.x). The catalog,
+    /// a turn, an approval, an effort, /compact and a reopen, each checked.
+    #[test]
+    #[ignore]
+    fn real_opencode_full() {
+        use crate::driver::{Driver, Prompt};
+        let kind = match std::env::var("OAH_TEST_KIND").as_deref() {
+            Ok("opencode2") => AgentKind::Opencode2,
+            _ => AgentKind::Opencode,
+        };
+        let dir = std::env::var("OAH_TEST_DIR").expect("OAH_TEST_DIR");
+        let model = std::env::var("OAH_TEST_MODEL").expect("OAH_TEST_MODEL");
+        let env: Vec<EnvVar> = std::env::var("OAH_TEST_DATA")
+            .ok()
+            .map(|d| vec![EnvVar { key: "XDG_DATA_HOME".into(), value: d, in_keychain: false }])
+            .unwrap_or_default();
+        let opts = |resume: Option<String>| StartOptions {
+            effort: None,
+            kind,
+            cwd: dir.clone(),
+            location: oah_core::settings::Location::Local,
+            binary: std::env::var("OAH_TEST_BINARY").unwrap_or_default(),
+            model: Some(model.clone()),
+            permission: PermissionMode::Ask,
+            resume,
+            env: env.clone(),
+        };
+
+        // 1. The catalog for a chat that hasn't started.
+        let t0 = std::time::Instant::now();
+        let (models, commands) = opencode_catalog(StartOptions { model: None, ..opts(None) }).expect("catalog");
+        eprintln!(
+            "catalog: {} models in {:?}; commands {:?}",
+            models.len(),
+            t0.elapsed(),
+            commands.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+        for m in models.iter().take(30) {
+            eprintln!("  {} ({}) efforts={:?}", m.id, m.name, m.efforts);
+        }
+        assert!(!models.is_empty());
+        assert!(models.iter().any(|m| !m.efforts.is_empty()), "some model has effort levels");
+        let v2 = std::env::var("OAH_TEST_BINARY").is_err();
+        if v2 {
+            assert!(commands.iter().any(|c| c.name == "compact"), "the real commands, not the built-in guess");
+        }
+
+        let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
+        let start = |resume: Option<String>| {
+            let e = events.clone();
+            let sink: Sink = Arc::new(move |ev| e.lock().unwrap().push(ev));
+            AcpDriver::start(opts(resume), sink).expect("start opencode")
+        };
+        // Runs until the turn ends, allowing what's asked; the events of the turn.
+        let wait_turn = |d: &mut AcpDriver, from: usize| -> Vec<ChatEvent> {
+            let t0 = std::time::Instant::now();
+            loop {
+                assert!(t0.elapsed() < Duration::from_secs(300), "turn took too long");
+                thread::sleep(Duration::from_millis(200));
+                let evs: Vec<ChatEvent> = events.lock().unwrap()[from..].to_vec();
+                for e in &evs {
+                    if let ChatEvent::Approval { request } = e {
+                        if d.state.lock().unwrap().pending.contains_key(&request.request_id) {
+                            eprintln!("  approving: {}", request.title);
+                            d.answer(&request.request_id, Decision::Allow).unwrap();
+                        }
+                    }
+                }
+                if evs.iter().any(|e| matches!(e, ChatEvent::TurnFinished { .. })) {
+                    return evs;
+                }
+            }
+        };
+        let send = |d: &mut AcpDriver, text: &str| -> Vec<ChatEvent> {
+            let from = events.lock().unwrap().len();
+            d.send(Prompt { id: "p".into(), text: text.into(), images: vec![], files: vec![] }).unwrap();
+            wait_turn(d, from)
+        };
+        let text_of = |evs: &[ChatEvent]| -> String {
+            evs.iter().filter_map(|e| if let ChatEvent::TextDelta { text, .. } = e { Some(text.as_str()) } else { None }).collect()
+        };
+
+        // 2. A turn.
+        let mut d = start(None);
+        let session = events.lock().unwrap().iter().find_map(|e| match e {
+            ChatEvent::Started { session_id, model, .. } => {
+                eprintln!("started session={session_id:?} model={model:?}");
+                session_id.clone()
+            }
+            _ => None,
+        });
+        eprintln!("major version {}", d.state.lock().unwrap().major);
+        let evs = send(&mut d, "Reply with exactly the word: pong");
+        eprintln!("turn 1: {:?}", text_of(&evs));
+        assert!(text_of(&evs).to_lowercase().contains("pong"));
+        assert!(evs.iter().any(|e| matches!(e, ChatEvent::Context { .. })), "context reported");
+        assert!(evs.iter().any(|e| matches!(e, ChatEvent::TurnFinished { usage: Some(_), .. })), "usage reported");
+
+        // 3. A command asks first in Ask mode (oah's OPENCODE_PERMISSION).
+        let evs = send(&mut d, "Run the shell command `echo oah-$((6*7))` with your bash tool and tell me its output.");
+        let asked = evs.iter().any(|e| matches!(e, ChatEvent::Approval { .. }));
+        eprintln!("turn 2 asked={asked}: {:?}", text_of(&evs));
+        assert!(asked, "a command asks in Ask mode");
+        assert!(text_of(&evs).contains("oah-42"));
+
+        // 4. An effort the model has.
+        let efforts = d.state.lock().unwrap().efforts.clone();
+        eprintln!("efforts for {model}: {efforts:?}");
+        if let Some(e) = efforts.iter().find(|e| *e != "default") {
+            let from = events.lock().unwrap().len();
+            assert!(d.set_effort(e).unwrap());
+            let picked = events.lock().unwrap()[from..].iter().any(|ev| matches!(ev, ChatEvent::Models { .. }));
+            eprintln!("set effort {e}: models re-read = {picked}");
+        }
+
+        // 5. /compact: a note, not the summary.
+        let from = events.lock().unwrap().len();
+        assert!(d.compact("").unwrap());
+        let evs = wait_turn(&mut d, from);
+        let note = evs.iter().any(|e| matches!(e, ChatEvent::Notice { text, .. } if text == "Context compacted."));
+        eprintln!("compact: note={note}, text shown={:?}", text_of(&evs));
+        assert!(note && text_of(&evs).is_empty());
+        assert!(d.compact("focus on tests").is_err(), "no instructions");
+        let cost_before = d.state.lock().unwrap().cost;
+        d.stop();
+
+        // 6. Reopen: the earlier turns are known, the next one is charged only its own cost.
+        let mut d = start(session.clone());
+        eprintln!("reopened: cost so far {:?} (before close {cost_before:?})", d.state.lock().unwrap().cost);
+        let evs = send(&mut d, "What exact word did you reply with the first time? One word.");
+        eprintln!("after reopen: {:?}", text_of(&evs));
+        assert!(text_of(&evs).to_lowercase().contains("pong"));
+        let turn_cost = evs.iter().find_map(|e| if let ChatEvent::TurnFinished { cost_usd, .. } = e { Some(*cost_usd) } else { None });
+        eprintln!("turn cost after reopen: {turn_cost:?}");
+        d.stop();
+    }
+
     /// Against a real OpenCode (ignored): OAH_TEST_DIR is a project folder, OAH_TEST_MODEL an
     /// optional model. Runs a turn, answers approvals, then reopens the session and asks about it.
     #[test]
@@ -1348,7 +1776,6 @@ opencode/big-pickle
                 permission: PermissionMode::Ask,
                 resume,
                 env: vec![],
-                args: vec![],
             };
             AcpDriver::start(opts, sink).expect("start opencode")
         };

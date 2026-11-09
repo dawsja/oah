@@ -1,5 +1,5 @@
 // The composer's / menu: oah's own commands first, then the agent's (Claude Code's from its
-// `initialize`, Codex skills from `skills/list`, an ACP agent's `available_commands_update`).
+// `initialize`, Codex skills from `skills/list`, OpenCode's `available_commands_update`).
 
 import type { SlashCommand } from "./chat"
 import type { AgentKind } from "./types"

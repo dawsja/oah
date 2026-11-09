@@ -213,12 +213,11 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: 
         if installed == Some(false) {
             return account::Limits { missing: true, ..Default::default() };
         }
-        let env = secrets::resolve(&secrets::scope(kind, None), &provider.env);
+        let env = secrets::resolve(&secrets::scope(kind), &provider.env);
         match kind {
             AgentKind::Claude => account::claude_limits(&location, &env),
             AgentKind::Codex => account::codex_limits(&binary, &location),
-            AgentKind::Opencode => account::opencode_go_limits(&location, &env),
-            AgentKind::Acp => account::Limits::default(),
+            AgentKind::Opencode | AgentKind::Opencode2 => account::opencode_go_limits(&location, &env),
         }
     })
     .await
@@ -256,11 +255,21 @@ pub(crate) fn catalog(s: &Settings, kind: AgentKind, project_id: Option<&str>) -
                 .unwrap_or_default();
             Ok(Catalog { models, commands })
         }
-        AgentKind::Opencode => Ok(Catalog {
-            models: oah_agents::acp::opencode_models(&binary, &location, &cwd)?,
-            commands: oah_agents::acp::opencode_commands(),
-        }),
-        AgentKind::Acp => Ok(Catalog { models: vec![], commands: vec![] }),
+        AgentKind::Opencode | AgentKind::Opencode2 => {
+            let provider = s.providers.get(kind);
+            let opts = oah_agents::driver::StartOptions {
+                kind,
+                cwd,
+                location,
+                binary,
+                model: None,
+                effort: None,
+                permission: PermissionMode::Ask,
+                resume: None,
+                env: secrets::resolve(&secrets::scope(kind), &provider.env),
+            };
+            oah_agents::acp::opencode_catalog(opts).map(|(models, commands)| Catalog { models, commands })
+        }
     }
 }
 
@@ -311,18 +320,16 @@ fn chat_markdown(state: State<AppState>, chat_id: String) -> CmdResult<String> {
 
 /// A new, empty chat in `project_id` (its agent starts with the first message).
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
 fn chat_create(
     app: AppHandle,
     state: State<AppState>,
     project_id: String,
     agent: Option<AgentKind>,
-    acp_agent: Option<String>,
     model: Option<String>,
     effort: Option<String>,
     cwd: Option<String>,
 ) -> CmdResult<ChatMeta> {
-    create_chat(&app, &state, NewChat { project_id, agent, acp_agent, model, effort, cwd })
+    create_chat(&app, &state, NewChat { project_id, agent, model, effort, cwd })
 }
 
 /// What `chat_create` (and a phone's `chat.create`) takes.
@@ -331,16 +338,15 @@ fn chat_create(
 pub(crate) struct NewChat {
     project_id: String,
     agent: Option<AgentKind>,
-    acp_agent: Option<String>,
     model: Option<String>,
     effort: Option<String>,
     cwd: Option<String>,
 }
 
 pub(crate) fn create_chat(app: &AppHandle, state: &AppState, c: NewChat) -> CmdResult<ChatMeta> {
-    let NewChat { project_id, agent, acp_agent, model, effort, cwd } = c;
+    let NewChat { project_id, agent, model, effort, cwd } = c;
     let s = state.settings.lock().unwrap().clone();
-    let meta = state.chats.create_in(&s, oah_mcp::host::NewChat { project_id, agent, acp_agent, model, effort, cwd })?;
+    let meta = state.chats.create_in(&s, oah_mcp::host::NewChat { project_id, agent, model, effort, cwd })?;
     state.chats.changed(app);
     Ok(meta)
 }

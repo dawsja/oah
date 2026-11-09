@@ -43,7 +43,7 @@ export function ChatScreen({ chatId }: { chatId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId])
 
-  const agent = agents.find((a) => a.kind === meta?.agent && (a.acpId ?? null) === (meta?.acpAgent ?? null))
+  const agent = agents.find((a) => a.kind === meta?.agent)
   const t = transcript ?? emptyTranscript()
   const { models, load } = useModels(agent, meta?.projectId ?? null, t.models)
   const source = useMemo<ImageSource>(
@@ -127,7 +127,7 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
   const link = useMobile((s) => s.link)
   const preferred = project?.defaultAgent ?? defaultAgent
   const [pick, setPick] = useState<string | null>(null)
-  const agent = agents.find((a) => `${a.kind}:${a.acpId ?? ""}` === pick) ?? agents.find((a) => a.kind === preferred) ?? agents[0]
+  const agent = agents.find((a) => a.kind === pick) ?? agents.find((a) => a.kind === preferred) ?? agents[0]
   const [model, setModel] = useState("")
   const { models, load } = useModels(agent, projectId, NONE)
   const [sending, setSending] = useState(false)
@@ -140,12 +140,11 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
         <h3 className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Agent</h3>
         <div className="flex flex-wrap gap-1.5">
           {agents.map((a) => {
-            const key = `${a.kind}:${a.acpId ?? ""}`
             return (
               <button
-                key={key}
-                className={cn("rounded-md h-10 border px-3 text-[13px]", agent && key === `${agent.kind}:${agent.acpId ?? ""}` ? "border-primary bg-primary text-primary-foreground" : "active:bg-accent")}
-                onClick={() => (setPick(key), setModel(""))}
+                key={a.kind}
+                className={cn("rounded-md h-10 border px-3 text-[13px]", agent?.kind === a.kind ? "border-primary bg-primary text-primary-foreground" : "active:bg-accent")}
+                onClick={() => (setPick(a.kind), setModel(""))}
               >
                 {a.name}
               </button>

@@ -189,7 +189,7 @@ fn agent_name(k: AgentKind) -> &'static str {
         AgentKind::Claude => "Claude Code",
         AgentKind::Codex => "Codex",
         AgentKind::Opencode => "OpenCode",
-        AgentKind::Acp => "ACP agent",
+        AgentKind::Opencode2 => "OpenCode 2",
     }
 }
 
@@ -250,17 +250,14 @@ impl Host for AppHost {
             "agents.list" => {
                 let s = settings();
                 let p = &s.providers;
-                let mut agents: Vec<Value> = AgentKind::ALL
+                let agents: Vec<Value> = AgentKind::ALL
                     .iter()
                     .filter(|k| p.get(**k).enabled)
                     .map(|k| {
                         let pr = p.get(*k);
-                        json!({ "kind": k, "acpId": null, "name": agent_name(*k), "defaultModel": pr.default_model, "permissionMode": pr.permission_mode })
+                        json!({ "kind": k, "name": agent_name(*k), "defaultModel": pr.default_model, "permissionMode": pr.permission_mode })
                     })
                     .collect();
-                agents.extend(p.acp.iter().filter(|a| a.provider.enabled).map(|a| {
-                    json!({ "kind": AgentKind::Acp, "acpId": a.id, "name": a.name, "defaultModel": a.provider.default_model, "permissionMode": a.provider.permission_mode })
-                }));
                 Ok(json!({ "agents": agents, "defaultAgent": p.default_agent }))
             }
             "chat.create" => to_value(crate::create_chat(app, &state, serde_json::from_value(p).map_err(err)?)?),

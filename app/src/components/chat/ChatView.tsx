@@ -4,13 +4,13 @@ import { AgentGlyph, Mark } from "@/components/icons"
 import { promptText } from "@/components/Prompt"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { agentChoices, agentKey, agentName, providerFor, type AgentRef } from "@/lib/agents"
+import { agentChoices } from "@/lib/agents"
 import { emptyTranscript, type ChatMeta, type ModelOption, type SlashCommand, type PlanItem, type Transcript as T } from "@/lib/chat"
 import { copyText } from "@/lib/clipboard"
 import { LocationIcon } from "@/components/LocationIcon"
 import { addLocalFolder, OpenProjectMenu, useDistros } from "@/components/OpenProject"
 import { ipc, type Catalog } from "@/lib/ipc"
-import { locationLabel, type Project } from "@/lib/types"
+import { AGENT_LABEL, isOpencode, locationLabel, type AgentKind, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
 import { copyChatMarkdown, useChats, type Queued } from "@/store/chats"
@@ -46,27 +46,25 @@ export function ChatView() {
   return <NewChat project={project} />
 }
 
-function useAgentDefaults(project: Project, agent: AgentRef) {
-  const settings = useApp((s) => s.settings)!
-  const provider = providerFor(settings, agent)
-  return { model: project.defaultModel || provider?.defaultModel || "", permission: provider?.permissionMode ?? "ask" }
+function useAgentDefaults(project: Project, agent: AgentKind) {
+  const provider = useApp((s) => s.settings)!.providers[agent]
+  return { model: project.defaultModel || provider.defaultModel || "", permission: provider.permissionMode }
 }
 
 /** Share in-flight catalog requests; opening the menu refreshes externally changed credentials. */
 const catalogCache = new Map<string, Promise<Catalog>>()
 /** The commands a running chat of each agent last listed, so a new chat has them at once. */
 const seenCommands = new Map<string, SlashCommand[]>()
-function useCatalog(agent: AgentRef, projectId: string, live: { models: ModelOption[]; commands: SlashCommand[] } = { models: [], commands: [] }) {
-  const key = `${agentKey(agent)}|${projectId}`
+function useCatalog(agent: AgentKind, projectId: string, live: { models: ModelOption[]; commands: SlashCommand[] } = { models: [], commands: [] }) {
+  const key = `${agent}|${projectId}`
   const [fetched, setFetched] = useState<Catalog | undefined>(undefined)
   useEffect(() => setFetched(undefined), [key])
   if (live.commands.length) seenCommands.set(key, live.commands)
   const load = () => {
-    if (agent.kind === "acp") return setFetched({ models: [], commands: [] })
-    if (!catalogCache.has(key)) catalogCache.set(key, ipc.providerCatalog(agent.kind, projectId).finally(() => catalogCache.delete(key)))
+    if (!catalogCache.has(key)) catalogCache.set(key, ipc.providerCatalog(agent, projectId).finally(() => catalogCache.delete(key)))
     catalogCache.get(key)!.then(setFetched).catch(() => {})
   }
-  const models = agent.kind === "opencode" && fetched ? fetched.models : live.models.length ? live.models : fetched?.models
+  const models = isOpencode(agent) && fetched ? fetched.models : live.models.length ? live.models : fetched?.models
   const commands = live.commands.length ? live.commands : (seenCommands.get(key) ?? fetched?.commands ?? [])
   return { models, commands, load }
 }
@@ -75,7 +73,7 @@ function NewChat({ project }: { project: Project }) {
   const settings = useApp((s) => s.settings)!
   const choices = agentChoices(settings)
   const preferred = project.defaultAgent ?? settings.providers.defaultAgent
-  const [agent, setAgent] = useState<AgentRef>(choices.find((c) => c.kind === preferred) ?? choices[0] ?? { kind: "claude", acpId: null })
+  const [agent, setAgent] = useState<AgentKind>(choices.includes(preferred) ? preferred : (choices[0] ?? "claude"))
   const d = useAgentDefaults(project, agent)
   const [permission, setPermission] = useState(d.permission)
   const [model, setModel] = useState<string | null>(null)
@@ -85,7 +83,7 @@ function NewChat({ project }: { project: Project }) {
   const draftCwd = useApp((s) => s.draftCwd)
   const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
   const send = (text: string, images: { mime: string; data: string }[] = []) =>
-    useChats.getState().send(null, text, { agent: agent.kind, acpId: agent.acpId, model: model ?? undefined, effort: effort || undefined, permission, cwd: draftCwd ?? undefined, images })
+    useChats.getState().send(null, text, { agent, model: model ?? undefined, effort: effort || undefined, permission, cwd: draftCwd ?? undefined, images })
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
@@ -96,7 +94,7 @@ function NewChat({ project }: { project: Project }) {
             <div>
               <h1 className="text-[22px] leading-tight font-semibold tracking-tight">What should we work on?</h1>
               <p className="mt-1 text-[12.5px] text-muted-foreground">
-                {agentName(settings, agent)} in <span className="font-medium text-foreground">{project.name}</span>
+                {AGENT_LABEL[agent]} in <span className="font-medium text-foreground">{project.name}</span>
                 {worktree ? (
                   <span className="rounded-sm ml-1 border px-1 font-mono text-[11px] text-muted-foreground">⎇ {worktree.branch}</span>
                 ) : null}
@@ -147,7 +145,7 @@ function NewChat({ project }: { project: Project }) {
 }
 
 function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatMeta; transcript: T }) {
-  const agent: AgentRef = { kind: meta.agent, acpId: meta.acpAgent }
+  const agent = meta.agent
   const d = useAgentDefaults(project, agent)
   const { models, commands, load } = useCatalog(agent, project.id, transcript)
   const permission = useChats((s) => s.permission[meta.id]) ?? d.permission
@@ -218,7 +216,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
               // A command never goes into a turn that's running: it waits its turn.
               if (running && how === "steer" && !text.startsWith("/")) void chats.steer(meta.id, text, images)
               else if (running) chats.enqueue(meta.id, text, images)
-              else void chats.send(meta.id, text, { agent: meta.agent, acpId: meta.acpAgent, permission, images })
+              else void chats.send(meta.id, text, { agent: meta.agent, permission, images })
             }}
             onSteerQueued={queued.length ? () => void chats.sendQueued(meta.id) : undefined}
             onStop={() => chats.interrupt(meta.id)}

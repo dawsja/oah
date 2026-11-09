@@ -66,8 +66,6 @@ export type ChatMeta = {
   agent: AgentKind
   /** Reasoning effort; empty: the model's default. */
   effort: string
-  /** Which added ACP agent, when `agent` is "acp". */
-  acpAgent: string | null
   model: string
   title: string
   cwd: string

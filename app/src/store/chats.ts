@@ -6,10 +6,9 @@ import { create } from "zustand"
 import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript, type Waiting } from "@/lib/chat"
 
 export { needsYou, waitingOf } from "@/lib/chat"
-import { providerFor } from "@/lib/agents"
 import { ipc, onChatEvent, onChatsChanged } from "@/lib/ipc"
 import { notify } from "@/lib/notify"
-import type { AgentKind, PermissionMode } from "@/lib/types"
+import { isOpencode, type AgentKind, type PermissionMode } from "@/lib/types"
 import { useApp } from "./app"
 import { draftKey, drafts } from "./drafts"
 
@@ -40,7 +39,7 @@ type ChatsStore = {
   send(
     chatId: string | null,
     text: string,
-    opts: { agent: AgentKind; acpId?: string | null; model?: string; effort?: string; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] },
+    opts: { agent: AgentKind; model?: string; effort?: string; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] },
   ): Promise<void>
   /** `/compact`: the agent summarizes the conversation so far. */
   compact(chatId: string, instructions: string, permission: PermissionMode): Promise<void>
@@ -119,7 +118,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
     try {
       if (!id) {
         if (!app.projectId) return
-        const meta = await ipc.chatCreate(app.projectId, opts.agent, opts.acpId ?? null, opts.model ?? null, opts.effort ?? null, opts.cwd ?? null)
+        const meta = await ipc.chatCreate(app.projectId, opts.agent, opts.model ?? null, opts.effort ?? null, opts.cwd ?? null)
         id = meta.id
         set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: emptyTranscript() }, permission: { ...s.permission, [meta.id]: opts.permission } }))
         useApp.setState({ chatId: meta.id })
@@ -132,7 +131,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
     } catch (e) {
       const msg = String(e)
       // Not signed in: the CLI's sign-in is one click away.
-      const login = msg.includes("isn't signed in") && (opts.agent === "opencode" || opts.agent === "claude" || opts.agent === "codex") ? opts.agent : null
+      const login = msg.includes("isn't signed in") ? opts.agent : null
       // Sign in where the project is: this computer, or inside its WSL distro.
       const meta = get().metas.find((m) => m.id === id)
       const project = useApp.getState().settings?.projects.find((p) => p.id === (meta?.projectId ?? useApp.getState().projectId))
@@ -226,7 +225,8 @@ export const useChats = create<ChatsStore>((set, get) => ({
   async steer(chatId, text, images) {
     const opts = sendOpts(chatId, images)
     if (!opts) return
-    if (get().transcripts[chatId]?.running && (opts.agent === "opencode" || opts.agent === "acp")) await get().interrupt(chatId)
+    // OpenCode takes one prompt at a time: the running turn stops, then this goes.
+    if (get().transcripts[chatId]?.running && isOpencode(opts.agent)) await get().interrupt(chatId)
     await get().send(chatId, text, opts)
   },
 
@@ -256,9 +256,9 @@ function sendOpts(chatId: string, images: Image[]) {
   const meta = useChats.getState().metas.find((m) => m.id === chatId)
   if (!meta) return null
   const settings = useApp.getState().settings
-  const provider = settings ? providerFor(settings, { kind: meta.agent, acpId: meta.acpAgent }) : null
+  const provider = settings?.providers[meta.agent]
   const permission = useChats.getState().permission[chatId] ?? provider?.permissionMode ?? "ask"
-  return { agent: meta.agent, acpId: meta.acpAgent, permission, images: images.map(({ mime, data }) => ({ mime, data })) }
+  return { agent: meta.agent, permission, images: images.map(({ mime, data }) => ({ mime, data })) }
 }
 
 /** Chats whose snapshot is loading, and the events (with their numbers) that came meanwhile. */

@@ -1,13 +1,16 @@
 // Mirrors crates/oah-core/src/settings.rs (serde camelCase).
 
-export type AgentKind = "claude" | "codex" | "opencode" | "acp"
-/** The built-in agents (an added ACP agent is `acp` plus its id). */
-export const AGENTS: Exclude<AgentKind, "acp">[] = ["claude", "codex", "opencode"]
-export const AGENT_LABEL: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode", acp: "ACP agent" }
-/** Agents whose plan limits oah can read. */
+/** `opencode2`: OpenCode 2 by its installer's `opencode2` command (the same CLI and accounts). */
+export type AgentKind = "claude" | "codex" | "opencode" | "opencode2"
+/** The agents oah drives. */
+export const AGENTS: AgentKind[] = ["claude", "codex", "opencode", "opencode2"]
+export const AGENT_LABEL: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode", opencode2: "OpenCode 2" }
+/** OpenCode by either command: driven the same way. */
+export const isOpencode = (k: AgentKind | undefined) => k === "opencode" || k === "opencode2"
+/** Agents whose plan limits oah can read (OpenCode 2's are OpenCode's: one Go account). */
 export const LIMIT_AGENTS: AgentKind[] = ["claude", "codex", "opencode"]
 /** Whose limits they are (OpenCode's are its Go plan's). */
-export const LIMIT_LABEL: Record<AgentKind, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode Go", acp: "ACP agent" }
+export const LIMIT_LABEL: Record<AgentKind, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode Go", opencode2: "OpenCode Go" }
 
 export type PermissionMode = "ask" | "acceptEdits" | "plan" | "fullAccess"
 export const PERMISSION_LABEL: Record<PermissionMode, string> = {
@@ -28,10 +31,7 @@ export type Provider = {
   env: EnvVar[]
 }
 
-/** An agent the user added that speaks ACP: `binary` is its command, `args` follow it. */
-export type AcpAgent = Provider & { id: string; name: string; args: string[] }
-
-export type Providers = { claude: Provider; codex: Provider; opencode: Provider; acp: AcpAgent[]; defaultAgent: AgentKind }
+export type Providers = { claude: Provider; codex: Provider; opencode: Provider; opencode2: Provider; defaultAgent: AgentKind }
 
 export type Voice = { enabled: boolean; microphone: string; holdKey: string; silenceStopSecs: number }
 
@@ -115,4 +115,4 @@ export type Limits = { windows: LimitWindow[]; error: string | null; extra: Limi
 
 /** `windows`: not installed there, but a Windows copy is on WSL's PATH (where). */
 export type Tool = { path: string | null; version: string | null; windows: string | null }
-export type HostCheck = { ok: boolean; error: string | null; home: string | null; os: string | null; git: Tool; gh: Tool; claude: Tool; codex: Tool; opencode: Tool }
+export type HostCheck = { ok: boolean; error: string | null; home: string | null; os: string | null; git: Tool; gh: Tool; claude: Tool; codex: Tool; opencode: Tool; opencode2: Tool }

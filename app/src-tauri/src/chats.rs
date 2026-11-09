@@ -137,17 +137,7 @@ impl Chats {
         let project = settings.projects.iter().find(|p| p.id == chat.project_id).ok_or("no such project")?;
         let agent = chat.agent.or(project.default_agent).unwrap_or(settings.providers.default_agent);
         let cwd = chat.cwd.unwrap_or_else(|| project.path.clone());
-        if agent == AgentKind::Acp && chat.acp_agent.as_deref().and_then(|id| settings.providers.acp_agent(id)).is_none() {
-            return Err("no such ACP agent".into());
-        }
-        self.create(
-            &chat.project_id,
-            agent,
-            chat.acp_agent,
-            chat.model.as_deref().unwrap_or(""),
-            chat.effort.as_deref().unwrap_or(""),
-            &cwd,
-        )
+        self.create(&chat.project_id, agent, chat.model.as_deref().unwrap_or(""), chat.effort.as_deref().unwrap_or(""), &cwd)
     }
 
     /// The mode a chat sends with: the one given (remembered from now on), else the last one.
@@ -197,18 +187,9 @@ impl Chats {
         Ok(Snapshot { events, seq: log.seq, live, busy })
     }
 
-    pub fn create(
-        &self,
-        project_id: &str,
-        agent: AgentKind,
-        acp_agent: Option<String>,
-        model: &str,
-        effort: &str,
-        cwd: &str,
-    ) -> Result<ChatMeta, String> {
+    pub fn create(&self, project_id: &str, agent: AgentKind, model: &str, effort: &str, cwd: &str) -> Result<ChatMeta, String> {
         let mut meta = self.store.create(project_id, agent, model, cwd).map_err(|e| e.to_string())?;
-        if agent == AgentKind::Acp || !effort.is_empty() {
-            meta.acp_agent = acp_agent.filter(|_| agent == AgentKind::Acp);
+        if !effort.is_empty() {
             meta.effort = effort.to_string();
             self.store.save(&meta).map_err(|e| e.to_string())?;
         }
@@ -315,14 +296,10 @@ impl Chats {
         meta.sleeping = false;
         self.store.save(&meta).map_err(|e| e.to_string())?;
         let project = settings.projects.iter().find(|p| p.id == meta.project_id).ok_or("this chat's project was removed")?;
-        let provider = settings
-            .providers
-            .for_chat(meta.agent, meta.acp_agent.as_deref())
-            .ok_or("this chat's agent was removed in Settings → Providers")?;
+        let provider = settings.providers.get(meta.agent);
         if !provider.enabled {
             return Err("this agent is turned off in Settings → Providers".into());
         }
-        let args = meta.acp_agent.as_deref().and_then(|id| settings.providers.acp_agent(id)).map(|a| a.args.clone()).unwrap_or_default();
         let model = Some(meta.model.clone())
             .filter(|m| !m.is_empty())
             .or_else(|| Some(project.default_model.clone()).filter(|m| !m.is_empty()))
@@ -336,8 +313,7 @@ impl Chats {
             effort: Some(meta.effort.clone()).filter(|e| !e.is_empty()),
             permission: permission.unwrap_or(provider.permission_mode),
             resume: meta.agent_session_id.clone(),
-            env: crate::secrets::resolve(&crate::secrets::scope(meta.agent, meta.acp_agent.as_deref()), &provider.env),
-            args,
+            env: crate::secrets::resolve(&crate::secrets::scope(meta.agent), &provider.env),
         };
         // A stopped distro starts here (a few seconds), so a missing or broken one says so
         // plainly instead of as an agent that exited.

@@ -3,7 +3,7 @@ import type { ChatMeta } from "./chat"
 import { termsOf, titleMatches } from "./search"
 
 const meta = (id: string, title: string, projectId = "p"): ChatMeta =>
-  ({ id, projectId, agent: "claude", effort: "", acpAgent: null, model: "", title, cwd: "", agentSessionId: null, createdAt: 0, updatedAt: 0, tokens: 0, costUsd: 0, pinned: false }) as ChatMeta
+  ({ id, projectId, agent: "claude", effort: "", model: "", title, cwd: "", agentSessionId: null, createdAt: 0, updatedAt: 0, tokens: 0, costUsd: 0, pinned: false }) as ChatMeta
 
 describe("titleMatches", () => {
   const metas = [meta("a", "Fix the retry logic"), meta("b", "Retry backoff in the client"), meta("c", "Login page", "q"), meta("d", "")]

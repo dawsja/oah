@@ -18,7 +18,6 @@ pub type HostResult<T> = Result<T, String>;
 pub struct NewChat {
     pub project_id: String,
     pub agent: Option<AgentKind>,
-    pub acp_agent: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub cwd: Option<String>,
@@ -56,8 +55,8 @@ pub trait Host: Send + Sync + 'static {
     /// A new worktree on a new branch, from the project's base branch.
     fn create_worktree(&self, project_id: &str, branch: &str) -> HostResult<WorktreeInfo>;
 
-    /// `kind`'s CLI (an ACP agent: `acp_agent`) on `location`.
-    fn check_agent(&self, kind: AgentKind, acp_agent: Option<&str>, location: &Location) -> AgentCheck;
+    /// `kind`'s CLI on `location`.
+    fn check_agent(&self, kind: AgentKind, location: &Location) -> AgentCheck;
     /// The models (with their effort levels) and slash commands an agent offers where the
     /// project is.
     fn catalog(&self, kind: AgentKind, project_id: Option<&str>) -> HostResult<(Vec<ModelOption>, Vec<SlashCommand>)>;

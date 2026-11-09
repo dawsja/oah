@@ -76,15 +76,21 @@ pub struct PairedDevice {
 pub enum AgentKind {
     Claude,
     Codex,
-    /// OpenCode, over ACP (`opencode acp`).
+    /// OpenCode, over ACP (`opencode acp`): 1.x or 2.x, whichever `opencode` is.
     Opencode,
-    /// An agent the user added, over the Agent Client Protocol (see `Providers::acp`).
-    Acp,
+    /// OpenCode 2 by its installer's `opencode2` command (2.x only; the same accounts and
+    /// history as `opencode`).
+    Opencode2,
 }
 
 impl AgentKind {
     /// The built-in agents (each has its own Provider settings).
-    pub const ALL: [AgentKind; 3] = [AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode];
+    pub const ALL: [AgentKind; 4] = [AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode, AgentKind::Opencode2];
+
+    /// OpenCode by either command: the same CLI, driven the same way.
+    pub fn is_opencode(self) -> bool {
+        matches!(self, AgentKind::Opencode | AgentKind::Opencode2)
+    }
 
     /// The command when no path is set.
     pub fn default_binary(self) -> &'static str {
@@ -92,9 +98,20 @@ impl AgentKind {
             AgentKind::Claude => "claude",
             AgentKind::Codex => "codex",
             AgentKind::Opencode => "opencode",
-            AgentKind::Acp => "",
+            AgentKind::Opencode2 => "opencode2",
         }
     }
+}
+
+/// An agent oah no longer has (`acp`, from when users could add ACP agents) reads as the default.
+fn agent_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<AgentKind, D::Error> {
+    Ok(agent_or_none(d)?.unwrap_or(AgentKind::Claude))
+}
+
+/// An agent oah no longer has reads as none (the Providers default).
+fn agent_or_none<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Option<AgentKind>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.and_then(|v| serde_json::from_value(v).ok()))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,9 +120,9 @@ pub struct Providers {
     pub claude: Provider,
     pub codex: Provider,
     pub opencode: Provider,
-    /// Other agents that speak ACP, added by the user.
-    pub acp: Vec<AcpAgent>,
+    pub opencode2: Provider,
     /// The agent a new chat starts with when its project names none.
+    #[serde(deserialize_with = "agent_or_default")]
     pub default_agent: AgentKind,
 }
 
@@ -115,56 +132,29 @@ impl Default for Providers {
             claude: Provider::default(),
             codex: Provider::default(),
             opencode: Provider::default(),
-            acp: Vec::new(),
+            opencode2: Provider::default(),
             default_agent: AgentKind::Claude,
         }
     }
 }
 
-/// An ACP agent the user added: a command that speaks the Agent Client Protocol on stdio.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-pub struct AcpAgent {
-    pub id: String,
-    pub name: String,
-    /// Arguments after the command (`provider.binary`), e.g. `["--experimental-acp"]`.
-    pub args: Vec<String>,
-    /// The command, model, permissions and environment, as for the built-in agents.
-    #[serde(flatten)]
-    pub provider: Provider,
-}
-
-static NO_PROVIDER: std::sync::LazyLock<Provider> = std::sync::LazyLock::new(Provider::default);
-
 impl Providers {
-    /// A built-in agent's settings (`Acp` agents are looked up with [`Providers::acp_agent`]).
+    /// An agent's settings.
     pub fn get(&self, kind: AgentKind) -> &Provider {
         match kind {
             AgentKind::Claude => &self.claude,
             AgentKind::Codex => &self.codex,
             AgentKind::Opencode => &self.opencode,
-            AgentKind::Acp => &NO_PROVIDER,
+            AgentKind::Opencode2 => &self.opencode2,
         }
     }
 
-    pub fn acp_agent(&self, id: &str) -> Option<&AcpAgent> {
-        self.acp.iter().find(|a| a.id == id)
-    }
-
-    /// The settings a chat's agent runs with.
-    pub fn for_chat(&self, kind: AgentKind, acp_id: Option<&str>) -> Option<&Provider> {
+    pub fn get_mut(&mut self, kind: AgentKind) -> &mut Provider {
         match kind {
-            AgentKind::Acp => acp_id.and_then(|id| self.acp_agent(id)).map(|a| &a.provider),
-            k => Some(self.get(k)),
-        }
-    }
-
-    pub fn get_mut(&mut self, kind: AgentKind) -> Option<&mut Provider> {
-        match kind {
-            AgentKind::Claude => Some(&mut self.claude),
-            AgentKind::Codex => Some(&mut self.codex),
-            AgentKind::Opencode => Some(&mut self.opencode),
-            AgentKind::Acp => None,
+            AgentKind::Claude => &mut self.claude,
+            AgentKind::Codex => &mut self.codex,
+            AgentKind::Opencode => &mut self.opencode,
+            AgentKind::Opencode2 => &mut self.opencode2,
         }
     }
 }
@@ -340,6 +330,7 @@ pub struct Project {
     /// The folder (on `location`).
     pub path: String,
     /// The agent new chats start with; none means the Providers default.
+    #[serde(deserialize_with = "agent_or_none")]
     pub default_agent: Option<AgentKind>,
     /// Empty is the agent's default model.
     pub default_model: String,
@@ -464,6 +455,22 @@ mod tests {
         assert_eq!(old.appearance.theme, Theme::Light);
         assert_eq!(old.appearance.ui_font_size, 13, "missing fields get defaults");
         assert!(old.providers.claude.enabled);
+    }
+
+    #[test]
+    fn settings_from_when_acp_agents_could_be_added_still_load() {
+        let json = r#"{
+            "providers": {"claude": {"binary": "/opt/claude"}, "defaultAgent": "acp",
+                "acp": [{"id": "g", "name": "Gemini", "binary": "gemini", "args": ["--experimental-acp"]}]},
+            "projects": [{"id": "p1", "name": "web", "location": {"kind": "local"}, "path": "/code/web", "defaultAgent": "acp"},
+                         {"id": "p2", "name": "api", "location": {"kind": "local"}, "path": "/code/api", "defaultAgent": "codex"}]
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.providers.claude.binary, "/opt/claude", "the rest is kept");
+        assert_eq!(s.providers.default_agent, AgentKind::Claude);
+        assert_eq!(s.projects[0].default_agent, None);
+        assert_eq!(s.projects[1].default_agent, Some(AgentKind::Codex));
+        assert!(!serde_json::to_string(&s).unwrap().contains("acp\""), "saved without the ACP agents");
     }
 
     #[test]

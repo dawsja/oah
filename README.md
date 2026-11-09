@@ -1,8 +1,7 @@
 # oah — Open Agent Harness
 
-A chat-first desktop app for coding agents. oah drives **Claude Code**, **Codex**, **OpenCode**
-and any other agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com)
-(the CLIs you already use, with your own sign-ins) in your projects: on this computer, in WSL
+A chat-first desktop app for coding agents. oah drives **Claude Code**, **Codex** and **OpenCode**
+1.x and 2 (by `opencode` or `opencode2`), the CLIs you already use with your own sign-ins, in your projects: on this computer, in WSL
 or on an SSH host, with git, worktrees and pull requests next to the chat. Rust and Tauri; no
 Electron.
 
@@ -17,7 +16,7 @@ Electron.
   free space; Claude Code reports the breakdown, the others the total), token use per turn, a model picker with each agent's own models and their effort levels (hover a
   model: Low … Max open to the right), `@` file mentions, and a `/` menu: oah's `/model`, `/plan`, `/compact` and `/clear`, then the agent's own
   commands and skills. "Always allow" lasts for the chat's session; it never writes the agent's
-  settings files. Messages sent mid-turn are steered in (Codex) or queued (Claude, ACP). Chats
+  settings files. Messages sent mid-turn are steered in (Codex) or queued (Claude, OpenCode). Chats
   are saved and resume the agent's own session.
 - **Images.** Attach by paste, drop or the clip button; they're saved with the chat, shown as
   thumbnails in the message, and open full-window (fit or actual size, copy, save; ← → between
@@ -95,7 +94,7 @@ crates/
   oah-core       data folder (~/.config/oah/app, or $OAH_HOME/app), settings.json, chats on disk
   oah-transport  runs a program in a folder: locally, over ssh, or in a WSL distro; distros,
                  host checks, remote folders; terminals (a shell in a pty, wherever the project is)
-  oah-agents     Claude Code (stream-json), Codex (app-server) and ACP (OpenCode, added agents)
+  oah-agents     Claude Code (stream-json), Codex (app-server) and OpenCode (ACP)
                  drivers → ChatEvent; sign-in, models and plan limits; a scripted mock
                  (OAH_MOCK_AGENT=1)
   oah-git        git and gh: status, diffs, commits, branches, sync, graph, worktrees, PRs

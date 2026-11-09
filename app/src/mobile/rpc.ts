@@ -17,7 +17,7 @@ export type Push = { push: "chat"; chatId: string; event: ChatEvent } | { push: 
 export type Waiting = "approval" | "question" | "plan"
 
 /** An agent the desktop has turned on. */
-export type AgentInfo = { kind: AgentKind; acpId: string | null; name: string; defaultModel: string; permissionMode: PermissionMode }
+export type AgentInfo = { kind: AgentKind; name: string; defaultModel: string; permissionMode: PermissionMode }
 export type Catalog = { models: ModelOption[]; commands: SlashCommand[] }
 export type Image = { mime: string; data: string }
 
@@ -52,7 +52,7 @@ export const api = {
   chats: () => rpc<{ metas: ChatMeta[]; running: string[]; busy: string[]; waiting?: Record<string, Waiting> }>("chats.list"),
   open: (chatId: string) => rpc<Snapshot>("chat.open", { chatId }),
   close: (chatId: string) => rpc<void>("chat.close", { chatId }),
-  create: (projectId: string, agent: AgentKind, acpAgent: string | null, model: string | null) => rpc<ChatMeta>("chat.create", { projectId, agent, acpAgent, model }),
+  create: (projectId: string, agent: AgentKind, model: string | null) => rpc<ChatMeta>("chat.create", { projectId, agent, model }),
   send: (chatId: string, text: string, images: Image[], permission: PermissionMode | null) =>
     rpc<void>("chat.send", { chatId, prompt: { id: crypto.randomUUID(), text, images }, permission }),
   interrupt: (chatId: string) => rpc<void>("chat.interrupt", { chatId }),

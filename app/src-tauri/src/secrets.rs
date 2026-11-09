@@ -5,13 +5,9 @@ use oah_core::settings::{AgentKind, EnvVar, Settings};
 
 const SERVICE: &str = "dev.oah.app";
 
-/// Whose variables: a built-in agent (`claude`, `codex`, `opencode`) or an added ACP agent
-/// (`acp:<id>`).
-pub fn scope(kind: AgentKind, acp_id: Option<&str>) -> String {
-    match kind {
-        AgentKind::Acp => format!("acp:{}", acp_id.unwrap_or("")),
-        k => format!("{k:?}").to_lowercase(),
-    }
+/// Whose variables: `claude`, `codex` or `opencode`.
+pub fn scope(kind: AgentKind) -> String {
+    format!("{kind:?}").to_lowercase()
 }
 
 fn entry(scope: &str, key: &str) -> Result<keyring::Entry, String> {
@@ -39,13 +35,7 @@ fn stash_vars(scope: &str, vars: &mut [EnvVar], old: &[EnvVar]) -> Result<(), St
 pub fn stash(settings: &mut Settings, before: &Settings) -> Result<(), String> {
     for kind in AgentKind::ALL {
         let old = before.providers.get(kind).env.clone();
-        if let Some(p) = settings.providers.get_mut(kind) {
-            stash_vars(&scope(kind, None), &mut p.env, &old)?;
-        }
-    }
-    for a in settings.providers.acp.iter_mut() {
-        let old = before.providers.acp_agent(&a.id).map(|b| b.provider.env.clone()).unwrap_or_default();
-        stash_vars(&scope(AgentKind::Acp, Some(&a.id)), &mut a.provider.env, &old)?;
+        stash_vars(&scope(kind), &mut settings.providers.get_mut(kind).env, &old)?;
     }
     Ok(())
 }

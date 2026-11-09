@@ -25,12 +25,32 @@ pub struct Spec<'a> {
     pub env: &'a [EnvVar],
 }
 
+/// Per-user folders installers put CLIs in without always getting them onto PATH for every
+/// shell (Claude Code's native installer; OpenCode's, which adds it in `.bashrc` only). A
+/// program by name not on PATH is looked for there too; PATH still wins.
+pub const USER_BIN_DIRS: [&str; 2] = [".local/bin", ".opencode/bin"];
+
+/// A program on this computer: on PATH (so `claude` finds `claude.exe` or `claude.cmd`), else
+/// in one of the [`USER_BIN_DIRS`].
+pub fn find_local(program: &str) -> Option<PathBuf> {
+    if let Ok(p) = which::which(program) {
+        return Some(p);
+    }
+    if program.contains(['/', '\\']) {
+        return None;
+    }
+    let home = oah_core::paths::home_dir();
+    let names: Vec<String> =
+        if cfg!(windows) { ["exe", "cmd"].iter().map(|e| format!("{program}.{e}")).collect() } else { vec![program.to_string()] };
+    USER_BIN_DIRS.iter().flat_map(|d| names.iter().map(|n| home.join(d).join(n)).collect::<Vec<_>>()).find(|p| p.is_file())
+}
+
 /// A `Command` ready to spawn, with piped stdio and no console window. Local programs are
-/// resolved on PATH first (so `claude` finds `claude.exe` or `claude.cmd`).
+/// found with [`find_local`].
 pub fn command(spec: &Spec) -> Result<Command, String> {
     let mut cmd = match spec.location {
         Location::Local => {
-            let exe: PathBuf = which::which(spec.program).map_err(|_| format!("{} isn't installed or isn't on PATH", spec.program))?;
+            let exe: PathBuf = find_local(spec.program).ok_or_else(|| format!("{} isn't installed or isn't on PATH", spec.program))?;
             let mut c = Command::new(exe);
             c.args(&spec.args).current_dir(spec.cwd);
             for v in spec.env.iter().filter(|v| !v.key.is_empty()) {
@@ -59,10 +79,10 @@ pub fn remote_line(spec: &Spec) -> String {
     format!("sh -lc {}", sh_quote(&remote_script(spec, false)))
 }
 
-/// `cd` to the folder (`~` expanded), then `exec env K=V program args…`. With `skip_windows`
-/// (WSL), a program given by name is looked up on PATH without the Windows drives WSL adds
-/// (`/mnt/c/…`), so a Windows copy is never run on Linux files; the program itself still gets
-/// the whole PATH.
+/// `cd` to the folder (`~` expanded), then `exec env K=V program args…`. A program given by
+/// name is looked up on PATH, then in the [`USER_BIN_DIRS`]. With `skip_windows` (WSL), the
+/// lookup leaves out the Windows drives WSL adds (`/mnt/c/…`), so a Windows copy is never run
+/// on Linux files; the program itself still gets the whole PATH.
 pub fn remote_script(spec: &Spec, skip_windows: bool) -> String {
     let cd = cd_line(spec.cwd);
     let mut words = vec!["exec".to_string(), "env".to_string()];
@@ -71,12 +91,22 @@ pub fn remote_script(spec: &Spec, skip_windows: bool) -> String {
     }
     let by_name = !spec.program.contains('/');
     let mut lines = vec![cd + " || exit 1"];
+    let user_bins: Vec<String> = USER_BIN_DIRS.iter().map(|d| format!("$HOME/{d}")).collect();
     if skip_windows && by_name {
         lines.push(LINUX_PATH.trim().to_string());
         lines.push(format!(
-            "oah_prog=$(PATH=$oah_path command -v {p}) || {{ printf '%s\\n' {msg} >&2; exit 127; }}",
+            "oah_prog=$(PATH=\"$oah_path:{bins}\" command -v {p}) || {{ printf '%s\\n' {msg} >&2; exit 127; }}",
+            bins = user_bins.join(":"),
             p = sh_quote(spec.program),
             msg = sh_quote(&format!("{} isn't installed in this distro (a Windows copy doesn't count)", spec.program)),
+        ));
+        words.push("\"$oah_prog\"".into());
+    } else if by_name {
+        // Not found: run it by name anyway, so the shell says so (exit 127).
+        lines.push(format!(
+            "oah_prog=$(PATH=\"$PATH:{bins}\" command -v {p}) || oah_prog={p}",
+            bins = user_bins.join(":"),
+            p = sh_quote(spec.program),
         ));
         words.push("\"$oah_prog\"".into());
     } else {
@@ -128,7 +158,10 @@ mod tests {
         ];
         let spec = Spec { location: &loc, cwd: "~/code/my app", program: "claude", args: vec!["-p".into(), "it's".into()], env: &env };
         let script = remote_script(&spec, false);
-        assert_eq!(script, "cd \"$HOME\"/'code/my app' || exit 1\nexec env 'API_KEY=a'\\''b' 'claude' '-p' 'it'\\''s'");
+        assert_eq!(
+            script,
+            "cd \"$HOME\"/'code/my app' || exit 1\noah_prog=$(PATH=\"$PATH:$HOME/.local/bin:$HOME/.opencode/bin\" command -v 'claude') || oah_prog='claude'\nexec env 'API_KEY=a'\\''b' \"$oah_prog\" '-p' 'it'\\''s'"
+        );
         assert_eq!(remote_line(&spec), format!("sh -lc {}", sh_quote(&script)));
     }
 
@@ -153,6 +186,23 @@ mod tests {
             Spec { location: &loc, cwd: "/", program: "printf", args: vec!["%s|".into(), "a b".into(), "it's $HOME".into()], env: &[] };
         let out = Command::new("sh").arg("-c").arg(remote_line(&spec)).output().unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout), "a b|it's $HOME|");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn finds_programs_in_user_bin_folders() {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".opencode/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("oah-test-tool"), "#!/bin/sh\necho found-it\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("oah-test-tool"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        for skip_windows in [false, true] {
+            let loc = Location::Wsl { distro: "x".into() };
+            let spec = Spec { location: &loc, cwd: "/", program: "oah-test-tool", args: vec![], env: &[] };
+            let out = Command::new("sh").arg("-c").arg(remote_script(&spec, skip_windows)).env("HOME", home.path()).output().unwrap();
+            assert_eq!(String::from_utf8_lossy(&out.stdout), "found-it\n", "skip_windows={skip_windows}");
+        }
     }
 
     #[test]

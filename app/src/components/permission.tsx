@@ -1,4 +1,4 @@
-// The permission modes' icons and colours, shared by every agent (Claude Code, Codex, OpenCode, added ACP agents).
+// The permission modes' icons and colours, shared by every agent (Claude Code, Codex, OpenCode).
 import { FilePen, Hand, ListChecks, ShieldOff, type LucideIcon } from "lucide-react"
 import type { PermissionMode } from "@/lib/types"
 
