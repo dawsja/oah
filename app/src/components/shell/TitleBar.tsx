@@ -5,7 +5,6 @@ import { isRemote, locationLabel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useRemote } from "@/lib/remote"
 import { useApp, useProject } from "@/store/app"
-import { UpdateButton } from "./Updates"
 import { UsageButton } from "./UsageButton"
 import { TerminalButton } from "@/components/terminal/TerminalPanel"
 
@@ -47,7 +46,6 @@ export function TitleBar() {
         ) : null}
       </div>
       <div data-tauri-drag-region className="h-full flex-1" onDoubleClick={() => win().then((w) => w.toggleMaximize())} />
-      <UpdateButton />
       <PhoneButton />
       <UsageButton />
       <TerminalButton />

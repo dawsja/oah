@@ -19,6 +19,7 @@ import { toast } from "sonner"
 import { useApp } from "@/store/app"
 import { copyChatMarkdown, needsYou, useChats, waitingOf } from "@/store/chats"
 import { openChatSearch } from "./ChatSearch"
+import { UpdateButton } from "./Updates"
 import { useGit } from "@/store/git"
 
 /** Projects, each with its worktrees and their chats; Settings at the bottom. */
@@ -74,7 +75,8 @@ export function Sidebar() {
         )}
       </nav>
 
-      <div className="border-t p-1">
+      <div className="flex flex-col gap-1 border-t p-1">
+        <UpdateButton />
         <button
           className={cn("rounded-md flex h-8 w-full items-center gap-2 px-2.5 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", view === "settings" && "row-active")}
           onClick={() => openSettings()}
