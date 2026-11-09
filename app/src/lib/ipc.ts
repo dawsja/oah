@@ -31,6 +31,9 @@ export const ipc = {
   chatList: () => call<ChatMeta[]>("chat_list"),
   /** What each chat waits on the user for, open in this window or not. */
   chatWaiting: () => call<Record<string, Waiting>>("chat_waiting"),
+  /** Chats with background work running. */
+  chatBackground: () => call<string[]>("chat_background"),
+  chatStopTask: (chatId: string, taskId: string) => call<void>("chat_stop_task", { chatId, taskId }),
   /** Chats whose text has every word of `query`, newest first. */
   chatSearch: (query: string) => call<SearchHit[]>("chat_search", { query }),
   /** The chat as Markdown, for an issue or a PR description. */

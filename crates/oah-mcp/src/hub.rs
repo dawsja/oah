@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use oah_agents::event::{ApprovalRequest, ChatEvent, ModelOption, PlanItem, QuestionRequest, Usage};
+use oah_agents::event::{ApprovalRequest, BackgroundTask, ChatEvent, ModelOption, PlanItem, QuestionRequest, Usage};
 use oah_core::settings::PermissionMode;
 use serde::Serialize;
 
@@ -31,6 +31,9 @@ pub struct Status {
     /// Files changed this turn: path, lines added, lines removed.
     pub files: Vec<(String, u32, u32)>,
     pub plan: Vec<PlanItem>,
+    /// Background work: running, or ended since the user last wrote.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<BackgroundTask>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -148,6 +151,7 @@ impl Status {
             }
             ChatEvent::PermissionChanged { mode } => self.permission = Some(*mode),
             ChatEvent::Plan { items } => self.plan = items.clone(),
+            ChatEvent::Tasks { tasks } => self.tasks = tasks.clone(),
             ChatEvent::TurnFinished { usage, cost_usd, duration_ms, interrupted, .. } => {
                 self.settle();
                 self.turns += 1;

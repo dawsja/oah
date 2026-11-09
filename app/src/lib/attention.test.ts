@@ -31,4 +31,17 @@ describe("what waits on the user", () => {
     expect(notification({ type: "approval", request: approval("command") }, meta("c"))?.waits).toBe(true)
     expect(notification({ type: "turnFinished", turnId: "t", usage: null, costUsd: null, durationMs: null, interrupted: false }, meta("c"))?.waits).toBeUndefined()
   })
+
+  it("tells when background work ends, once", () => {
+    const t = (status: "running" | "completed" | "failed" | "stopped") => ({
+      id: "k1", kind: "agent" as const, title: "Watch CI", status, detail: null, itemId: null, startedAt: 0, endedAt: null, tracked: true, stoppable: true,
+    })
+    const m = meta("bg")
+    expect(notification({ type: "tasks", tasks: [t("running")] }, m)).toBeNull()
+    expect(notification({ type: "tasks", tasks: [t("completed")] }, m)).toMatchObject({ title: "Background work finished", body: expect.stringContaining("Watch CI") })
+    expect(notification({ type: "tasks", tasks: [t("completed")] }, m)).toBeNull()
+    // Stopped on purpose: no news.
+    notification({ type: "tasks", tasks: [t("running")] }, m)
+    expect(notification({ type: "tasks", tasks: [t("stopped")] }, m)).toBeNull()
+  })
 })

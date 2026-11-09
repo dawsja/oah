@@ -102,6 +102,10 @@ struct State {
     /// Set when the process starts; part of every turn id.
     nonce: String,
     permission: PermissionMode,
+    /// Tool calls started this turn and not finished: one still open when the turn ends was
+    /// left running (Antigravity's background commands), and shows as a background task.
+    open: HashMap<String, ToolCall>,
+    tasks: TaskList,
 }
 
 /// A form field from an elicitation, and how its answer goes back.
@@ -195,8 +199,18 @@ impl AcpDriver {
                 rpc.fail_all();
                 let code = child.lock().unwrap().as_mut().and_then(|c| c.wait().ok()).and_then(|s| s.code());
                 thread::sleep(Duration::from_millis(50));
-                if let Some(turn_id) = state.lock().unwrap().turn_id.take() {
+                let (turn, tasks) = {
+                    let mut s = state.lock().unwrap();
+                    s.open.clear();
+                    let tasks = s.tasks.stop_all().then(|| s.tasks.event());
+                    (s.turn_id.take(), tasks)
+                };
+                if let Some(turn_id) = turn {
                     sink(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted: true });
+                }
+                // What it left running went with it.
+                if let Some(e) = tasks {
+                    sink(e);
                 }
                 let message = if code == Some(127) {
                     Some(format!("{program} isn't installed there, or isn't on that machine's PATH."))
@@ -440,10 +454,28 @@ fn run_prompt(rpc: Rpc, state: Arc<Mutex<State>>, sink: Sink, queue: Arc<Mutex<V
     thread::spawn(move || {
         let started = std::time::Instant::now();
         let r = rpc.call("session/prompt", json!({"sessionId": sid, "prompt": blocks}), PROMPT_LIMIT);
-        let (cost, interrupted, compacted, context) = {
+        let (cost, interrupted, compacted, context, tasks) = {
             let mut s = state.lock().unwrap();
             s.busy = false;
             s.turn_id = None;
+            // Tool calls the turn ended without: left running in the background. Antigravity
+            // never says when those end; others may, with a later `tool_call_update`.
+            let left: Vec<(String, ToolCall)> = s.open.drain().collect();
+            let ended_well = r.as_ref().is_ok_and(|v| v["stopReason"] != "cancelled");
+            let tracked = s.kind != Some(AgentKind::Antigravity);
+            let mut changed = false;
+            for (id, call) in left.into_iter().filter(|_| ended_well) {
+                let kind = match call.kind {
+                    ToolKind::Bash => TaskKind::Command,
+                    ToolKind::Task => TaskKind::Agent,
+                    _ => TaskKind::Other,
+                };
+                let mut t = BackgroundTask::running(id.clone(), kind, call.title);
+                t.item_id = Some(id);
+                t.tracked = tracked;
+                changed |= s.tasks.add(t);
+            }
+            let tasks = changed.then(|| s.tasks.event());
             s.pending.clear();
             s.questions.clear();
             s.choices.clear();
@@ -462,8 +494,12 @@ fn run_prompt(rpc: Rpc, state: Arc<Mutex<State>>, sink: Sink, queue: Arc<Mutex<V
                 .and_then(|m| m["totalTokens"].as_u64())
                 .filter(|t| *t > 0)
                 .and_then(|used| Some((used, *s.windows.get(s.current_model.as_deref()?)?)));
-            (cost, reason == "cancelled", std::mem::take(&mut s.compacting), context)
+            (cost, reason == "cancelled", std::mem::take(&mut s.compacting), context, tasks)
         };
+        // Before the turn's end, so that doesn't settle these tool calls as cut off.
+        if let Some(e) = tasks {
+            sink(e);
+        }
         if let Some((used_tokens, window_tokens)) = context {
             sink(ChatEvent::Context { used_tokens, window_tokens, parts: vec![] });
         }
@@ -511,6 +547,16 @@ impl Driver for AcpDriver {
             images: prompt.images.iter().map(|i| i.mime.clone()).collect(),
             files: prompt.files.clone(),
         });
+        // Ended tasks have been seen; so have ones the agent never reports on (it can say how
+        // they went now, if asked).
+        let tasks = {
+            let mut s = self.state.lock().unwrap();
+            let untracked = s.tasks.forget_untracked();
+            (s.tasks.clear_ended() | untracked).then(|| s.tasks.event())
+        };
+        if let Some(e) = tasks {
+            (self.sink)(e);
+        }
         if self.state.lock().unwrap().busy {
             // One prompt at a time: this one runs when the current one ends.
             self.queue.lock().unwrap().push_back(prompt);
@@ -639,6 +685,10 @@ impl Driver for AcpDriver {
             Prompt { id: format!("compact-{}", self.state.lock().unwrap().turns), text: "/compact".into(), images: vec![], files: vec![] };
         run_prompt(self.rpc.clone(), self.state.clone(), self.sink.clone(), self.queue.clone(), prompt);
         Ok(true)
+    }
+
+    fn background(&self) -> usize {
+        self.state.lock().unwrap().tasks.running()
     }
 
     fn resumable(&self) -> bool {
@@ -882,15 +932,33 @@ impl Translator {
         st.tools.insert(id.clone(), call.clone());
         drop(st);
         if known.as_ref() != Some(&call) {
-            self.emit(ChatEvent::ToolStarted { item_id: id.clone(), tool: call });
+            self.emit(ChatEvent::ToolStarted { item_id: id.clone(), tool: call.clone() });
         }
         match u["status"].as_str() {
             Some("completed") | Some("failed") => {
                 let ok = u["status"] == "completed";
                 let diff = diffs_of(&u["content"]);
-                self.emit(ChatEvent::ToolFinished { item_id: id, ok, output: clip(output_of(u)), diff });
+                let output = clip(output_of(u));
+                // A background task that ended.
+                let ended = {
+                    let mut st = self.state.lock().unwrap();
+                    st.open.remove(&id);
+                    let status = if ok { TaskStatus::Completed } else { TaskStatus::Failed };
+                    let detail = output.lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().chars().take(160).collect());
+                    st.tasks.finish(&id, status, detail).map(|t| format!("Background task ended: {}", t.title)).map(|n| (n, st.tasks.event()))
+                };
+                self.emit(ChatEvent::ToolFinished { item_id: id, ok, output, diff });
+                if let Some((notice, tasks)) = ended {
+                    self.emit(tasks);
+                    self.emit(ChatEvent::Notice { level: NoticeLevel::Info, text: notice });
+                }
             }
-            _ => {}
+            _ => {
+                let mut st = self.state.lock().unwrap();
+                if st.busy && !st.loading {
+                    st.open.insert(id, call);
+                }
+            }
         }
     }
 
@@ -2658,6 +2726,79 @@ opencode/big-pickle
         let answer = ask_once(opts, "Reply with just the word: pong", Duration::from_secs(120)).expect("one-off");
         eprintln!("one-off: {answer}");
         assert!(answer.to_lowercase().contains("pong"));
+    }
+
+    #[test]
+    fn tool_calls_left_open_end_as_background_tasks() {
+        let lines = [
+            upd(json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "execute", "title": "npm run dev", "status": "in_progress"})),
+            upd(json!({"sessionUpdate": "tool_call", "toolCallId": "c2", "kind": "read", "title": "a.txt", "status": "in_progress"})),
+            upd(json!({"sessionUpdate": "tool_call_update", "toolCallId": "c2", "status": "completed"})),
+        ];
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let o = out.clone();
+        let sink: Sink = Arc::new(move |e| o.lock().unwrap().push(e));
+        let state = Arc::new(Mutex::new(State { alive: true, busy: true, turn_id: Some("turn-1".into()), stretch: 1, ..Default::default() }));
+        let mut tr = Translator { sink, state: state.clone(), rpc: Rpc::new(None, "OpenCode") };
+        for l in &lines {
+            tr.handle(l);
+        }
+        // Only the one still running is open.
+        assert_eq!(state.lock().unwrap().open.keys().collect::<Vec<_>>(), ["c1"]);
+        // Say the turn ended with it open: it's a task, and its later update ends it.
+        {
+            let mut s = state.lock().unwrap();
+            let call = s.open.remove("c1").unwrap();
+            let mut t = BackgroundTask::running("c1", TaskKind::Command, call.title);
+            t.item_id = Some("c1".into());
+            s.tasks.add(t);
+        }
+        tr.handle(&upd(json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed", "rawOutput": {"combinedOutput": "ready\nlistening on :3000\n"}})));
+        let ev = out.lock().unwrap().clone();
+        let Some(ChatEvent::Tasks { tasks }) = ev.iter().rev().find(|e| matches!(e, ChatEvent::Tasks { .. })) else { panic!("no tasks") };
+        assert_eq!((tasks[0].status, tasks[0].detail.as_deref()), (TaskStatus::Completed, Some("listening on :3000")));
+        assert!(matches!(ev.last(), Some(ChatEvent::Notice { text, .. }) if text.contains("npm run dev")));
+    }
+
+    /// `OAH_TEST_DIR=/tmp/x cargo test -p oah-agents real_antigravity_background -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_antigravity_background() {
+        use crate::driver::{Driver, Prompt};
+        let dir = std::env::var("OAH_TEST_DIR").expect("OAH_TEST_DIR");
+        let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
+        let e = events.clone();
+        let sink: Sink = Arc::new(move |ev| e.lock().unwrap().push(ev));
+        let opts = StartOptions {
+            kind: AgentKind::Antigravity,
+            cwd: dir,
+            location: oah_core::settings::Location::Local,
+            binary: String::new(),
+            model: Some("gemini-3.8-flash".into()),
+            effort: Some("low".into()),
+            permission: PermissionMode::FullAccess,
+            resume: None,
+            env: vec![],
+        };
+        let mut d = AcpDriver::start(opts, sink).expect("start agy");
+        let text = "Run this shell command in the background (don't wait for it): sleep 30; echo bg-finished > done.txt . Then immediately reply 'started' and end your turn. Do not check on it.";
+        d.send(Prompt { id: "p1".into(), text: text.into(), images: vec![], files: vec![] }).unwrap();
+        for _ in 0..240 {
+            if events.lock().unwrap().iter().any(|e| matches!(e, ChatEvent::TurnFinished { .. })) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(500));
+        }
+        let evs = events.lock().unwrap().clone();
+        for e in &evs {
+            if matches!(e, ChatEvent::Tasks { .. } | ChatEvent::TurnFinished { .. } | ChatEvent::ToolStarted { .. } | ChatEvent::ToolFinished { .. }) {
+                eprintln!("{}", serde_json::to_string(e).unwrap());
+            }
+        }
+        let tasks = evs.iter().find_map(|e| if let ChatEvent::Tasks { tasks } = e { Some(tasks.clone()) } else { None }).expect("a task");
+        assert_eq!((tasks[0].kind, tasks[0].status, tasks[0].tracked), (TaskKind::Command, TaskStatus::Running, false));
+        assert_eq!(d.background(), 0, "an untracked task doesn't keep the chat awake");
+        d.stop();
     }
 
     #[test]

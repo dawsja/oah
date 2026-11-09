@@ -315,6 +315,18 @@ fn chat_waiting(state: State<AppState>) -> std::collections::BTreeMap<String, &'
     state.chats.waiting()
 }
 
+/// Chats with background work running (commands, subagents), whether or not the window has
+/// them open.
+#[tauri::command]
+fn chat_background(state: State<AppState>) -> Vec<String> {
+    state.chats.background()
+}
+
+#[tauri::command]
+fn chat_stop_task(state: State<AppState>, chat_id: String, task_id: String) -> CmdResult<()> {
+    state.chats.stop_task(&chat_id, &task_id)
+}
+
 /// Chats whose text has every word of `query`, newest first.
 #[tauri::command]
 async fn chat_search(app: AppHandle, query: String) -> CmdResult<Vec<oah_mcp::search::Hit>> {
@@ -545,6 +557,8 @@ pub fn run() {
             provider_catalog,
             chat_list,
             chat_waiting,
+            chat_background,
+            chat_stop_task,
             chat_search,
             chat_markdown,
             attention::app_set_badge,

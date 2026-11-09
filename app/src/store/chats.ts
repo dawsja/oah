@@ -27,6 +27,8 @@ type ChatsStore = {
   /** What each running chat waits on the user for, as the app last said (`chat_waiting`):
    *  it knows about chats this window never opened. */
   waiting: Record<string, Waiting>
+  /** Chats with background work running, as the app last said (`chat_background`). */
+  background: string[]
   /** A chat opened to answer it: its waiting card takes the cursor once it shows. */
   focus: string | null
 
@@ -47,6 +49,8 @@ type ChatsStore = {
   clear(chatId: string): Promise<void>
   sleep(chatId: string): Promise<void>
   interrupt(chatId: string): Promise<void>
+  /** Stops one background task. */
+  stopTask(chatId: string, taskId: string): Promise<void>
   answer(chatId: string, requestId: string, decision: Decision): Promise<void>
   answerQuestion(chatId: string, requestId: string, answers: Record<string, string[]>): Promise<void>
   setModel(chatId: string, model: string): Promise<void>
@@ -75,6 +79,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
   permission: {},
   queued: {},
   waiting: {},
+  background: [],
   focus: null,
 
   async init() {
@@ -87,8 +92,12 @@ export const useChats = create<ChatsStore>((set, get) => ({
   },
 
   async refresh() {
-    const [metas, waiting] = await Promise.all([ipc.chatList().catch(() => [] as ChatMeta[]), ipc.chatWaiting().catch(() => ({}))])
-    set({ metas, waiting })
+    const [metas, waiting, background] = await Promise.all([
+      ipc.chatList().catch(() => [] as ChatMeta[]),
+      ipc.chatWaiting().catch(() => ({})),
+      ipc.chatBackground().catch(() => [] as string[]),
+    ])
+    set({ metas, waiting, background })
   },
 
   async open(chatId) {
@@ -100,7 +109,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
     const snap = await ipc.chatSnapshot(chatId).catch(() => ({ events: [] as ChatEvent[], seq: 0, live: false, busy: false }))
     const held = loading.get(chatId) ?? []
     loading.delete(chatId)
-    const t = held.filter(([seq]) => seq > snap.seq).reduce((t, [, e]) => reduce(t, e), replay(snap.events, snap.busy))
+    const t = held.filter(([seq]) => seq > snap.seq).reduce((t, [, e]) => reduce(t, e), replay(snap.events, snap.busy, snap.live))
     set((s) => ({ transcripts: { ...s.transcripts, [chatId]: t } }))
   },
 
@@ -165,6 +174,10 @@ export const useChats = create<ChatsStore>((set, get) => ({
 
   async interrupt(chatId) {
     await ipc.chatInterrupt(chatId).catch((e) => toast.error(String(e)))
+  },
+
+  async stopTask(chatId, taskId) {
+    await ipc.chatStopTask(chatId, taskId).catch((e) => toast.error(String(e)))
   },
 
   async answer(chatId, requestId, decision) {

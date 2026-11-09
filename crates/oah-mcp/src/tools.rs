@@ -258,6 +258,9 @@ pub fn call(ctx: &Ctx, name: &str, a: Value, progress: Progress) -> ToolResult {
             if !status.plan.is_empty() {
                 r["todo"] = json!(status.plan);
             }
+            if !status.tasks.is_empty() {
+                r["backgroundTasks"] = json!(status.tasks);
+            }
             if let Some(c) = &status.context {
                 r["context"] = json!(c);
             }

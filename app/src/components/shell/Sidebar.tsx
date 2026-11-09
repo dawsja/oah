@@ -6,7 +6,7 @@ import { confirmAction, promptText } from "@/components/Prompt"
 import { Tip } from "@/components/Tip"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ago, type ChatMeta, type Waiting } from "@/lib/chat"
+import { ago, runningTasks, type ChatMeta, type Waiting } from "@/lib/chat"
 import { samePath, worktrees as wt, type Worktree } from "@/lib/git"
 import { LocationIcon } from "@/components/LocationIcon"
 import { OpenProjectMenu } from "@/components/OpenProject"
@@ -295,6 +295,8 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
   const t = useChats((s) => s.transcripts[meta.id])
   const waits = useChats((s) => waitingOf(s, meta.id))
   const running = !!t?.running
+  // Background work between turns: what the open transcript says, else what the app says.
+  const background = useChats((s) => (s.transcripts[meta.id] ? runningTasks(s.transcripts[meta.id]).some((k) => k.tracked) : s.background.includes(meta.id)))
   const active = chatId === meta.id && view === "chat"
   const rename = () =>
     void promptText({ title: "Rename chat", value: meta.title, confirm: "Rename" }).then((title) => {
@@ -320,6 +322,10 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
             <Moon className="size-3 shrink-0 text-faint" aria-label="Sleeping; send a message to resume" />
           ) : running ? (
             <LoaderCircle className="size-3 shrink-0 animate-spin text-muted-foreground" />
+          ) : background ? (
+            <Tip content="Background work running">
+              <LoaderCircle className="size-3 shrink-0 animate-spin text-faint [animation-duration:2.5s]" aria-label="Background work running" />
+            </Tip>
           ) : (
             <AgentGlyph agent={meta.agent} className="size-3 shrink-0 opacity-70" />
           )}
@@ -333,7 +339,7 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
         <ContextMenuItem onSelect={() => useChats.getState().pin(meta.id, !meta.pinned)}>
           {meta.pinned ? <PinOff /> : <Pin />} {meta.pinned ? "Unpin" : "Pin"}
         </ContextMenuItem>
-        <ContextMenuItem disabled={meta.sleeping || running || !!waits || !meta.agentSessionId} onSelect={() => useChats.getState().sleep(meta.id)}>
+        <ContextMenuItem disabled={meta.sleeping || running || background || !!waits || !meta.agentSessionId} onSelect={() => useChats.getState().sleep(meta.id)}>
           <Moon /> {meta.sleeping ? "Sleeping" : "Sleep"}
         </ContextMenuItem>
         <ContextMenuItem onSelect={rename}>

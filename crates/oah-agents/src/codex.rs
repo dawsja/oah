@@ -47,6 +47,13 @@ struct State {
     changes: HashMap<String, Vec<FileDiff>>,
     usage: Option<Usage>,
     alive: bool,
+    /// Background work: terminals (commands Codex keeps running after its turn: they end with
+    /// their `item/completed`, whenever that comes) and subagents (spawned threads).
+    tasks: TaskList,
+    /// Commands running in this turn, in case they outlive it: item id → task.
+    open: HashMap<String, BackgroundTask>,
+    /// Subagents' thread ids: their notifications feed their task, not this chat.
+    agents: std::collections::HashSet<String>,
 }
 
 /// Codex's approval policy and sandbox for each permission mode.
@@ -99,8 +106,18 @@ impl CodexDriver {
                 rpc.fail_all();
                 let code = child.lock().unwrap().as_mut().and_then(|c| c.wait().ok()).and_then(|s| s.code());
                 thread::sleep(Duration::from_millis(50));
-                if let Some(turn_id) = state.lock().unwrap().turn_id.take() {
+                let (turn, tasks) = {
+                    let mut st = state.lock().unwrap();
+                    st.open.clear();
+                    let tasks = st.tasks.stop_all().then(|| st.tasks.event());
+                    (st.turn_id.take(), tasks)
+                };
+                if let Some(turn_id) = turn {
                     sink(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted: true });
+                }
+                // Its terminals and subagents went with it.
+                if let Some(e) = tasks {
+                    sink(e);
                 }
                 // 127: the shell couldn't find the program (on an SSH host, usually not installed).
                 let message = if code == Some(127) {
@@ -182,6 +199,13 @@ impl Driver for CodexDriver {
             images: prompt.images.iter().map(|i| i.mime.clone()).collect(),
             files: prompt.files.clone(),
         });
+        let tasks = {
+            let mut st = self.state.lock().unwrap();
+            st.tasks.clear_ended().then(|| st.tasks.event())
+        };
+        if let Some(e) = tasks {
+            (self.sink)(e);
+        }
         let (approval, _) = policy(self.permission);
         let mut params = json!({"threadId": thread_id, "input": input, "approvalPolicy": approval});
         if self.permission_changed {
@@ -269,6 +293,10 @@ impl Driver for CodexDriver {
         true
     }
 
+    fn background(&self) -> usize {
+        self.state.lock().unwrap().tasks.running()
+    }
+
     fn idle(&self) -> bool {
         let s = self.state.lock().unwrap();
         s.turn_id.is_none() && s.pending.is_empty() && s.questions.is_empty()
@@ -341,6 +369,9 @@ impl Translator {
             }
             return;
         }
+        if let Some(thread) = p["threadId"].as_str().filter(|t| self.state.lock().unwrap().agents.contains(*t)) {
+            return self.subagent(thread, method, p);
+        }
         match method {
             "turn/started" => {
                 let id = p["turn"]["id"].as_str().unwrap_or("").to_string();
@@ -397,13 +428,23 @@ impl Translator {
             }
             "turn/completed" => {
                 let turn = &p["turn"];
-                let (turn_id, usage) = {
+                let (turn_id, usage, tasks) = {
                     let mut st = self.state.lock().unwrap();
                     st.pending.clear();
                     st.questions.clear();
                     st.turn_id = None;
-                    (s(&turn["id"]), st.usage.take())
+                    // Commands still running are background terminals now (unless the turn was
+                    // stopped: then they were cut off with it).
+                    let left: Vec<BackgroundTask> = st.open.drain().map(|(_, t)| t).filter(|_| turn["status"] != "interrupted").collect();
+                    let mut changed = false;
+                    for t in left {
+                        changed |= st.tasks.add(t);
+                    }
+                    (s(&turn["id"]), st.usage.take(), changed.then(|| st.tasks.event()))
                 };
+                if let Some(e) = tasks {
+                    self.emit(e);
+                }
                 let status = turn["status"].as_str().unwrap_or("completed");
                 if status == "failed" {
                     let msg = turn["error"]["message"].as_str().unwrap_or("The turn failed.").to_string();
@@ -452,6 +493,13 @@ impl Translator {
             "commandExecution" => {
                 let command = s(&item["command"]);
                 if !done {
+                    // A command in a terminal Codex can leave running (it has a process id).
+                    let terminal = item["processId"].is_string() || item["source"].as_str().is_some_and(|s| s.to_ascii_lowercase().contains("unified"));
+                    if terminal && item["source"].as_str().is_none_or(|s| !s.to_ascii_lowercase().contains("interaction")) {
+                        let mut t = BackgroundTask::running(id.clone(), TaskKind::Command, strip_shell(&command));
+                        t.item_id = Some(id.clone());
+                        self.state.lock().unwrap().open.insert(id.clone(), t);
+                    }
                     let kind = command_kind(item);
                     self.emit(ChatEvent::ToolStarted {
                         item_id: id,
@@ -465,7 +513,21 @@ impl Translator {
                     });
                 } else {
                     let ok = item["status"] == "completed" && item["exitCode"].as_i64().unwrap_or(0) == 0;
+                    let ended = {
+                        let mut st = self.state.lock().unwrap();
+                        st.open.remove(&id);
+                        let how = match item["exitCode"].as_i64() {
+                            Some(code) => format!("exit code {code}"),
+                            None => s(&item["status"]),
+                        };
+                        let status = if ok { TaskStatus::Completed } else { TaskStatus::Failed };
+                        st.tasks.finish(&id, status, Some(how.clone())).map(|t| format!("Background command ended ({how}): {}", t.title)).map(|n| (n, st.tasks.event()))
+                    };
                     self.emit(ChatEvent::ToolFinished { item_id: id, ok, output: clip(s(&item["aggregatedOutput"])), diff: None });
+                    if let Some((notice, tasks)) = ended {
+                        self.emit(tasks);
+                        self.emit(ChatEvent::Notice { level: NoticeLevel::Info, text: notice });
+                    }
                 }
             }
             "fileChange" => {
@@ -486,6 +548,9 @@ impl Translator {
                 }
             }
             "mcpToolCall" | "dynamicToolCall" | "collabAgentToolCall" => {
+                if item["type"] == "collabAgentToolCall" {
+                    self.collab(item);
+                }
                 let name = item["tool"].as_str().or(item["name"].as_str()).unwrap_or("tool").to_string();
                 if !done {
                     let title = format!("{}{}", item["server"].as_str().map(|s| format!("{s} · ")).unwrap_or_default(), name);
@@ -516,6 +581,79 @@ impl Translator {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// A subagent tool call (`spawnAgent`, `wait`…): it starts subagents, and says how they are.
+    fn collab(&mut self, item: &Value) {
+        let mut ended = Vec::new();
+        let event = {
+            let mut st = self.state.lock().unwrap();
+            let mut changed = false;
+            if item["tool"] == "spawnAgent" {
+                let title = item["prompt"].as_str().and_then(|p| p.lines().find(|l| !l.trim().is_empty())).unwrap_or("Subagent").trim().to_string();
+                for thread in item["receiverThreadIds"].as_array().into_iter().flatten().filter_map(|t| t.as_str()) {
+                    st.agents.insert(thread.to_string());
+                    let mut t = BackgroundTask::running(thread, TaskKind::Agent, title.clone());
+                    t.item_id = item["id"].as_str().map(String::from);
+                    changed |= st.tasks.add(t);
+                }
+            }
+            for (thread, state) in item["agentsStates"].as_object().into_iter().flatten() {
+                let status = match state["status"].as_str().unwrap_or("") {
+                    "completed" => TaskStatus::Completed,
+                    "errored" => TaskStatus::Failed,
+                    "interrupted" | "shutdown" | "notFound" => TaskStatus::Stopped,
+                    _ => continue,
+                };
+                if let Some(t) = st.tasks.finish(thread, status, state["message"].as_str().map(first_line)) {
+                    ended.push(format!("Subagent finished: {}", t.title));
+                    changed = true;
+                }
+            }
+            changed.then(|| st.tasks.event())
+        };
+        if let Some(e) = event {
+            self.emit(e);
+        }
+        for text in ended {
+            self.emit(ChatEvent::Notice { level: NoticeLevel::Info, text });
+        }
+    }
+
+    /// A notification from a subagent's thread: progress for its task.
+    fn subagent(&mut self, thread: &str, method: &str, p: &Value) {
+        let mut ended = None;
+        let event = {
+            let mut st = self.state.lock().unwrap();
+            let changed = match method {
+                "item/completed" if p["item"]["type"] == "agentMessage" => st.tasks.progress(thread, None, p["item"]["text"].as_str().map(first_line).as_deref()),
+                "item/started" if p["item"]["type"] == "commandExecution" => {
+                    st.tasks.progress(thread, None, Some(&format!("Running {}", strip_shell(&s(&p["item"]["command"])))))
+                }
+                "turn/completed" => {
+                    let status = match p["turn"]["status"].as_str() {
+                        Some("failed") => TaskStatus::Failed,
+                        Some("interrupted") => TaskStatus::Stopped,
+                        _ => TaskStatus::Completed,
+                    };
+                    match st.tasks.finish(thread, status, None) {
+                        Some(t) => {
+                            ended = Some(format!("Subagent finished: {}", t.title));
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                _ => false,
+            };
+            changed.then(|| st.tasks.event())
+        };
+        if let Some(e) = event {
+            self.emit(e);
+        }
+        if let Some(text) = ended {
+            self.emit(ChatEvent::Notice { level: NoticeLevel::Info, text });
         }
     }
 
@@ -609,6 +747,15 @@ pub fn parse_models(v: &Value) -> Vec<ModelOption> {
             default_effort: m["defaultReasoningEffort"].as_str().map(String::from),
         })
         .collect()
+}
+
+/// The first non-empty line, at most 160 characters: a task's detail.
+fn first_line(text: &str) -> String {
+    let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+    match line.char_indices().nth(160) {
+        Some((i, _)) => format!("{}…", &line[..i]),
+        None => line.to_string(),
+    }
 }
 
 fn s(v: &Value) -> String {
@@ -741,6 +888,51 @@ mod tests {
         send(PermissionMode::AcceptEdits, Some(("on-request", "workspaceWrite")));
         driver.stop();
         reader.join().unwrap();
+    }
+
+    fn task_lists(ev: &[ChatEvent]) -> Vec<Vec<BackgroundTask>> {
+        ev.iter().filter_map(|e| if let ChatEvent::Tasks { tasks } = e { Some(tasks.clone()) } else { None }).collect()
+    }
+
+    #[test]
+    fn a_terminal_left_running_is_background_work() {
+        let (ev, _) = run(&[
+            json!({"method":"turn/started","params":{"threadId":"t","turn":{"id":"T1"}}}),
+            json!({"method":"item/started","params":{"threadId":"t","item":{"type":"commandExecution","id":"c1","command":"/bin/bash -lc 'npm run dev'","processId":"p1","source":"unifiedExecStartup","status":"inProgress"}}}),
+            json!({"method":"item/started","params":{"threadId":"t","item":{"type":"commandExecution","id":"c2","command":"ls","processId":"p2","source":"unifiedExecStartup","status":"inProgress"}}}),
+            json!({"method":"item/completed","params":{"threadId":"t","item":{"type":"commandExecution","id":"c2","command":"ls","status":"completed","exitCode":0}}}),
+            json!({"method":"turn/completed","params":{"threadId":"t","turn":{"id":"T1","status":"completed"}}}),
+            json!({"method":"item/completed","params":{"threadId":"t","item":{"type":"commandExecution","id":"c1","command":"x","status":"failed","exitCode":1,"aggregatedOutput":"boom"}}}),
+        ]);
+        let lists = task_lists(&ev);
+        assert_eq!(lists.len(), 2);
+        assert_eq!((lists[0].len(), lists[0][0].title.as_str(), lists[0][0].status), (1, "npm run dev", TaskStatus::Running));
+        assert_eq!(lists[0][0].item_id.as_deref(), Some("c1"));
+        assert_eq!((lists[1][0].status, lists[1][0].detail.as_deref()), (TaskStatus::Failed, Some("exit code 1")));
+        // Listed before the turn ends, so the turn's end doesn't settle the command as cut off.
+        let at = |f: fn(&ChatEvent) -> bool| ev.iter().position(f).unwrap();
+        assert!(at(|e| matches!(e, ChatEvent::Tasks { .. })) < at(|e| matches!(e, ChatEvent::TurnFinished { .. })));
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Notice { text, .. } if text.contains("npm run dev"))));
+    }
+
+    #[test]
+    fn subagents_are_tasks_and_their_threads_stay_out_of_the_chat() {
+        let (ev, _) = run(&[
+            json!({"method":"turn/started","params":{"threadId":"t","turn":{"id":"T1"}}}),
+            json!({"method":"item/completed","params":{"threadId":"t","item":{"type":"collabAgentToolCall","id":"s1","tool":"spawnAgent","status":"completed","senderThreadId":"t","receiverThreadIds":["sub"],"prompt":"Check the release workflow\nthen report","agentsStates":{"sub":{"status":"running","message":null}}}}}),
+            json!({"method":"turn/started","params":{"threadId":"sub","turn":{"id":"S1"}}}),
+            json!({"method":"item/completed","params":{"threadId":"sub","item":{"type":"agentMessage","id":"m","text":"CI is green."}}}),
+            json!({"method":"turn/completed","params":{"threadId":"t","turn":{"id":"T1","status":"completed"}}}),
+            json!({"method":"turn/completed","params":{"threadId":"sub","turn":{"id":"S1","status":"completed"}}}),
+        ]);
+        let lists = task_lists(&ev);
+        assert_eq!((lists[0][0].kind, lists[0][0].title.as_str()), (TaskKind::Agent, "Check the release workflow"));
+        let last = lists.last().unwrap();
+        assert_eq!((last[0].status, last[0].detail.as_deref()), (TaskStatus::Completed, Some("CI is green.")));
+        // One turn in this chat; the subagent's text isn't its text.
+        assert_eq!(ev.iter().filter(|e| matches!(e, ChatEvent::TurnStarted { .. })).count(), 1);
+        assert_eq!(ev.iter().filter(|e| matches!(e, ChatEvent::TurnFinished { .. })).count(), 1);
+        assert!(!ev.iter().any(|e| matches!(e, ChatEvent::Text { .. })));
     }
 
     #[test]

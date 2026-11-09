@@ -75,6 +75,15 @@ pub trait Driver: Send {
     fn set_effort(&mut self, _effort: &str) -> DriverResult<bool> {
         Ok(false)
     }
+    /// Stops one background task (see [`crate::event::BackgroundTask::stoppable`]).
+    fn stop_task(&mut self, _task_id: &str) -> DriverResult<()> {
+        Err("this agent can't stop its background work from oah".into())
+    }
+    /// How many background tasks are running: the CLI is busy even between turns, so it isn't
+    /// put to sleep or restarted under them.
+    fn background(&self) -> usize {
+        0
+    }
     /// No turn is running (so restarting the CLI loses nothing).
     fn idle(&self) -> bool {
         true

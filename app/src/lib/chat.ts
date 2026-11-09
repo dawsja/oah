@@ -17,6 +17,21 @@ export type ApprovalRequest = {
   canRemember: boolean
 }
 export type PlanItem = { text: string; status: "pending" | "inProgress" | "completed" }
+/** Work an agent runs beside the conversation: a command left running, a subagent, a watcher.
+ *  `tracked: false`: the agent never says when it ends, so "running" means "started, not heard
+ *  of since". `stoppable`: oah can stop it (`chat_stop_task`). Times are unix ms. */
+export type BackgroundTask = {
+  id: string
+  kind: "command" | "agent" | "watch" | "other"
+  title: string
+  status: "running" | "completed" | "failed" | "stopped"
+  detail: string | null
+  itemId: string | null
+  startedAt: number
+  endedAt: number | null
+  tracked: boolean
+  stoppable: boolean
+}
 export type QuestionOption = { label: string; description: string }
 export type Question = { id: string; header: string; question: string; options: QuestionOption[]; multi: boolean; other: boolean; secret: boolean }
 export type QuestionRequest = { requestId: string; questions: Question[] }
@@ -54,6 +69,7 @@ export type ChatEvent =
   | { type: "commands"; commands: SlashCommand[] }
   | { type: "permissionChanged"; mode: PermissionMode }
   | { type: "plan"; items: PlanItem[] }
+  | { type: "tasks"; tasks: BackgroundTask[] }
   | { type: "turnFinished"; turnId: string; usage: Usage | null; costUsd: number | null; durationMs: number | null; interrupted: boolean }
   | { type: "context"; usedTokens: number; windowTokens: number; parts?: ContextPart[] }
   | { type: "notice"; level: "info" | "warn"; text: string }
@@ -94,6 +110,8 @@ export type Transcript = {
   items: Item[]
   running: boolean
   plan: PlanItem[]
+  /** Background work: running, and ended since the user last wrote. */
+  tasks: BackgroundTask[]
   context: ContextFill | null
   model: string | null
   /** The agent's working folder, to show paths relative to it. */
@@ -108,7 +126,7 @@ export type Transcript = {
   commands: SlashCommand[]
 }
 
-export const emptyTranscript = (): Transcript => ({ items: [], running: false, plan: [], context: null, model: null, cwd: null, approvals: [], questions: [], models: [], commands: [] })
+export const emptyTranscript = (): Transcript => ({ items: [], running: false, plan: [], tasks: [], context: null, model: null, cwd: null, approvals: [], questions: [], models: [], commands: [] })
 
 /** What a chat waits on the user for: an approval, a plan to approve, or a question. */
 export type Waiting = "approval" | "plan" | "question"
@@ -205,9 +223,13 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
       return t
     case "plan":
       return { ...t, plan: e.items }
+    case "tasks":
+      return { ...t, tasks: e.tasks }
     case "turnFinished": {
-      // Tools still "running" when the turn ends were cut off.
-      const settled = items.map((it) => (it.kind === "tool" && it.status === "running" ? { ...it, status: "error" as const, output: it.output || "Stopped." } : it))
+      // Tools still "running" when the turn ends were cut off, unless they run on in the
+      // background (the agent lists those as tasks first).
+      const background = new Set(t.tasks.flatMap((k) => (k.status === "running" && k.itemId ? [k.itemId] : [])))
+      const settled = items.map((it) => (it.kind === "tool" && it.status === "running" && !background.has(it.id) ? { ...it, status: "error" as const, output: it.output || "Stopped." } : it))
       return {
         ...t,
         running: false,
@@ -224,19 +246,34 @@ export function reduce(t: Transcript, e: ChatEvent): Transcript {
       return push({ kind: "notice", id: uid("n"), level: e.level, text: e.text })
     case "error":
       return push({ kind: "notice", id: uid("e"), level: "error", text: e.message }, { running: false, approvals: [], questions: [] })
-    case "exited":
+    case "exited": {
+      // Its background work went with it (the agent says so first; a log cut short may not).
+      const tasks = stopTasks(t.tasks)
       return e.code && e.code !== 0
-        ? push({ kind: "notice", id: uid("x"), level: "error", text: e.message ?? `The agent exited (code ${e.code}).` }, { running: false, approvals: [], questions: [] })
-        : { ...t, running: false, approvals: [], questions: [] }
+        ? push({ kind: "notice", id: uid("x"), level: "error", text: e.message ?? `The agent exited (code ${e.code}).` }, { running: false, approvals: [], questions: [], tasks })
+        : { ...t, running: false, approvals: [], questions: [], tasks }
+    }
   }
+}
+
+/** Running tasks marked stopped (their agent isn't running any more). */
+function stopTasks(tasks: BackgroundTask[]): BackgroundTask[] {
+  return tasks.some((k) => k.status === "running") ? tasks.map((k) => (k.status === "running" ? { ...k, status: "stopped" as const, endedAt: k.endedAt ?? Date.now() } : k)) : tasks
+}
+
+/** Background tasks still running, and how many of them the agent reports on. */
+export function runningTasks(t: Transcript | undefined): BackgroundTask[] {
+  return t?.tasks.filter((k) => k.status === "running") ?? []
 }
 
 /** A chat from its events. `busy`: its agent is mid-turn right now (a snapshot says so), so it
  *  stays running with its open approvals and questions; otherwise it's idle, whatever the log
- *  ended with. */
-export function replay(events: ChatEvent[], busy = false): Transcript {
+ *  ended with. `live`: its agent is running, so its background tasks may be too; otherwise
+ *  they stopped with it. */
+export function replay(events: ChatEvent[], busy = false, live = busy): Transcript {
   const t = events.reduce(reduce, emptyTranscript())
-  return busy ? { ...t, running: true } : { ...t, running: false, approvals: [], questions: [] }
+  const tasks = live ? t.tasks : stopTasks(t.tasks)
+  return busy ? { ...t, running: true, tasks } : { ...t, running: false, approvals: [], questions: [], tasks }
 }
 
 /** A chat as the desktop has it now (`chat_snapshot`, or a phone's `chat.open`). */

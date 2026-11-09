@@ -79,3 +79,39 @@ describe("formatTokens", () => {
     expect([999_500, 1_000_000, 1_048_576, 1_500_000, 2_000_000].map(formatTokens)).toEqual(["1M", "1M", "1M", "1.5M", "2M"])
   })
 })
+
+describe("background tasks", () => {
+  const task = (id: string, status: "running" | "completed" | "failed" | "stopped" = "running") => ({
+    id,
+    kind: "command" as const,
+    title: "npm run dev",
+    status,
+    detail: null,
+    itemId: id,
+    startedAt: 0,
+    endedAt: status === "running" ? null : 1000,
+    tracked: true,
+    stoppable: false,
+  })
+  const tool = { kind: "bash" as const, name: "shell", title: "npm run dev", input: {}, path: null }
+
+  it("keeps a tool that runs on in the background running when its turn ends", () => {
+    const t = run([
+      { type: "turnStarted", turnId: "t1" },
+      { type: "toolStarted", itemId: "c1", tool },
+      { type: "toolStarted", itemId: "c2", tool },
+      { type: "tasks", tasks: [task("c1")] },
+      { type: "turnFinished", turnId: "t1", usage: null, costUsd: null, durationMs: null, interrupted: false },
+    ])
+    expect(t.items.find((i) => i.id === "c1")).toMatchObject({ status: "running" })
+    expect(t.items.find((i) => i.id === "c2")).toMatchObject({ status: "error", output: "Stopped." })
+    expect(t.tasks.map((k) => k.status)).toEqual(["running"])
+  })
+
+  it("stops running tasks when the agent is gone", () => {
+    const events: ChatEvent[] = [{ type: "tasks", tasks: [task("a"), task("b", "completed")] }]
+    expect(replay(events, false, true).tasks.map((k) => k.status)).toEqual(["running", "completed"])
+    expect(replay(events).tasks.map((k) => k.status)).toEqual(["stopped", "completed"])
+    expect(run([...events, { type: "exited", code: 0, message: null }]).tasks.map((k) => k.status)).toEqual(["stopped", "completed"])
+  })
+})

@@ -144,7 +144,7 @@ export const useMobile = create<Store>((set, get) => ({
     try {
       const snap = await api.open(chatId)
       if (get().chatId !== chatId) return
-      const t = replay(snap.events, snap.busy)
+      const t = replay(snap.events, snap.busy, snap.live)
       // Events that came in while it loaded were held by the desktop and follow this answer.
       set((s) => ({ transcripts: { ...s.transcripts, [chatId]: t } }))
     } catch (e) {
@@ -167,7 +167,7 @@ export const useMobile = create<Store>((set, get) => ({
         id = meta.id
         // Open it before sending, so every event of the first turn arrives here.
         const snap = await api.open(meta.id)
-        set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: replay(snap.events, snap.busy) }, chatId: meta.id }))
+        set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: replay(snap.events, snap.busy, snap.live) }, chatId: meta.id }))
       }
       const chat = id
       set((s) => ({ transcripts: { ...s.transcripts, [chat]: { ...(s.transcripts[chat] ?? emptyTranscript()), running: true } } }))

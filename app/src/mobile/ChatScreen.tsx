@@ -3,6 +3,7 @@ import { Loader2, X } from "lucide-react"
 import { ApprovalCard } from "@/components/chat/Approval"
 import { ImageSourceContext, type ImageSource } from "@/components/chat/ChatImages"
 import { QuestionCard } from "@/components/chat/QuestionCard"
+import { TasksDock } from "@/components/chat/TasksDock"
 import { Transcript } from "@/components/chat/Transcript"
 import { CwdContext } from "@/components/chat/cwd"
 import { emptyTranscript, type ModelOption } from "@/lib/chat"
@@ -66,6 +67,7 @@ export function ChatScreen({ chatId }: { chatId: string }) {
         <ImageSourceContext.Provider value={source}>
           {transcript ? <Transcript transcript={t} className="flex-1" /> : <div className="grid flex-1 place-items-center text-[13px] text-muted-foreground">{link === "connected" ? "Loading…" : ""}</div>}
           <div className="flex flex-col gap-2 px-2.5 pt-1 [&:not(:empty)]:pb-2">
+            {t.tasks.length && meta ? <TasksDock agent={meta.agent} tasks={t.tasks} /> : null}
             {t.questions[0] ? (
               <QuestionCard request={t.questions[0]} onAnswer={(a) => st.answerQuestion(chatId, t.questions[0].requestId, a)} />
             ) : t.approvals[0] ? (

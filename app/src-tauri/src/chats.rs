@@ -30,6 +30,8 @@ struct Activity {
     last: Instant,
     busy: bool,
     stopped: bool,
+    /// Background tasks running, as the last `Tasks` said.
+    tasks: usize,
 }
 
 impl Activity {
@@ -40,12 +42,14 @@ impl Activity {
                 self.busy = true
             }
             ChatEvent::TurnFinished { .. } | ChatEvent::Exited { .. } | ChatEvent::Error { .. } => self.busy = false,
+            ChatEvent::Tasks { tasks } => self.tasks = tasks.iter().filter(|t| t.is_running() && t.tracked).count(),
             _ => {}
         }
     }
 
+    /// Asleep, the CLI would take its background work down with it.
     fn eligible(&self, minimum: Duration) -> bool {
-        !self.stopped && !self.busy && self.last.elapsed() >= minimum
+        !self.stopped && !self.busy && self.tasks == 0 && self.last.elapsed() >= minimum
     }
 }
 
@@ -251,7 +255,7 @@ impl Chats {
         let permission = self.permission(chat_id, permission);
         let mut live = self.live.lock().unwrap();
         // An effort the CLI only takes at start: restart it (resuming) now that it's idle.
-        if self.restart.lock().unwrap().contains(chat_id) && live.get(chat_id).is_some_and(|d| d.idle()) {
+        if self.restart.lock().unwrap().contains(chat_id) && live.get(chat_id).is_some_and(|d| d.idle() && d.background() == 0) {
             if let Some(mut d) = live.remove(chat_id) {
                 d.stop();
             }
@@ -323,14 +327,17 @@ impl Chats {
         self.metas.lock().unwrap().insert(chat_id.to_string(), meta);
 
         let (publisher, metas, hub, feed) = (self.publisher(app, chat_id), self.metas.clone(), self.hub.clone(), self.feed.clone());
-        let activity = Arc::new(Mutex::new(Activity { last: Instant::now(), busy: false, stopped: false }));
+        let activity = Arc::new(Mutex::new(Activity { last: Instant::now(), busy: false, stopped: false, tasks: 0 }));
         self.activity.lock().unwrap().insert(chat_id.to_string(), activity.clone());
         let sink: driver::Sink = Arc::new(move |event: ChatEvent| {
             let mut activity = activity.lock().unwrap();
             if activity.stopped {
                 return;
             }
+            let tasks_before = activity.tasks;
             activity.observe(&event);
+            // Background work starting or ending changes the list too.
+            let tasks_changed = activity.tasks != tasks_before;
             publisher.publish(&event);
             fold(&publisher.store, &metas, &publisher.id, &event);
             hub.push(&publisher.id, &event);
@@ -344,12 +351,26 @@ impl Chats {
                     | ChatEvent::ApprovalResolved { .. }
                     | ChatEvent::Question { .. }
                     | ChatEvent::QuestionResolved { .. }
-            ) {
+            ) || tasks_changed
+            {
                 let _ = publisher.app.emit("chats-changed", ());
                 let _ = feed.send(Feed::ChatsChanged);
             }
         });
         driver::start(opts, sink)
+    }
+
+    /// Stops one of the chat's background tasks.
+    pub fn stop_task(&self, chat_id: &str, task_id: &str) -> Result<(), String> {
+        match self.live.lock().unwrap().get_mut(chat_id) {
+            Some(d) => d.stop_task(task_id),
+            None => Err("The agent isn't running; its background work stopped with it.".into()),
+        }
+    }
+
+    /// Chats with background work running (between turns, too).
+    pub fn background(&self) -> Vec<String> {
+        self.live.lock().unwrap().iter().filter(|(_, d)| d.background() > 0).map(|(k, _)| k.clone()).collect()
     }
 
     pub fn interrupt(&self, chat_id: &str) -> Result<(), String> {
@@ -515,6 +536,9 @@ impl Chats {
         };
         if !driver.idle() {
             return Err("Wait for the agent to finish before sleeping this chat.".into());
+        }
+        if driver.background() > 0 {
+            return Err("This chat has background work running; sleeping it would stop that.".into());
         }
         if !driver.resumable() {
             return Err("This agent does not support resuming saved sessions.".into());
@@ -729,7 +753,7 @@ mod tests {
                 as Box<dyn Driver>
         };
         chats.live.lock().unwrap().insert(meta.id.clone(), make_driver(false));
-        let activity = Arc::new(Mutex::new(Activity { last: Instant::now(), busy: false, stopped: false }));
+        let activity = Arc::new(Mutex::new(Activity { last: Instant::now(), busy: false, stopped: false, tasks: 0 }));
         chats.activity.lock().unwrap().insert(meta.id.clone(), activity.clone());
         assert!(chats.sleep_session(&meta.id, Duration::ZERO).is_err());
         chats.live.lock().unwrap().insert(meta.id.clone(), make_driver(true));

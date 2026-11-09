@@ -1,9 +1,9 @@
-// Desktop notifications while oah is in the background: a turn finished, or an agent is
-// waiting for an approval or an answer. Nothing is sent while the window has focus. Each one
+// Desktop notifications while oah is in the background: a turn finished, background work
+// (a command, a subagent) ended, or an agent is waiting for an approval or an answer. Nothing is sent while the window has focus. Each one
 // carries its chat's id: a click opens the chat (attention.ts), and one that waits on the user
 // has an Answer button too.
 
-import type { ChatEvent, ChatMeta } from "./chat"
+import type { BackgroundTask, ChatEvent, ChatMeta } from "./chat"
 
 let allowed: boolean | null = null
 
@@ -14,10 +14,28 @@ async function permitted(): Promise<boolean> {
   return allowed
 }
 
+/** Per chat, the background tasks running as last heard, to tell which ones just ended. */
+const runningTasks = new Map<string, Set<string>>()
+
+/** The tasks in `tasks` that were running and aren't now (and remembers what runs now). */
+export function endedTasks(chatId: string, tasks: BackgroundTask[]): BackgroundTask[] {
+  const before = runningTasks.get(chatId) ?? new Set<string>()
+  runningTasks.set(chatId, new Set(tasks.filter((t) => t.status === "running").map((t) => t.id)))
+  return tasks.filter((t) => t.status !== "running" && before.has(t.id))
+}
+
 /** What to say about `event`, if anything. */
 export function notification(event: ChatEvent, meta: ChatMeta | undefined): { title: string; body: string; waits?: true } | null {
   const chat = meta?.title || "A chat"
   switch (event.type) {
+    case "tasks": {
+      // Stopped ones were stopped on purpose (or went with the agent): no news.
+      const ended = endedTasks(meta?.id ?? "", event.tasks).filter((t) => t.status !== "stopped")
+      if (!ended.length) return null
+      const failed = ended.some((t) => t.status === "failed")
+      const what = ended.length === 1 ? ended[0].title : `${ended.length} background tasks`
+      return { title: failed ? "Background work failed" : "Background work finished", body: `${chat}: ${what}` }
+    }
     case "turnFinished":
       return event.interrupted ? null : { title: "Done", body: chat }
     case "approval":
@@ -37,8 +55,9 @@ const COOLDOWN = 5_000
 let nextId = 1
 
 export async function notify(event: ChatEvent, meta: ChatMeta | undefined) {
+  // Task lists are followed even while focused, so an end is told apart from a stale list.
+  const n = event.type === "tasks" || !document.hasFocus() ? notification(event, meta) : null
   if (document.hasFocus()) return
-  const n = notification(event, meta)
   if (!n) return
   const key = meta?.id ?? ""
   const now = Date.now()

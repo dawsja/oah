@@ -24,6 +24,7 @@ import { Composer, editInComposer, STEER_KEY } from "./Composer"
 import { Tip } from "@/components/Tip"
 import { CwdContext } from "./cwd"
 import { Transcript } from "./Transcript"
+import { TasksDock } from "./TasksDock"
 
 /** The middle of the window: the open chat, or a new one in the current project. */
 export function ChatView() {
@@ -179,6 +180,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
       <div className="mx-auto flex max-h-[75%] min-h-0 w-full max-w-[46rem] shrink-0 flex-col gap-2 px-6 pb-4">
         <div ref={dock} className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden">
           {transcript.plan.length ? <PlanDock items={transcript.plan} /> : null}
+          {transcript.tasks.length ? <TasksDock agent={meta.agent} tasks={transcript.tasks} onStop={(id) => void chats.stopTask(meta.id, id)} /> : null}
           {transcript.questions[0] ? (
             <div data-waiting className="rounded-2xl flex min-h-0 flex-col">
               <QuestionCard request={transcript.questions[0]} onAnswer={(a) => chats.answerQuestion(meta.id, transcript.questions[0].requestId, a)} />

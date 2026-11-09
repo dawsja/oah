@@ -59,6 +59,12 @@ struct State {
     after_plan: PermissionMode,
     /// `claude_code_version` from `initialize`.
     version: Option<String>,
+    /// Background tasks (`system` `task_*` messages): shown ones, and tasks run inside a turn
+    /// (a subagent the turn waits for), which show only if they outlive it.
+    tasks: TaskList,
+    inside: HashMap<String, BackgroundTask>,
+    /// Turns Claude starts by itself (a background task ended and it looks at the result).
+    woke: u32,
 }
 
 pub fn permission_mode_flag(mode: PermissionMode) -> &'static str {
@@ -139,13 +145,19 @@ impl ClaudeDriver {
                 } else {
                     Some(tail.lock().unwrap().clone()).filter(|m| !m.is_empty())
                 };
-                let turn = {
+                let (turn, tasks) = {
                     let mut s = state.lock().unwrap();
                     s.waiting.clear();
-                    s.turn_id.take()
+                    s.inside.clear();
+                    let tasks = s.tasks.stop_all().then(|| s.tasks.event());
+                    (s.turn_id.take(), tasks)
                 };
                 if let Some(turn_id) = turn {
                     sink(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted: true });
+                }
+                // Its background tasks went with it.
+                if let Some(e) = tasks {
+                    sink(e);
                 }
                 sink(ChatEvent::Exited { code, message });
             });
@@ -184,13 +196,17 @@ impl Driver for ClaudeDriver {
             images: prompt.images.iter().map(|i| i.mime.clone()).collect(),
             files: prompt.files.clone(),
         });
-        let started = {
+        let (started, tasks) = {
             let mut s = self.state.lock().unwrap();
             s.waiting.push(uuid.clone());
-            s.turn_id.is_none().then(|| s.turn_id = Some(turn_id.clone())).is_some()
+            let tasks = s.tasks.clear_ended().then(|| s.tasks.event());
+            (s.turn_id.is_none().then(|| s.turn_id = Some(turn_id.clone())).is_some(), tasks)
         };
         if started {
             (self.sink)(ChatEvent::TurnStarted { turn_id });
+        }
+        if let Some(e) = tasks {
+            (self.sink)(e);
         }
         self.write(&json!({"type": "user", "uuid": uuid, "message": {"role": "user", "content": content}}))
     }
@@ -251,6 +267,14 @@ impl Driver for ClaudeDriver {
 
     fn resumable(&self) -> bool {
         true
+    }
+
+    fn stop_task(&mut self, task_id: &str) -> DriverResult<()> {
+        self.write(&json!({"type": "control_request", "request_id": format!("oah-stop-{task_id}"), "request": {"subtype": "stop_task", "task_id": task_id}}))
+    }
+
+    fn background(&self) -> usize {
+        self.state.lock().unwrap().tasks.running()
     }
 
     fn idle(&self) -> bool {
@@ -319,6 +343,7 @@ impl Translator {
             "system" if v["subtype"] == "commands_changed" && v["commands"].is_array() => {
                 self.emit(ChatEvent::Commands { commands: parse_commands(v) });
             }
+            "system" if v["subtype"].as_str().is_some_and(|s| s.starts_with("task_") || s == "background_tasks_changed") => self.task(v),
             "stream_event" => self.stream_event(&v["event"]),
             "assistant" => self.assistant(v),
             "user" => self.tool_results(v),
@@ -362,6 +387,15 @@ impl Translator {
             "message_start" => {
                 s.message_id = e["message"]["id"].as_str().unwrap_or("").to_string();
                 s.blocks.clear();
+                // Nobody sent anything, yet Claude answers: a background task ended and it's
+                // looking at the result. That's a turn too (it ends with a `result`).
+                if s.turn_id.is_none() && s.waiting.is_empty() {
+                    s.woke += 1;
+                    let turn_id = format!("turn-w{}", s.woke);
+                    s.turn_id = Some(turn_id.clone());
+                    drop(s);
+                    self.emit(ChatEvent::TurnStarted { turn_id });
+                }
             }
             "content_block_start" => {
                 let kind = match e["content_block"]["type"].as_str() {
@@ -528,6 +562,83 @@ impl Translator {
         });
     }
 
+    /// `task_started` / `task_progress` / `task_updated` / `task_notification`, and
+    /// `background_tasks_changed` (the running background tasks, whole).
+    fn task(&mut self, v: &Value) {
+        let id = v["task_id"].as_str().unwrap_or("").to_string();
+        let mut ended = None;
+        let event = {
+            let mut s = self.state.lock().unwrap();
+            let changed = match v["subtype"].as_str().unwrap_or("") {
+                "task_started" if !id.is_empty() => {
+                    let mut t = BackgroundTask::running(&id, task_kind(v["task_type"].as_str().unwrap_or("")), task_title(v));
+                    t.item_id = v["tool_use_id"].as_str().map(String::from);
+                    t.stoppable = true;
+                    if v["is_backgrounded"] == true || s.turn_id.is_none() {
+                        s.tasks.add(t)
+                    } else {
+                        s.inside.insert(id.clone(), t);
+                        false
+                    }
+                }
+                "task_progress" => {
+                    let detail = v["summary"]
+                        .as_str()
+                        .filter(|d| !d.is_empty())
+                        .map(String::from)
+                        .or_else(|| v["last_tool_name"].as_str().map(|n| format!("Using {n}")));
+                    if let Some(t) = s.inside.get_mut(&id) {
+                        t.detail = detail.clone();
+                    }
+                    s.tasks.progress(&id, v["description"].as_str(), detail.as_deref())
+                }
+                "task_updated" => {
+                    let patch = &v["patch"];
+                    let status = patch["status"].as_str().and_then(task_status);
+                    match status {
+                        Some(st) if st != TaskStatus::Running => {
+                            s.inside.remove(&id);
+                            s.tasks.finish(&id, st, patch["error"].as_str().map(String::from)).is_some()
+                        }
+                        _ => s.tasks.progress(&id, patch["description"].as_str(), None),
+                    }
+                }
+                "task_notification" => {
+                    s.inside.remove(&id);
+                    let st = v["status"].as_str().and_then(task_status).unwrap_or(TaskStatus::Completed);
+                    let summary = v["summary"].as_str().filter(|d| !d.is_empty()).map(String::from);
+                    // `task_updated` may have ended it already; the summary is still news.
+                    let shown = s.tasks.finish(&id, st, summary.clone()).is_some() || s.tasks.set_detail(&id, summary.clone());
+                    if let Some(t) = s.tasks.get(&id) {
+                        ended = Some(summary.unwrap_or_else(|| format!("Background task ended: {}", t.title)));
+                    }
+                    shown
+                }
+                "background_tasks_changed" => {
+                    // Running background tasks we never saw start (a resumed session's).
+                    let mut changed = false;
+                    for t in v["tasks"].as_array().into_iter().flatten() {
+                        let Some(tid) = t["task_id"].as_str() else { continue };
+                        if s.tasks.get(tid).is_none() && !s.inside.contains_key(tid) {
+                            let mut task = BackgroundTask::running(tid, task_kind(t["task_type"].as_str().unwrap_or("")), task_title(t));
+                            task.stoppable = true;
+                            changed |= s.tasks.add(task);
+                        }
+                    }
+                    changed
+                }
+                _ => false,
+            };
+            changed.then(|| s.tasks.event())
+        };
+        if let Some(e) = event {
+            self.emit(e);
+        }
+        if let Some(text) = ended {
+            self.emit(ChatEvent::Notice { level: NoticeLevel::Info, text });
+        }
+    }
+
     fn result(&mut self, v: &Value) {
         let (turn_id, cost) = {
             let mut s = self.state.lock().unwrap();
@@ -557,6 +668,19 @@ impl Translator {
         }
         let interrupted =
             v["subtype"] == "error_during_execution" || v["terminal_reason"].as_str().is_some_and(|r| r.contains("interrupt"));
+        // Tasks the turn started and didn't wait for are background work now.
+        let outlived = {
+            let mut s = self.state.lock().unwrap();
+            let left: Vec<BackgroundTask> = s.inside.drain().map(|(_, t)| t).collect();
+            let mut changed = false;
+            for t in left {
+                changed |= s.tasks.add(t);
+            }
+            changed.then(|| s.tasks.event())
+        };
+        if let Some(e) = outlived {
+            self.emit(e);
+        }
         self.emit(ChatEvent::TurnFinished {
             turn_id: turn_id.unwrap_or_else(|| "turn".into()),
             usage: Some(usage),
@@ -593,6 +717,34 @@ impl Translator {
         if let Some(turn_id) = next {
             self.emit(ChatEvent::TurnStarted { turn_id });
         }
+    }
+}
+
+/// Claude Code's `task_type`.
+fn task_kind(t: &str) -> TaskKind {
+    match t {
+        "local_bash" => TaskKind::Command,
+        t if t.starts_with("monitor") => TaskKind::Watch,
+        t if t.contains("agent") || t.contains("teammate") => TaskKind::Agent,
+        _ => TaskKind::Other,
+    }
+}
+
+fn task_title(v: &Value) -> String {
+    ["description", "prompt", "subagent_type", "task_type"]
+        .iter()
+        .find_map(|k| v[*k].as_str().filter(|s| !s.trim().is_empty()))
+        .map(|s| s.lines().next().unwrap_or(s).to_string())
+        .unwrap_or_else(|| "Background task".into())
+}
+
+fn task_status(s: &str) -> Option<TaskStatus> {
+    match s {
+        "running" | "pending" => Some(TaskStatus::Running),
+        "completed" => Some(TaskStatus::Completed),
+        "failed" => Some(TaskStatus::Failed),
+        "killed" | "stopped" | "cancelled" => Some(TaskStatus::Stopped),
+        _ => None,
     }
 }
 
@@ -953,6 +1105,96 @@ mod tests {
         assert_eq!(c[0].hint, "<instructions>");
         let ev = run(&[json!({"type": "control_response", "response": {"subtype": "success", "request_id": "oah-init", "response": r}})]);
         assert!(matches!(&ev[..], [ChatEvent::Commands { commands }] if commands.len() == 4));
+    }
+
+    /// `OAH_TEST_DIR=/tmp/x cargo test -p oah-agents real_claude_background -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_claude_background() {
+        use std::time::{Duration, Instant};
+        let dir = std::env::var("OAH_TEST_DIR").expect("OAH_TEST_DIR");
+        let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
+        let e = events.clone();
+        let sink: Sink = Arc::new(move |ev| e.lock().unwrap().push(ev));
+        let opts = StartOptions {
+            kind: AgentKind::Claude,
+            cwd: dir,
+            location: oah_core::settings::Location::Local,
+            binary: String::new(),
+            model: Some("haiku".into()),
+            effort: None,
+            permission: PermissionMode::FullAccess,
+            resume: None,
+            env: vec![],
+        };
+        let mut d = ClaudeDriver::start(opts, sink).expect("start claude");
+        let text = "Use the Bash tool with run_in_background=true to run: sleep 120. Then reply OK and end your turn. Don't check on it.";
+        d.send(Prompt { id: "p1".into(), text: text.into(), images: vec![], files: vec![] }).unwrap();
+        let wait = |f: &dyn Fn(&[ChatEvent]) -> bool| {
+            let t = Instant::now();
+            while t.elapsed() < Duration::from_secs(90) {
+                if f(&events.lock().unwrap()) {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(250));
+            }
+            false
+        };
+        assert!(wait(&|ev| ev.iter().any(|e| matches!(e, ChatEvent::TurnFinished { .. }))), "the turn ends");
+        let last_tasks = |ev: &[ChatEvent]| ev.iter().rev().find_map(|e| if let ChatEvent::Tasks { tasks } = e { Some(tasks.clone()) } else { None });
+        let tasks = last_tasks(&events.lock().unwrap()).expect("a background task");
+        eprintln!("{}", serde_json::to_string(&tasks).unwrap());
+        assert_eq!((tasks[0].kind, tasks[0].status), (TaskKind::Command, TaskStatus::Running));
+        assert_eq!(d.background(), 1);
+        d.stop_task(&tasks[0].id).unwrap();
+        assert!(wait(&|ev| last_tasks(ev).is_some_and(|t| t[0].status == TaskStatus::Stopped)), "stopping it ends it");
+        eprintln!("{}", serde_json::to_string(&last_tasks(&events.lock().unwrap())).unwrap());
+        assert_eq!(d.background(), 0);
+        d.stop();
+    }
+
+    #[test]
+    fn tracks_background_tasks() {
+        // As Claude Code 2.1.319 says it: a `Bash` with `run_in_background`, the turn ends, the
+        // command ends, then Claude wakes up by itself to look at the result.
+        let ev = run(&[
+            json!({"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"Sleep 8 seconds"}]}),
+            json!({"type":"system","subtype":"task_started","task_id":"b1","tool_use_id":"tu1","description":"Sleep 8 seconds","is_backgrounded":true,"task_type":"local_bash"}),
+            json!({"type":"system","subtype":"task_started","task_id":"a1","tool_use_id":"tu2","description":"Explore the repo","is_backgrounded":false,"task_type":"local_agent"}),
+            json!({"type":"system","subtype":"task_progress","task_id":"a1","description":"Explore the repo","last_tool_name":"Grep","usage":{}}),
+            json!({"type":"system","subtype":"task_notification","task_id":"a1","status":"completed","summary":"done"}),
+            json!({"type":"result","subtype":"success","total_cost_usd":0.0,"usage":{}}),
+            json!({"type":"system","subtype":"task_updated","task_id":"b1","patch":{"status":"completed","end_time":1}}),
+            json!({"type":"system","subtype":"task_notification","task_id":"b1","status":"completed","summary":"Background command \"Sleep 8 seconds\" completed (exit code 0)"}),
+            json!({"type":"system","subtype":"background_tasks_changed","tasks":[]}),
+            json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"m9"}}}),
+            json!({"type":"result","subtype":"success","total_cost_usd":0.0,"usage":{}}),
+        ]);
+        let lists: Vec<&Vec<BackgroundTask>> = ev.iter().filter_map(|e| if let ChatEvent::Tasks { tasks } = e { Some(tasks) } else { None }).collect();
+        // The subagent the turn waited for never shows; the background command does, once.
+        assert!(lists.iter().all(|l| l.iter().all(|t| t.id == "b1")));
+        assert_eq!(lists[0][0].status, TaskStatus::Running);
+        assert_eq!((lists[1][0].kind, lists[1][0].item_id.as_deref(), lists[1][0].stoppable), (TaskKind::Command, Some("tu1"), true));
+        let last = lists.last().unwrap();
+        assert_eq!(last[0].status, TaskStatus::Completed);
+        assert!(last[0].detail.as_deref().unwrap().contains("exit code 0"));
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Notice { text, .. } if text.contains("exit code 0"))));
+        // Claude's own turn after it is a turn.
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::TurnStarted { turn_id } if turn_id == "turn-w1")));
+        assert!(matches!(ev.last(), Some(ChatEvent::TurnFinished { turn_id, .. }) if turn_id == "turn-w1"));
+    }
+
+    #[test]
+    fn a_subagent_that_outlives_its_turn_shows() {
+        let ev = run(&[
+            json!({"type":"system","subtype":"task_started","task_id":"a1","description":"Watch CI","is_backgrounded":false,"task_type":"local_agent"}),
+            json!({"type":"result","subtype":"success","total_cost_usd":0.0,"usage":{}}),
+        ]);
+        let tasks = ev.iter().find_map(|e| if let ChatEvent::Tasks { tasks } = e { Some(tasks) } else { None }).unwrap();
+        assert_eq!((tasks[0].kind, tasks[0].status), (TaskKind::Agent, TaskStatus::Running));
+        // Sent before the turn ends, so the turn's end doesn't settle it as cut off.
+        let at = |f: fn(&ChatEvent) -> bool| ev.iter().position(f).unwrap();
+        assert!(at(|e| matches!(e, ChatEvent::Tasks { .. })) < at(|e| matches!(e, ChatEvent::TurnFinished { .. })));
     }
 
     #[test]

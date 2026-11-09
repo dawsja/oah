@@ -88,6 +88,11 @@ pub enum ChatEvent {
     Plan {
         items: Vec<PlanItem>,
     },
+    /// Work the agent runs beside the conversation (background commands, subagents, watchers),
+    /// replaced whole: running ones, and ones that ended since the user last wrote.
+    Tasks {
+        tasks: Vec<BackgroundTask>,
+    },
     TurnFinished {
         turn_id: String,
         usage: Option<Usage>,
@@ -302,6 +307,187 @@ pub enum PlanStatus {
     Pending,
     InProgress,
     Completed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskKind {
+    /// A shell command left running (a dev server, a build, `sleep && …`).
+    Command,
+    /// A subagent working on its own.
+    Agent,
+    /// Something watched for a change (Claude Code's Monitor).
+    Watch,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskStatus {
+    Running,
+    Completed,
+    Failed,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTask {
+    /// The agent's id for it (Claude's task id, Codex's process id, an ACP tool call id).
+    pub id: String,
+    pub kind: TaskKind,
+    /// What it is: the command, or the subagent's job.
+    pub title: String,
+    pub status: TaskStatus,
+    /// The latest word on it: progress, or how it ended.
+    #[serde(default)]
+    pub detail: Option<String>,
+    /// The tool call that started it, when there is one in the transcript.
+    #[serde(default)]
+    pub item_id: Option<String>,
+    /// Unix ms.
+    pub started_at: u64,
+    #[serde(default)]
+    pub ended_at: Option<u64>,
+    /// `false`: the agent never says when it ends (Antigravity's background commands), so
+    /// "running" means "started, and not heard of since".
+    #[serde(default = "yes")]
+    pub tracked: bool,
+    /// oah can stop it (`Driver::stop_task`).
+    #[serde(default)]
+    pub stoppable: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+impl BackgroundTask {
+    pub fn running(id: impl Into<String>, kind: TaskKind, title: impl Into<String>) -> BackgroundTask {
+        BackgroundTask {
+            id: id.into(),
+            kind,
+            title: title.into(),
+            status: TaskStatus::Running,
+            detail: None,
+            item_id: None,
+            started_at: now_ms(),
+            ended_at: None,
+            tracked: true,
+            stoppable: false,
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.status == TaskStatus::Running
+    }
+}
+
+/// A driver's background tasks, in the order they started. Each change returns whether there
+/// was one, so the driver sends [`ChatEvent::Tasks`] only then.
+#[derive(Debug, Default)]
+pub struct TaskList {
+    tasks: Vec<BackgroundTask>,
+}
+
+impl TaskList {
+    pub fn get(&self, id: &str) -> Option<&BackgroundTask> {
+        self.tasks.iter().find(|t| t.id == id)
+    }
+
+    /// Adds a task, or (same id) fills in what it says that the one we have doesn't.
+    pub fn add(&mut self, task: BackgroundTask) -> bool {
+        match self.tasks.iter_mut().find(|t| t.id == task.id) {
+            Some(t) => {
+                let before = t.clone();
+                t.title = task.title;
+                t.detail = task.detail.or(t.detail.take());
+                t.item_id = task.item_id.or(t.item_id.take());
+                *t != before
+            }
+            None => {
+                self.tasks.push(task);
+                true
+            }
+        }
+    }
+
+    /// New progress for a running task.
+    pub fn progress(&mut self, id: &str, title: Option<&str>, detail: Option<&str>) -> bool {
+        let Some(t) = self.tasks.iter_mut().find(|t| t.id == id && t.is_running()) else { return false };
+        let mut changed = false;
+        if let Some(title) = title.filter(|s| !s.is_empty() && *s != t.title) {
+            t.title = title.to_string();
+            changed = true;
+        }
+        if let Some(d) = detail.filter(|s| !s.is_empty()) {
+            if t.detail.as_deref() != Some(d) {
+                t.detail = Some(d.to_string());
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// Ends a running task (`detail`: how, when the agent says). The ended task, if it was running.
+    pub fn finish(&mut self, id: &str, status: TaskStatus, detail: Option<String>) -> Option<&BackgroundTask> {
+        let t = self.tasks.iter_mut().find(|t| t.id == id && t.is_running())?;
+        t.status = status;
+        t.ended_at = Some(now_ms());
+        if detail.as_deref().is_some_and(|d| !d.is_empty()) {
+            t.detail = detail;
+        }
+        Some(t)
+    }
+
+    /// Replaces an ended task's detail (how it ended, said after it ended).
+    pub fn set_detail(&mut self, id: &str, detail: Option<String>) -> bool {
+        match self.tasks.iter_mut().find(|t| t.id == id) {
+            Some(t) if detail.is_some() && t.detail != detail => {
+                t.detail = detail;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Ends every running task (the agent stopped, so they went with it).
+    pub fn stop_all(&mut self) -> bool {
+        let mut changed = false;
+        for t in self.tasks.iter_mut().filter(|t| t.is_running()) {
+            t.status = TaskStatus::Stopped;
+            t.ended_at = Some(now_ms());
+            changed = true;
+        }
+        changed
+    }
+
+    /// Forgets the ended tasks (the user wrote again: they've been seen).
+    pub fn clear_ended(&mut self) -> bool {
+        let before = self.tasks.len();
+        self.tasks.retain(|t| t.is_running());
+        self.tasks.len() != before
+    }
+
+    /// Forgets the running tasks the agent never reports on.
+    pub fn forget_untracked(&mut self) -> bool {
+        let before = self.tasks.len();
+        self.tasks.retain(|t| t.tracked || !t.is_running());
+        self.tasks.len() != before
+    }
+
+    /// The running tasks the agent reports on (the others may well be done).
+    pub fn running(&self) -> usize {
+        self.tasks.iter().filter(|t| t.is_running() && t.tracked).count()
+    }
+
+    pub fn event(&self) -> ChatEvent {
+        ChatEvent::Tasks { tasks: self.tasks.clone() }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
