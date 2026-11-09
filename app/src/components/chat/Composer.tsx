@@ -281,12 +281,12 @@ export function Composer(p: ComposerProps) {
       {images.length ? (
         <div className="flex flex-wrap gap-1.5 px-3 pt-3">
           {images.map((img, i) => (
-            <div key={i} className="rounded-lg group/img relative size-14 overflow-hidden border bg-background">
-              <button className="size-full" aria-label={`View ${img.name}`} onClick={() => openImages(images.map((x) => ({ src: `data:${x.mime};base64,${x.data}`, name: x.name })), i)}>
+            <div key={i} className="group/img relative size-14">
+              <button className="rounded-lg size-full overflow-hidden border bg-background" aria-label={`View ${img.name}`} onClick={() => openImages(images.map((x) => ({ src: `data:${x.mime};base64,${x.data}`, name: x.name })), i)}>
                 <img src={`data:${img.mime};base64,${img.data}`} alt={img.name} className="size-full object-cover" />
               </button>
               <button
-                className="rounded-full absolute -top-1.5 -right-1.5 hidden size-4 place-items-center bg-foreground text-background group-hover/img:grid"
+                className="rounded-full absolute -top-1.5 -right-1.5 z-10 hidden size-4 place-items-center bg-foreground text-background group-focus-within/img:grid group-hover/img:grid"
                 aria-label="Remove image"
                 onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}
               >
