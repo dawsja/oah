@@ -27,6 +27,7 @@ fn minimums(kind: AgentKind) -> &'static [&'static str] {
     match kind {
         AgentKind::Opencode => &["1.18.31", "2.0.14"],
         AgentKind::Opencode2 => &["2.0.14"],
+        AgentKind::Antigravity => &[crate::antigravity::MINIMUM],
         _ => &[],
     }
 }
@@ -45,6 +46,7 @@ pub fn outdated(kind: AgentKind, version: &str) -> Option<String> {
         AgentKind::Opencode | AgentKind::Opencode2 => {
             format!("OpenCode {version} is too old for chats. Update to {min} or newer (`opencode upgrade`).")
         }
+        AgentKind::Antigravity => format!("Antigravity {version} is too old for chats. Update to {min} or newer (`agy update`)."),
         _ => format!("Version {version} is too old for chats. Update to {min} or newer."),
     })
 }

@@ -100,6 +100,8 @@ pub fn start(opts: StartOptions, sink: Sink) -> DriverResult<Box<dyn Driver>> {
     match opts.kind {
         AgentKind::Claude => crate::claude::ClaudeDriver::start(opts, sink).map(|d| Box::new(d) as Box<dyn Driver>),
         AgentKind::Codex => crate::codex::CodexDriver::start(opts, sink).map(|d| Box::new(d) as Box<dyn Driver>),
-        AgentKind::Opencode | AgentKind::Opencode2 => crate::acp::AcpDriver::start(opts, sink).map(|d| Box::new(d) as Box<dyn Driver>),
+        AgentKind::Opencode | AgentKind::Opencode2 | AgentKind::Antigravity => {
+            crate::acp::AcpDriver::start(opts, sink).map(|d| Box::new(d) as Box<dyn Driver>)
+        }
     }
 }

@@ -1,4 +1,5 @@
-//! OpenCode over the Agent Client Protocol (ACP, v1): `opencode acp`, JSON-RPC 2.0 on stdio.
+//! OpenCode and Antigravity over the Agent Client Protocol (ACP, v1): `opencode acp` or
+//! `agy acp`, JSON-RPC 2.0 on stdio.
 //!
 //! We send `initialize`, then `session/new` (or `session/load` / `session/resume` to reopen a
 //! chat), and one `session/prompt` at a time: messages sent while a prompt runs wait their turn.
@@ -15,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use oah_core::settings::{EnvVar, PermissionMode};
+use oah_core::settings::{AgentKind, EnvVar, PermissionMode};
 use oah_transport::Spec;
 use serde_json::{json, Value};
 
@@ -55,6 +56,9 @@ struct State {
     pending: HashMap<String, (Value, Vec<Value>)>,
     /// Form elicitations waiting: our id → (JSON-RPC id, the fields).
     questions: HashMap<String, (Value, Vec<Field>)>,
+    /// Antigravity's questions, asked as permission requests whose options are the answers:
+    /// our id → (JSON-RPC id, the options).
+    choices: HashMap<String, (Value, Vec<Value>)>,
     /// The config option that picks the model (`session/set_config_option`), or none when the
     /// agent uses `session/set_model`.
     model_option: Option<String>,
@@ -78,6 +82,11 @@ struct State {
     /// The session can be deleted (`session/delete`), for the throwaway one a catalog uses.
     deletable: bool,
     current_model: Option<String>,
+    /// Which CLI this is: modes, sign-in and model listings differ.
+    kind: Option<AgentKind>,
+    /// Each model's efforts as first listed (Antigravity's per-effort model ids), kept for the
+    /// model lists that come later without them.
+    known_efforts: HashMap<String, Vec<String>>,
     /// Set when the process starts; part of every turn id.
     nonce: String,
     permission: PermissionMode,
@@ -104,23 +113,29 @@ enum FieldKind {
 
 impl AcpDriver {
     pub fn start(opts: StartOptions, sink: Sink) -> DriverResult<AcpDriver> {
-        let name = "OpenCode".to_string();
+        let kind = opts.kind;
+        let name = if kind.is_opencode() { "OpenCode".to_string() } else { kind.label().to_string() };
         let program = match opts.binary.trim() {
-            "" => "opencode".to_string(),
+            "" => kind.default_binary().to_string(),
             b => b.to_string(),
         };
         let args = vec!["acp".to_string()];
         let mut env = opts.env.clone();
-        // OpenCode 1.x can't answer its question tool over ACP; 2.x uses form elicitation.
-        env.push(EnvVar { key: "OPENCODE_CLIENT".into(), value: "acp".into(), in_keychain: false });
-        env.push(EnvVar { key: "OPENCODE_ENABLE_QUESTION_TOOL".into(), value: "false".into(), in_keychain: false });
-        // OpenCode lets edits and commands through unless its config says "ask". Ask for both,
-        // and oah answers what its mode allows (Accept edits, Full access) by itself, so the
-        // mode can change mid-chat. 1.x reads OPENCODE_PERMISSION; 2.x ignores it and takes the
-        // rule only as config (OPENCODE_CONFIG_CONTENT). Your own permission settings win.
-        if !env.iter().any(|e| e.key == "OPENCODE_PERMISSION") {
-            env.push(EnvVar { key: "OPENCODE_PERMISSION".into(), value: ASK_FOR_EDITS_AND_COMMANDS.into(), in_keychain: false });
-            with_ask_config(&mut env);
+        if kind.is_opencode() {
+            // OpenCode 1.x can't answer its question tool over ACP; 2.x uses form elicitation.
+            env.push(EnvVar { key: "OPENCODE_CLIENT".into(), value: "acp".into(), in_keychain: false });
+            env.push(EnvVar { key: "OPENCODE_ENABLE_QUESTION_TOOL".into(), value: "false".into(), in_keychain: false });
+            // OpenCode lets edits and commands through unless its config says "ask". Ask for both,
+            // and oah answers what its mode allows (Accept edits, Full access) by itself, so the
+            // mode can change mid-chat. 1.x reads OPENCODE_PERMISSION; 2.x ignores it and takes the
+            // rule only as config (OPENCODE_CONFIG_CONTENT). Your own permission settings win.
+            if !env.iter().any(|e| e.key == "OPENCODE_PERMISSION") {
+                env.push(EnvVar { key: "OPENCODE_PERMISSION".into(), value: ASK_FOR_EDITS_AND_COMMANDS.into(), in_keychain: false });
+                with_ask_config(&mut env);
+            }
+        }
+        if kind == AgentKind::Antigravity {
+            crate::antigravity::acp_env(&mut env);
         }
         let mut cmd = oah_transport::command(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &env })?;
         let mut child = cmd.spawn().map_err(|e| format!("couldn't start {program}: {e}"))?;
@@ -132,7 +147,7 @@ impl AcpDriver {
             "{:x}",
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0) % 0xffffff
         );
-        let state = Arc::new(Mutex::new(State { alive: true, permission: opts.permission, nonce, ..Default::default() }));
+        let state = Arc::new(Mutex::new(State { alive: true, permission: opts.permission, nonce, kind: Some(kind), ..Default::default() }));
 
         let tail = Arc::new(Mutex::new(String::new()));
         {
@@ -196,7 +211,12 @@ impl AcpDriver {
         // Reopen the chat's session if we can; otherwise start a new one.
         let mut session = None;
         if let Some(id) = &opts.resume {
-            let reopen = if caps["loadSession"].as_bool() == Some(true) {
+            // Antigravity resumes without replaying the conversation; OpenCode's replay carries
+            // the session's cost so far.
+            let resume_first = kind == AgentKind::Antigravity && !caps["sessionCapabilities"]["resume"].is_null();
+            let reopen = if resume_first {
+                d.rpc.call("session/resume", json!({"sessionId": id, "cwd": opts.cwd, "mcpServers": []}), Duration::from_secs(120))
+            } else if caps["loadSession"].as_bool() == Some(true) {
                 d.state.lock().unwrap().loading = true;
                 let r = d.rpc.call("session/load", json!({"sessionId": id, "cwd": opts.cwd, "mcpServers": []}), Duration::from_secs(120));
                 d.state.lock().unwrap().loading = false;
@@ -228,7 +248,7 @@ impl AcpDriver {
                     d.state.lock().unwrap().cost = Some(0.0);
                     s
                 }
-                Err(e) if is_auth_error(&e) => return Err(NOT_SIGNED_IN.to_string()),
+                Err(e) if is_auth_error(&e) => return Err(not_signed_in(kind).to_string()),
                 Err(e) => return Err(e),
             },
         };
@@ -240,7 +260,7 @@ impl AcpDriver {
         if !models.is_empty() {
             (d.sink)(ChatEvent::Models { models, current: current.clone() });
         }
-        if d.state.lock().unwrap().major < 2 {
+        if kind.is_opencode() && d.state.lock().unwrap().major < 2 {
             // 1.x sessions list only the current model's efforts; its CLI knows every model's.
             // (2.x's CLI listing leaves out providers that report late: the session's is the one.)
             let (sink, state, binary, location, cwd, env) =
@@ -282,6 +302,8 @@ impl AcpDriver {
         st.model_option = model_option;
         read_effort(&mut st, session);
         add_efforts(&mut models, current.as_deref(), &st.efforts);
+        variant_efforts(&mut models, &session["models"]);
+        st.known_efforts = models.iter().filter(|m| !m.efforts.is_empty()).map(|m| (m.id.clone(), m.efforts.clone())).collect();
         if let Some(opts) = session["configOptions"].as_array() {
             if let Some(mode) = opts.iter().find(|o| o["category"] == "mode" || o["id"] == "mode") {
                 st.mode_option = mode["id"].as_str().map(String::from);
@@ -311,6 +333,7 @@ impl AcpDriver {
             st.current_model = current.clone();
         }
         add_efforts(&mut models, current.as_deref(), &st.efforts);
+        known_efforts(&mut models, &st.known_efforts);
         drop(st);
         if !models.is_empty() {
             (self.sink)(ChatEvent::Models { models, current });
@@ -325,13 +348,14 @@ impl AcpDriver {
         s.session_id.clone().ok_or_else(|| format!("{} has no session", self.rpc.name))
     }
 
-    /// Plan mode maps to the agent's `plan` mode when it has one (OpenCode: plan / build).
+    /// oah's permission mode as the agent's own mode, when it has a matching one: OpenCode's
+    /// plan / build, Antigravity's plan / accept-edits / default.
     fn apply_mode(&self, mode: PermissionMode) -> DriverResult<()> {
-        let (option, modes) = {
+        let (option, modes, kind) = {
             let s = self.state.lock().unwrap();
-            (s.mode_option.clone(), s.modes.clone())
+            (s.mode_option.clone(), s.modes.clone(), s.kind)
         };
-        let want = if mode == PermissionMode::Plan { "plan" } else { "build" };
+        let want = agent_mode(kind, mode);
         if !modes.iter().any(|m| m == want) {
             return Ok(());
         }
@@ -380,6 +404,7 @@ fn run_prompt(rpc: Rpc, state: Arc<Mutex<State>>, sink: Sink, queue: Arc<Mutex<V
             s.turn_id = None;
             s.pending.clear();
             s.questions.clear();
+            s.choices.clear();
             let reason = r.as_ref().ok().and_then(|v| v["stopReason"].as_str()).unwrap_or("");
             // Without a cost from before the turn, its share can't be told: none, not all of it.
             let cost = match (s.cost, s.cost_at_turn) {
@@ -446,7 +471,9 @@ impl Driver for AcpDriver {
         // Questions in flight are withdrawn with the turn.
         let (pending, questions) = {
             let mut s = self.state.lock().unwrap();
-            (s.pending.drain().collect::<Vec<_>>(), s.questions.drain().collect::<Vec<_>>())
+            let mut pending = s.pending.drain().collect::<Vec<_>>();
+            pending.extend(s.choices.drain());
+            (pending, s.questions.drain().collect::<Vec<_>>())
         };
         for (_, (id, _)) in pending {
             let _ = self.rpc.reply(&id, json!({"outcome": {"outcome": "cancelled"}}));
@@ -465,6 +492,12 @@ impl Driver for AcpDriver {
     }
 
     fn answer_question(&mut self, request_id: &str, answers: std::collections::BTreeMap<String, Vec<String>>) -> DriverResult<()> {
+        let choice = self.state.lock().unwrap().choices.remove(request_id);
+        if let Some((rpc_id, options)) = choice {
+            let reply = choice_reply(&options, &answers);
+            (self.sink)(ChatEvent::QuestionResolved { request_id: request_id.into(), answers });
+            return self.rpc.reply(&rpc_id, reply);
+        }
         let (rpc_id, fields) = self.state.lock().unwrap().questions.remove(request_id).ok_or("that question was already answered")?;
         let reply = elicitation_reply(&fields, &answers);
         (self.sink)(ChatEvent::QuestionResolved { request_id: request_id.into(), answers });
@@ -512,11 +545,11 @@ impl Driver for AcpDriver {
         Ok(true)
     }
 
-    /// `/compact` as OpenCode has it: a turn running its own `compact` command, which takes no
-    /// instructions. The summary isn't shown; a note says it's done.
+    /// `/compact` as OpenCode and Antigravity have it: a turn running their own `compact`
+    /// command, which takes no instructions. The summary isn't shown; a note says it's done.
     fn compact(&mut self, instructions: &str) -> DriverResult<bool> {
         if !instructions.trim().is_empty() {
-            return Err("OpenCode's /compact doesn't take instructions".into());
+            return Err(format!("{}'s /compact doesn't take instructions", self.rpc.name));
         }
         self.session()?;
         {
@@ -538,7 +571,7 @@ impl Driver for AcpDriver {
 
     fn idle(&self) -> bool {
         let s = self.state.lock().unwrap();
-        !s.busy && s.pending.is_empty() && s.questions.is_empty() && self.queue.lock().unwrap().is_empty()
+        !s.busy && s.pending.is_empty() && s.questions.is_empty() && s.choices.is_empty() && self.queue.lock().unwrap().is_empty()
     }
 
     fn set_permission(&mut self, mode: PermissionMode) -> DriverResult<()> {
@@ -658,11 +691,19 @@ impl Translator {
                     st.model_option = option;
                     st.current_model = current.clone();
                     add_efforts(&mut models, current.as_deref(), &st.efforts);
+                    known_efforts(&mut models, &st.known_efforts);
                     drop(st);
                     self.emit(ChatEvent::Models { models, current });
                 }
             }
-            "available_commands_update" => self.emit(ChatEvent::Commands { commands: acp_commands(&u["availableCommands"]) }),
+            "available_commands_update" => {
+                let mut commands = acp_commands(&u["availableCommands"]);
+                // Antigravity's `logout` would sign every chat out.
+                if self.state.lock().unwrap().kind == Some(AgentKind::Antigravity) {
+                    commands.retain(|c| c.name != "logout");
+                }
+                self.emit(ChatEvent::Commands { commands })
+            }
             "notice" => {
                 if let Some(t) = u["message"].as_str().or(u["text"].as_str()) {
                     self.emit(ChatEvent::Notice { level: NoticeLevel::Info, text: t.into() });
@@ -674,6 +715,10 @@ impl Translator {
 
     fn tool(&mut self, u: &Value) {
         let Some(id) = u["toolCallId"].as_str().map(String::from) else { return };
+        // A question's tool call ("Which color?" → "Response received"): the card is its record.
+        if is_question(&id) && self.state.lock().unwrap().kind == Some(AgentKind::Antigravity) {
+            return;
+        }
         let mut st = self.state.lock().unwrap();
         // A text after this tool call is a new stretch.
         if u["sessionUpdate"] == "tool_call" {
@@ -725,6 +770,27 @@ impl Translator {
         let options: Vec<Value> = p["options"].as_array().cloned().unwrap_or_default();
         let tc = &p["toolCall"];
         let id = tc["toolCallId"].as_str().map(String::from);
+        // Antigravity asks its questions this way: each option is an answer. Never answered by
+        // the mode, whatever it allows.
+        if id.as_deref().is_some_and(is_question) && self.state.lock().unwrap().kind == Some(AgentKind::Antigravity) {
+            let request_id = format!("acpq-{rpc_id}");
+            let question = Question {
+                id: "answer".into(),
+                header: String::new(),
+                question: tc["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("The agent asks:").to_string(),
+                options: options
+                    .iter()
+                    .filter_map(|o| o["name"].as_str())
+                    .map(|n| QuestionOption { label: n.to_string(), description: String::new() })
+                    .collect(),
+                multi: false,
+                other: false,
+                secret: false,
+            };
+            self.state.lock().unwrap().choices.insert(request_id.clone(), (rpc_id.clone(), options));
+            self.emit(ChatEvent::Question { request: QuestionRequest { request_id, questions: vec![question] } });
+            return;
+        }
         let known = id.as_ref().and_then(|i| self.state.lock().unwrap().tools.get(i).cloned());
         let kind = tc["kind"].as_str().map(tool_kind).or(known.as_ref().map(|k| k.kind)).unwrap_or(ToolKind::Other);
         // Full access answers everything, Accept edits answers edits: allow once, never always.
@@ -743,9 +809,20 @@ impl Translator {
         let input =
             if tc["rawInput"].is_null() { known.as_ref().map(|k| k.input.clone()).unwrap_or(Value::Null) } else { tc["rawInput"].clone() };
         let (akind, detail) = match kind {
-            ToolKind::Bash => (ApprovalKind::Command, input["command"].as_str().map(String::from).or(Some(title.clone()))),
+            ToolKind::Bash => (ApprovalKind::Command, command_of(&input).map(String::from).or(Some(title.clone()))),
             ToolKind::Edit | ToolKind::Write => (ApprovalKind::Edit, None),
             _ => (ApprovalKind::Other, input["description"].as_str().map(String::from)),
+        };
+        // Antigravity warns about risky "Allow always" choices.
+        let warning = options.iter().find_map(|o| {
+            let w = &o["_meta"]["agy.security.warning"];
+            let text = [w["title"].as_str(), w["message"].as_str()].into_iter().flatten().collect::<Vec<_>>().join(": ");
+            Some(text.chars().take(512).collect::<String>()).filter(|t| !t.is_empty())
+        });
+        let detail = match (detail, warning) {
+            (Some(d), Some(w)) => Some(format!("{d}\n\n⚠ {w}")),
+            (None, Some(w)) => Some(format!("⚠ {w}")),
+            (d, None) => d,
         };
         let title = match akind {
             ApprovalKind::Command => "Run a command".to_string(),
@@ -852,9 +929,52 @@ fn is_auth_error(e: &str) -> bool {
     e.contains("auth") || e.contains("401") || e.contains("sign in") || e.contains("log in") || e.contains("login")
 }
 
-/// What to do when the agent isn't signed in: its own instructions (`authMethods[].description`)
-/// and, for OpenCode, where oah's Sign in button is.
+/// What to do when the agent isn't signed in, and where oah's Sign in button is.
 const NOT_SIGNED_IN: &str = "OpenCode isn't signed in. Sign in with `opencode auth login` (Settings → Providers → OpenCode → Sign in).";
+
+fn not_signed_in(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Antigravity => crate::antigravity::NOT_SIGNED_IN,
+        _ => NOT_SIGNED_IN,
+    }
+}
+
+/// The agent's mode for oah's permission mode. What the mode allows past the agent's own asking
+/// (Accept edits, Full access) oah answers itself, so the mode can change mid-chat.
+fn agent_mode(kind: Option<AgentKind>, mode: PermissionMode) -> &'static str {
+    match (kind, mode) {
+        (_, PermissionMode::Plan) => "plan",
+        (Some(AgentKind::Antigravity), PermissionMode::AcceptEdits) => "accept-edits",
+        (Some(AgentKind::Antigravity), _) => "default",
+        _ => "build",
+    }
+}
+
+fn known_efforts(models: &mut [ModelOption], known: &HashMap<String, Vec<String>>) {
+    for m in models.iter_mut().filter(|m| m.efforts.is_empty()) {
+        if let Some(e) = known.get(&m.id) {
+            m.efforts = e.clone();
+        }
+    }
+}
+
+/// Antigravity lists each model once per effort (`claude-opus-5-5-high`, unstable `models`) next
+/// to its config option's base models (`claude-opus-5-5`): the suffixes are that model's efforts.
+fn variant_efforts(models: &mut [ModelOption], listed: &Value) {
+    let ids: Vec<&str> = listed["availableModels"].as_array().into_iter().flatten().filter_map(|m| m["modelId"].as_str()).collect();
+    for m in models.iter_mut().filter(|m| m.efforts.is_empty()) {
+        let mut efforts: Vec<String> = ids
+            .iter()
+            .filter_map(|id| id.strip_prefix(m.id.as_str())?.strip_prefix('-'))
+            .filter(|e| effort_rank(e) < 99)
+            .map(String::from)
+            .collect();
+        efforts.sort_by_key(|e| effort_rank(e));
+        if efforts.len() > 1 {
+            m.efforts = efforts;
+        }
+    }
+}
 
 /// The models (with every model's efforts) and commands OpenCode offers, for a chat that hasn't
 /// started. 1.x lists models from its CLI (`models --verbose`); 2.x only knows them in a session
@@ -980,11 +1100,31 @@ fn tool_kind(k: &str) -> ToolKind {
 }
 
 fn input_title(input: &Value) -> String {
-    ["command", "filePath", "file_path", "path", "pattern", "query", "url", "description"]
-        .iter()
-        .find_map(|k| input[*k].as_str())
+    command_of(input)
+        .or_else(|| ["filePath", "file_path", "path", "pattern", "query", "url", "description"].iter().find_map(|k| input[*k].as_str()))
         .unwrap_or("")
         .to_string()
+}
+
+/// A shell tool's command line: `command` (OpenCode), `CommandLine` / `commandLine` /
+/// `command_line` (Antigravity).
+fn command_of(input: &Value) -> Option<&str> {
+    ["command", "CommandLine", "commandLine", "command_line"].iter().find_map(|k| input[*k].as_str())
+}
+
+/// Antigravity's question tool calls (`interaction_…`).
+fn is_question(tool_call_id: &str) -> bool {
+    tool_call_id.starts_with("interaction_")
+}
+
+/// The answer to a choice question: the option whose name was picked (a picked option is the only
+/// answer Antigravity takes), or cancelled.
+fn choice_reply(options: &[Value], answers: &std::collections::BTreeMap<String, Vec<String>>) -> Value {
+    let picked = answers.values().flatten().next().map(|a| a.trim_end_matches(" (Recommended)").to_string());
+    match picked.and_then(|p| options.iter().find(|o| o["name"].as_str() == Some(p.as_str()))).and_then(|o| o["optionId"].as_str()) {
+        Some(id) => json!({"outcome": {"outcome": "selected", "optionId": id}}),
+        None => json!({"outcome": {"outcome": "cancelled"}}),
+    }
 }
 
 /// A tool's output: its text content, or what OpenCode puts in `rawOutput`.
@@ -998,7 +1138,13 @@ fn output_of(u: &Value) -> String {
         .collect();
     if parts.is_empty() {
         let raw = &u["rawOutput"];
-        if let Some(t) = raw["metadata"]["output"].as_str().or(raw["output"].as_str()).or(raw.as_str()) {
+        if let Some(t) = raw["metadata"]["output"]
+            .as_str()
+            .or(raw["output"].as_str())
+            .or(raw["combinedOutput"].as_str())
+            .or(raw["combined_output"].as_str())
+            .or(raw.as_str())
+        {
             parts.push(t.to_string());
         }
     }
@@ -1277,11 +1423,15 @@ mod tests {
     use oah_core::settings::AgentKind;
 
     fn run(lines: &[Value], permission: PermissionMode) -> (Vec<ChatEvent>, Arc<Mutex<State>>) {
+        run_as(None, lines, permission)
+    }
+
+    fn run_as(kind: Option<AgentKind>, lines: &[Value], permission: PermissionMode) -> (Vec<ChatEvent>, Arc<Mutex<State>>) {
         let out = Arc::new(Mutex::new(Vec::new()));
         let o = out.clone();
         let sink: Sink = Arc::new(move |e| o.lock().unwrap().push(e));
         let state =
-            Arc::new(Mutex::new(State { alive: true, turn_id: Some("turn-1".into()), stretch: 1, permission, ..Default::default() }));
+            Arc::new(Mutex::new(State { alive: true, turn_id: Some("turn-1".into()), stretch: 1, permission, kind, ..Default::default() }));
         let mut tr = Translator { sink, state: state.clone(), rpc: Rpc::new(None, "OpenCode") };
         for l in lines {
             tr.handle(l);
@@ -1384,6 +1534,97 @@ mod tests {
         }
         assert!(matches!(&ev[7], ChatEvent::Plan { items } if items[0].status == PlanStatus::Completed));
         assert!(matches!(&ev[8], ChatEvent::Context { used_tokens: 12000, window_tokens: 200000, .. }));
+    }
+
+    /// Antigravity's question, as captured from 1.x: a tool call, then a permission request whose
+    /// options are the answers.
+    #[test]
+    fn antigravity_questions_become_cards_even_with_full_access() {
+        let call = upd(
+            json!({"toolCallId": "interaction_28ffdbf7", "title": "Which color do you prefer?", "status": "pending", "rawInput": {}, "sessionUpdate": "tool_call"}),
+        );
+        let req = json!({"jsonrpc": "2.0", "id": 2, "method": "session/request_permission", "params": {"sessionId": "s",
+            "toolCall": {"toolCallId": "interaction_28ffdbf7", "status": "pending", "title": "Which color do you prefer?", "rawInput": {}},
+            "options": [{"optionId": "1", "name": "red", "kind": "allow_once"}, {"optionId": "2", "name": "blue", "kind": "allow_once"}]}});
+        let done = upd(
+            json!({"toolCallId": "interaction_28ffdbf7", "status": "completed", "rawOutput": "Response received", "sessionUpdate": "tool_call_update"}),
+        );
+        let (ev, state) = run_as(Some(AgentKind::Antigravity), &[call, req, done], PermissionMode::FullAccess);
+        // Only the card: no tool row for the question, and full access doesn't answer it.
+        match &ev[..] {
+            [ChatEvent::Question { request }] => {
+                assert_eq!(request.request_id, "acpq-2");
+                assert_eq!(request.questions[0].question, "Which color do you prefer?");
+                let labels: Vec<&str> = request.questions[0].options.iter().map(|o| o.label.as_str()).collect();
+                assert_eq!(labels, ["red", "blue"]);
+                assert!(!request.questions[0].other);
+            }
+            e => panic!("{e:?}"),
+        }
+        let (_, options) = state.lock().unwrap().choices.get("acpq-2").cloned().unwrap();
+        let answer = |a: &str| choice_reply(&options, &[("answer".to_string(), vec![a.to_string()])].into_iter().collect());
+        assert_eq!(answer("blue"), json!({"outcome": {"outcome": "selected", "optionId": "2"}}));
+        assert_eq!(answer("green")["outcome"]["outcome"], "cancelled");
+    }
+
+    #[test]
+    fn antigravity_commands_and_shell_tools() {
+        let cmds = upd(
+            json!({"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "goal", "description": "Run until done."}, {"name": "logout", "description": "Sign out."}]}),
+        );
+        let tool = upd(
+            json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "execute", "status": "in_progress", "rawInput": {"CommandLine": "cargo test", "Cwd": "/w"}}),
+        );
+        let end = upd(
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed", "rawOutput": {"combinedOutput": "ok: 9 passed", "exitCode": 0}}),
+        );
+        let (ev, _) = run_as(Some(AgentKind::Antigravity), &[cmds, tool, end], PermissionMode::Ask);
+        match &ev[0] {
+            ChatEvent::Commands { commands } => assert_eq!(commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["goal"]),
+            e => panic!("{e:?}"),
+        }
+        assert!(matches!(&ev[1], ChatEvent::ToolStarted { tool, .. } if tool.title == "cargo test" && tool.kind == ToolKind::Bash));
+        assert!(matches!(&ev[2], ChatEvent::ToolFinished { ok: true, output, .. } if output == "ok: 9 passed"));
+        // Asking to run it shows the command.
+        let req = json!({"jsonrpc": "2.0", "id": 9, "method": "session/request_permission", "params": {"sessionId": "s",
+            "toolCall": {"toolCallId": "t2", "kind": "execute", "title": "rm -rf build", "rawInput": {"CommandLine": "rm -rf build"}},
+            "options": [{"optionId": "a", "kind": "allow_once", "name": "Allow"},
+                        {"optionId": "b", "kind": "allow_always", "name": "Always", "_meta": {"agy.security.warning": {"title": "Destructive", "message": "Deletes files."}}}]}});
+        let (ev, _) = run_as(Some(AgentKind::Antigravity), &[req], PermissionMode::Ask);
+        match &ev[0] {
+            ChatEvent::Approval { request } => {
+                assert_eq!(request.kind, ApprovalKind::Command);
+                assert_eq!(request.detail.as_deref(), Some("rm -rf build\n\n⚠ Destructive: Deletes files."));
+            }
+            e => panic!("{e:?}"),
+        }
+    }
+
+    #[test]
+    fn antigravity_modes_and_model_efforts() {
+        assert_eq!(agent_mode(Some(AgentKind::Antigravity), PermissionMode::Ask), "default");
+        assert_eq!(agent_mode(Some(AgentKind::Antigravity), PermissionMode::AcceptEdits), "accept-edits");
+        assert_eq!(agent_mode(Some(AgentKind::Antigravity), PermissionMode::FullAccess), "default");
+        assert_eq!(agent_mode(Some(AgentKind::Antigravity), PermissionMode::Plan), "plan");
+        assert_eq!(agent_mode(Some(AgentKind::Opencode), PermissionMode::Ask), "build");
+        // `session/new` from agy 1.5.3: base models in the config option, efforts in the ids.
+        let session = json!({
+            "models": {"availableModels": [
+                {"modelId": "gemini-4-argon-medium"}, {"modelId": "gemini-4-argon-high"}, {"modelId": "gemini-4-argon-low"},
+                {"modelId": "claude-opus-5-5-low"}, {"modelId": "claude-opus-5-5-high"}, {"modelId": "gpt-oss-120b-medium"}],
+                "currentModelId": "gemini-4-argon-medium"},
+            "configOptions": [
+                {"id": "model", "category": "model", "currentValue": "gemini-4-argon", "options": [
+                    {"value": "gemini-4-argon", "name": "Gemini 4 Argon"}, {"value": "claude-opus-5-5", "name": "Claude Opus 5.5"},
+                    {"value": "gpt-oss-120b-medium", "name": "GPT-OSS 120B (Medium)"}]},
+                {"id": "thought_level", "category": "thought_level", "currentValue": "medium", "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]}]
+        });
+        let (mut models, current, option) = models_from(&session);
+        assert_eq!((current.as_deref(), option.as_deref()), (Some("gemini-4-argon"), Some("model")));
+        variant_efforts(&mut models, &session["models"]);
+        assert_eq!(models[0].efforts, ["low", "medium", "high"]);
+        assert_eq!(models[1].efforts, ["low", "high"]);
+        assert!(models[2].efforts.is_empty());
     }
 
     #[test]
@@ -1835,6 +2076,120 @@ opencode/big-pickle
         d2.stop();
     }
 
+    /// Against a real `agy` (ignored): OAH_TEST_DIR a folder, OAH_TEST_RESUME a conversation to
+    /// reopen (so no new one is left in its history). Checks the session's models, efforts and
+    /// commands, switches model, effort and mode, then runs one cheap turn that asks to run a
+    /// command (Ask mode: an approval card) and reads its output.
+    #[test]
+    #[ignore]
+    fn real_antigravity() {
+        use crate::driver::{Driver, Prompt};
+        let dir = std::env::var("OAH_TEST_DIR").expect("OAH_TEST_DIR");
+        let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
+        let e = events.clone();
+        let sink: Sink = Arc::new(move |ev| e.lock().unwrap().push(ev));
+        let opts = StartOptions {
+            kind: AgentKind::Antigravity,
+            cwd: dir.clone(),
+            location: oah_core::settings::Location::Local,
+            binary: String::new(),
+            model: Some("gemini-3.8-flash".into()),
+            effort: Some("low".into()),
+            permission: PermissionMode::Ask,
+            resume: std::env::var("OAH_TEST_RESUME").ok(),
+            env: vec![],
+        };
+        let mut d = AcpDriver::start(opts, sink).expect("start agy");
+        thread::sleep(Duration::from_millis(800));
+        {
+            let evs = events.lock().unwrap();
+            for e in evs.iter() {
+                match e {
+                    ChatEvent::Started { session_id, model, .. } => eprintln!("started session={session_id:?} model={model:?}"),
+                    ChatEvent::Models { models, current } => eprintln!(
+                        "models (current {current:?}): {}",
+                        models.iter().map(|m| format!("{} {:?}", m.id, m.efforts)).collect::<Vec<_>>().join(", ")
+                    ),
+                    ChatEvent::Commands { commands } => {
+                        eprintln!("commands: {}", commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(" "))
+                    }
+                    ChatEvent::Notice { text, .. } => eprintln!("notice: {text}"),
+                    _ => {}
+                }
+            }
+            let models = evs
+                .iter()
+                .rev()
+                .find_map(|e| if let ChatEvent::Models { models, .. } = e { Some(models.clone()) } else { None })
+                .expect("models");
+            assert!(models.iter().any(|m| m.efforts.len() > 1), "efforts per model");
+        }
+        let st = || {
+            let s = d.state.lock().unwrap();
+            (s.current_model.clone(), s.efforts.clone(), s.resumable)
+        };
+        eprintln!("after start: {:?}", st());
+        assert_eq!(st().0.as_deref(), Some("gemini-3.8-flash"));
+        assert!(st().2, "resumable");
+        d.set_permission(PermissionMode::Plan).expect("plan mode");
+        d.set_permission(PermissionMode::AcceptEdits).expect("accept-edits mode");
+        d.set_permission(PermissionMode::Ask).expect("default mode");
+
+        let from = events.lock().unwrap().len();
+        d.send(Prompt {
+            id: "p1".into(),
+            text: "Run the shell command `echo oah-agy-check` and tell me exactly what it printed. Nothing else.".into(),
+            images: vec![],
+            files: vec![],
+        })
+        .unwrap();
+        let t0 = std::time::Instant::now();
+        let mut approvals = 0;
+        loop {
+            assert!(t0.elapsed() < Duration::from_secs(240), "turn took too long");
+            thread::sleep(Duration::from_millis(200));
+            let evs: Vec<ChatEvent> = events.lock().unwrap()[from..].to_vec();
+            for e in &evs {
+                if let ChatEvent::Approval { request } = e {
+                    if d.state.lock().unwrap().pending.contains_key(&request.request_id) {
+                        approvals += 1;
+                        eprintln!("  approval: {:?} {} — {:?}", request.kind, request.title, request.detail);
+                        d.answer(&request.request_id, Decision::Allow).unwrap();
+                    }
+                }
+                if let ChatEvent::Question { request } = e {
+                    if d.state.lock().unwrap().choices.contains_key(&request.request_id) {
+                        eprintln!("  question: {:?}", request.questions[0]);
+                        let first = request.questions[0].options[0].label.clone();
+                        d.answer_question(&request.request_id, [("answer".to_string(), vec![first])].into_iter().collect()).unwrap();
+                    }
+                }
+            }
+            if evs.iter().any(|e| matches!(e, ChatEvent::TurnFinished { .. })) {
+                let mut text = String::new();
+                for e in &evs {
+                    match e {
+                        ChatEvent::TextDelta { text: t, .. } => text.push_str(t),
+                        ChatEvent::ReasoningDelta { .. } => {}
+                        ChatEvent::ToolStarted { tool, .. } => eprintln!("  tool: {:?} {} {}", tool.kind, tool.title, tool.input),
+                        ChatEvent::ToolFinished { ok, output, .. } => eprintln!("  tool done ok={ok} output={output:?}"),
+                        ChatEvent::Context { used_tokens, window_tokens, .. } => eprintln!("  context {used_tokens}/{window_tokens}"),
+                        ChatEvent::TurnFinished { usage, cost_usd, interrupted, .. } => {
+                            eprintln!("  finished usage={usage:?} cost={cost_usd:?} interrupted={interrupted}")
+                        }
+                        ChatEvent::Error { message } => eprintln!("  error: {message}"),
+                        ChatEvent::Notice { text, .. } => eprintln!("  notice: {text}"),
+                        _ => {}
+                    }
+                }
+                eprintln!("answer: {text}");
+                assert!(text.contains("oah-agy-check"), "the command's output comes back: {text}");
+                break;
+            }
+        }
+        eprintln!("approvals asked: {approvals}");
+        d.stop();
+    }
     #[test]
     fn refuses_file_system_requests() {
         let (ev, _) = run(

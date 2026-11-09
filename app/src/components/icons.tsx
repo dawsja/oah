@@ -1,5 +1,8 @@
 // The oah mark (assets/svg/oah-mark-*.svg) and the window controls. Everything else is lucide.
 
+import { useId } from "react"
+import type { AgentKind } from "@/lib/types"
+
 export function Mark({ size = 20, label, className }: { size?: number; label?: string; className?: string }) {
   return (
     <svg viewBox="10 10 100 100" width={size} height={size} className={className} role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
@@ -57,6 +60,27 @@ export function WslLogo({ className }: { className?: string }) {
 export const WinMin = () => (
   <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" strokeWidth="1" /></svg>
 )
+function AntigravityGlyph({ className }: { className?: string }) {
+  // A gradient id of its own per glyph, usable in `url(#…)`.
+  const id = `agy${useId().replace(/[^a-zA-Z0-9]/g, "")}`
+  return (
+    <svg viewBox="10 11 92 92" className={className} aria-hidden="true">
+      <defs>
+        <linearGradient id={id} x1="14" y1="0" x2="98" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#00B95C" />
+          <stop offset="0.38" stopColor="#FBBC04" />
+          <stop offset="0.6" stopColor="#FC413D" />
+          <stop offset="1" stopColor="#3186FF" />
+        </linearGradient>
+      </defs>
+      <path
+        fill={`url(#${id})`}
+        d="M89.6992 93.695C94.3659 97.195 101.366 94.8617 94.9492 88.445C75.6992 69.7783 79.7825 18.445 55.8659 18.445C31.9492 18.445 36.0325 69.7783 16.7825 88.445C9.78251 95.445 17.3658 97.195 22.0325 93.695C40.1159 81.445 38.9492 59.8617 55.8659 59.8617C72.7825 59.8617 71.6159 81.445 89.6992 93.695Z"
+      />
+    </svg>
+  )
+}
+
 export const WinMax = () => (
   <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" /></svg>
 )
@@ -66,8 +90,10 @@ export const WinClose = () => (
 
 /** Agent marks, simplified to flat glyphs. */
 /** Each agent's own mark: Claude's starburst, OpenAI's for Codex, OpenCode's (from
- *  opencode.ai's favicon). The marks belong to their owners; see THIRD_PARTY_NOTICES.md. */
-export function AgentGlyph({ agent, className }: { agent: "claude" | "codex" | "opencode" | "opencode2"; className?: string }) {
+ *  opencode.ai's favicon), Antigravity's arch (from antigravity.google's favicon, its colours as
+ *  one gradient). The marks belong to their owners; see THIRD_PARTY_NOTICES.md. */
+export function AgentGlyph({ agent, className }: { agent: AgentKind; className?: string }) {
+  if (agent === "antigravity") return <AntigravityGlyph className={className} />
   if (agent === "claude")
     return (
       <svg viewBox="0 0 24 24" className={className} aria-hidden="true">

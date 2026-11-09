@@ -113,7 +113,7 @@ function WslGroup() {
   )
 }
 
-const AGENT_TOOLS: Partial<Record<string, AgentKind>> = { claude: "claude", codex: "codex", opencode: "opencode", opencode2: "opencode2" }
+const AGENT_TOOLS: Partial<Record<string, AgentKind>> = { claude: "claude", codex: "codex", opencode: "opencode", opencode2: "opencode2", antigravity: "antigravity" }
 
 function DistroRow({ distro, onChange }: { distro: Distro; onChange: () => void }) {
   const location: Location = { kind: "wsl", distro: distro.name }
@@ -127,7 +127,7 @@ function DistroRow({ distro, onChange }: { distro: Distro; onChange: () => void 
     setCheck(c)
     onChange()
     if (!c.ok) return
-    for (const kind of ["claude", "codex", "opencode", "opencode2"] as AgentKind[]) {
+    for (const kind of ["claude", "codex", "opencode", "opencode2", "antigravity"] as AgentKind[]) {
       if (!c[kind as "claude"].path) continue
       setAccounts((a) => ({ ...a, [kind]: "checking" }))
       ipc.providerAccount(kind, location).then(

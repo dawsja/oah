@@ -218,6 +218,7 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: 
             AgentKind::Claude => account::claude_limits(&location, &env),
             AgentKind::Codex => account::codex_limits(&binary, &location),
             AgentKind::Opencode | AgentKind::Opencode2 => account::opencode_go_limits(&location, &env),
+            AgentKind::Antigravity => oah_agents::antigravity::limits(&binary, &location, &env),
         }
     })
     .await
@@ -269,6 +270,20 @@ pub(crate) fn catalog(s: &Settings, kind: AgentKind, project_id: Option<&str>) -
                 env: secrets::resolve(&secrets::scope(kind), &provider.env),
             };
             oah_agents::acp::opencode_catalog(opts).map(|(models, commands)| Catalog { models, commands })
+        }
+        AgentKind::Antigravity => {
+            let opts = oah_agents::driver::StartOptions {
+                kind,
+                cwd,
+                location,
+                binary,
+                model: None,
+                effort: None,
+                permission: PermissionMode::Ask,
+                resume: None,
+                env: secrets::resolve(&secrets::scope(kind), &s.providers.get(kind).env),
+            };
+            oah_agents::antigravity::catalog(&opts).map(|(models, commands)| Catalog { models, commands })
         }
     }
 }

@@ -13,7 +13,7 @@ const CHECK: &str = r#"
 printf 'home\t%s\n' "$HOME"
 printf 'os\t%s\n' "$(uname -sm 2>/dev/null)"
 set -f; lin=; oifs=$IFS; IFS=:; for d in $PATH; do case $d in /mnt/[a-z]|/mnt/[a-z]/*) ;; *) lin=${lin:+$lin:}$d;; esac; done; IFS=$oifs; set +f
-for t in git gh claude codex opencode opencode2; do
+for t in git gh claude codex opencode opencode2 agy; do
   p=$(PATH="$lin:$HOME/.local/bin:$HOME/.opencode/bin" command -v "$t" 2>/dev/null) || p=
   v=
   [ -n "$p" ] && v=$("$p" --version 2>/dev/null | head -n 1)
@@ -60,6 +60,8 @@ pub struct HostCheck {
     pub codex: Tool,
     pub opencode: Tool,
     pub opencode2: Tool,
+    /// Antigravity's `agy`.
+    pub antigravity: Tool,
 }
 
 fn sh(location: &Location, script: &str, args: &[&str], limit: Duration) -> Result<crate::Output, String> {
@@ -117,6 +119,7 @@ pub fn parse_check(out: &str) -> HostCheck {
             "codex" => c.codex = tool(),
             "opencode" => c.opencode = tool(),
             "opencode2" => c.opencode2 = tool(),
+            "agy" => c.antigravity = tool(),
             _ => {}
         }
     }

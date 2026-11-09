@@ -8,6 +8,11 @@ vi.mock("@/lib/ipc", () => ({ ipc: { providerLimits: vi.fn() } }))
 const w = (label: string, resetsAt: number | null = null) => ({ label, usedPercent: 10, resetsAt })
 
 describe("usage labels", () => {
+  it("keeps a model group's name on its windows (Antigravity)", () => {
+    expect(shortLabel(w("Gemini · 5 hours"))).toBe("Gemini 5h")
+    expect(shortLabel(w("Claude and GPT · this week"))).toBe("Claude and GPT wk")
+  })
+
   it("shortens window names", () => {
     expect(shortLabel(w("Current session (5 hours)"))).toBe("5h")
     expect(shortLabel(w("This week, all models"))).toBe("wk")
@@ -40,14 +45,15 @@ describe("usage locations", () => {
     for (const location of [LOCAL_USAGE, ubuntu, ssh]) await useUsage.getState().load(location)
     expect(ipc.providerLimits).toHaveBeenCalledWith("claude", ubuntu)
     expect(ipc.providerLimits).toHaveBeenCalledWith("opencode", ubuntu)
+    expect(ipc.providerLimits).toHaveBeenCalledWith("antigravity", ubuntu)
     const entries = useUsage.getState().entries
     expect(entries[usageLocationKey(ubuntu)].limits.claude?.windows[0].usedPercent).toBe(30)
     expect(entries[usageLocationKey(LOCAL_USAGE)].limits.claude?.windows[0].usedPercent).toBe(10)
     expect(entries[usageLocationKey(ssh)].limits.claude?.windows[0].usedPercent).toBe(60)
     await useUsage.getState().load(ubuntu)
-    expect(ipc.providerLimits).toHaveBeenCalledTimes(9)
-    await useUsage.getState().load(ubuntu, true)
     expect(ipc.providerLimits).toHaveBeenCalledTimes(12)
+    await useUsage.getState().load(ubuntu, true)
+    expect(ipc.providerLimits).toHaveBeenCalledTimes(16)
   })
 
   it("asks again for an agent that failed (signed out, no key), but reuses ones that answered", async () => {
@@ -56,14 +62,14 @@ describe("usage locations", () => {
       agent === "opencode" && !signedIn ? { windows: [], error: "No OpenCode Go key found for this location.", extra: [] } : limits(40),
     )
     await useUsage.getState().load(ubuntu)
-    expect(ipc.providerLimits).toHaveBeenCalledTimes(3)
+    expect(ipc.providerLimits).toHaveBeenCalledTimes(4)
     signedIn = true
     await useUsage.getState().load(ubuntu)
-    expect(ipc.providerLimits).toHaveBeenCalledTimes(4)
+    expect(ipc.providerLimits).toHaveBeenCalledTimes(5)
     expect(ipc.providerLimits).toHaveBeenLastCalledWith("opencode", ubuntu)
     expect(useUsage.getState().entries[usageLocationKey(ubuntu)].limits.opencode?.error).toBeNull()
     await useUsage.getState().load(ubuntu)
-    expect(ipc.providerLimits).toHaveBeenCalledTimes(4)
+    expect(ipc.providerLimits).toHaveBeenCalledTimes(5)
   })
 
   it("a thrown request counts as a failure and is asked again", async () => {
@@ -74,7 +80,7 @@ describe("usage locations", () => {
     await useUsage.getState().load(LOCAL_USAGE)
     expect(useUsage.getState().entries.local.limits.codex?.error).toContain("Codex didn't start")
     await useUsage.getState().load(LOCAL_USAGE)
-    expect(ipc.providerLimits).toHaveBeenCalledTimes(4)
+    expect(ipc.providerLimits).toHaveBeenCalledTimes(5)
     expect(ipc.providerLimits).toHaveBeenLastCalledWith("codex", LOCAL_USAGE)
   })
 
@@ -93,15 +99,16 @@ describe("usage locations", () => {
 })
 
 describe("shownAgents", () => {
-  const settings = (codexOn: boolean) => ({ providers: { claude: { enabled: true }, codex: { enabled: codexOn }, opencode: { enabled: true } } }) as unknown as Settings
+  const settings = (codexOn: boolean) =>
+    ({ providers: { claude: { enabled: true }, codex: { enabled: codexOn }, opencode: { enabled: true }, antigravity: { enabled: false } } }) as unknown as Settings
   const none = { windows: [], error: null, extra: [] }
 
   it("leaves out agents not installed there, and ones turned off", () => {
     expect(shownAgents(settings(true), { claude: none, codex: { ...none, missing: true }, opencode: { ...none, missing: true } })).toEqual(["claude"])
     expect(shownAgents(settings(false), {})).toEqual(["claude", "opencode"])
     // OpenCode 2 alone still shows OpenCode Go's limits (one account).
-    const only2 = { providers: { claude: { enabled: true }, codex: { enabled: true }, opencode: { enabled: false }, opencode2: { enabled: true } } } as unknown as Settings
-    expect(shownAgents(only2, {})).toEqual(["claude", "codex", "opencode"])
+    const only2 = { providers: { claude: { enabled: true }, codex: { enabled: true }, opencode: { enabled: false }, opencode2: { enabled: true }, antigravity: { enabled: true } } } as unknown as Settings
+    expect(shownAgents(only2, {})).toEqual(["claude", "codex", "opencode", "antigravity"])
     // Not loaded yet: shown (loading), until the app says they're missing.
     expect(shownAgents(settings(true), {})).toEqual(["claude", "codex", "opencode"])
   })

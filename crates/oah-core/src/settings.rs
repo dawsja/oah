@@ -81,15 +81,34 @@ pub enum AgentKind {
     /// OpenCode 2 by its installer's `opencode2` command (2.x only; the same accounts and
     /// history as `opencode`).
     Opencode2,
+    /// Google Antigravity's CLI, over ACP (`agy acp`).
+    Antigravity,
 }
 
 impl AgentKind {
     /// The built-in agents (each has its own Provider settings).
-    pub const ALL: [AgentKind; 4] = [AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode, AgentKind::Opencode2];
+    pub const ALL: [AgentKind; 5] =
+        [AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode, AgentKind::Opencode2, AgentKind::Antigravity];
 
     /// OpenCode by either command: the same CLI, driven the same way.
     pub fn is_opencode(self) -> bool {
         matches!(self, AgentKind::Opencode | AgentKind::Opencode2)
+    }
+
+    /// Driven over the Agent Client Protocol (OpenCode, Antigravity).
+    pub fn is_acp(self) -> bool {
+        self.is_opencode() || self == AgentKind::Antigravity
+    }
+
+    /// What people call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            AgentKind::Claude => "Claude Code",
+            AgentKind::Codex => "Codex",
+            AgentKind::Opencode => "OpenCode",
+            AgentKind::Opencode2 => "OpenCode 2",
+            AgentKind::Antigravity => "Antigravity",
+        }
     }
 
     /// The command when no path is set.
@@ -99,6 +118,7 @@ impl AgentKind {
             AgentKind::Codex => "codex",
             AgentKind::Opencode => "opencode",
             AgentKind::Opencode2 => "opencode2",
+            AgentKind::Antigravity => "agy",
         }
     }
 }
@@ -121,6 +141,7 @@ pub struct Providers {
     pub codex: Provider,
     pub opencode: Provider,
     pub opencode2: Provider,
+    pub antigravity: Provider,
     /// The agent a new chat starts with when its project names none.
     #[serde(deserialize_with = "agent_or_default")]
     pub default_agent: AgentKind,
@@ -133,6 +154,7 @@ impl Default for Providers {
             codex: Provider::default(),
             opencode: Provider::default(),
             opencode2: Provider::default(),
+            antigravity: Provider::default(),
             default_agent: AgentKind::Claude,
         }
     }
@@ -146,6 +168,7 @@ impl Providers {
             AgentKind::Codex => &self.codex,
             AgentKind::Opencode => &self.opencode,
             AgentKind::Opencode2 => &self.opencode2,
+            AgentKind::Antigravity => &self.antigravity,
         }
     }
 
@@ -155,6 +178,7 @@ impl Providers {
             AgentKind::Codex => &mut self.codex,
             AgentKind::Opencode => &mut self.opencode,
             AgentKind::Opencode2 => &mut self.opencode2,
+            AgentKind::Antigravity => &mut self.antigravity,
         }
     }
 }

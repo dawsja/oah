@@ -4,6 +4,7 @@
 //! - Claude Code: `claude -p --model haiku --tools "" --no-session-persistence`
 //! - Codex: `codex exec -m <its fast, affordable model> -s read-only --ephemeral` at low effort
 //! - OpenCode: `opencode run -m <a free model>`
+//! - Antigravity: `agy --print= --sandbox --model <Flash> --effort low`, stream-json in and out
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -15,9 +16,11 @@ use crate::driver::DriverResult;
 use crate::event::ModelOption;
 
 /// The model a one-shot uses, and what to call it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Cheap {
     pub model: Option<String>,
+    /// The effort to ask at (Antigravity picks it apart from the model).
+    pub effort: Option<String>,
     pub label: String,
 }
 
@@ -30,7 +33,7 @@ pub fn cheapest(kind: AgentKind, binary: &str, location: &Location, cwd: &str) -
         return c.clone();
     }
     let c = match kind {
-        AgentKind::Claude => Cheap { model: Some("haiku".into()), label: "Haiku".into() },
+        AgentKind::Claude => Cheap { model: Some("haiku".into()), label: "Haiku".into(), ..Default::default() },
         AgentKind::Codex => {
             let prog = program(kind, binary);
             let models =
@@ -41,6 +44,12 @@ pub fn cheapest(kind: AgentKind, binary: &str, location: &Location, cwd: &str) -
         }
         AgentKind::Opencode | AgentKind::Opencode2 => {
             pick_opencode(&crate::acp::opencode_models(binary, location, cwd, &[]).unwrap_or_default())
+        }
+        AgentKind::Antigravity => {
+            match crate::antigravity::models(binary, location, cwd, &[]).ok().and_then(|m| crate::antigravity::pick_cheap(&m)) {
+                Some((model, effort, label)) => Cheap { model: Some(model), effort, label },
+                None => Cheap { model: None, label: "default model".into(), ..Default::default() },
+            }
         }
     };
     PICKED.lock().unwrap().push((kind, location.clone(), c.clone()));
@@ -54,8 +63,8 @@ pub fn pick_codex(models: &[ModelOption]) -> Cheap {
         ["affordable", "mini", "luna", "fast", "efficient", "nano"].iter().any(|w| t.contains(w))
     };
     match models.iter().find(cheap) {
-        Some(m) => Cheap { model: Some(m.id.clone()), label: m.name.clone() },
-        None => Cheap { model: None, label: "default model".into() },
+        Some(m) => Cheap { model: Some(m.id.clone()), label: m.name.clone(), ..Default::default() },
+        None => Cheap { model: None, label: "default model".into(), ..Default::default() },
     }
 }
 
@@ -63,8 +72,8 @@ pub fn pick_codex(models: &[ModelOption]) -> Cheap {
 pub fn pick_opencode(models: &[ModelOption]) -> Cheap {
     let free = models.iter().find(|m| m.id.starts_with("opencode/") && m.id.contains("free"));
     match free {
-        Some(m) => Cheap { model: Some(m.id.clone()), label: m.name.clone() },
-        None => Cheap { model: None, label: "default model".into() },
+        Some(m) => Cheap { model: Some(m.id.clone()), label: m.name.clone(), ..Default::default() },
+        None => Cheap { model: None, label: "default model".into(), ..Default::default() },
     }
 }
 
@@ -87,8 +96,9 @@ pub fn ask(kind: AgentKind, binary: &str, location: &Location, cwd: &str, cheap:
                 .to_vec()
         }
         AgentKind::Opencode | AgentKind::Opencode2 => vec!["run".into()],
+        AgentKind::Antigravity => crate::antigravity::oneshot_args(cheap.model.as_deref(), cheap.effort.as_deref()),
     };
-    if let Some(m) = &cheap.model {
+    if let Some(m) = cheap.model.as_ref().filter(|_| kind != AgentKind::Antigravity) {
         args.extend(["--model".into(), m.clone()]);
     }
     if kind == AgentKind::Codex {
@@ -103,11 +113,22 @@ pub fn ask(kind: AgentKind, binary: &str, location: &Location, cwd: &str, cheap:
     } else {
         vec![]
     };
+    let mut env = env;
+    // Antigravity reads the question as stream-json and answers in it.
+    let input = if kind == AgentKind::Antigravity {
+        crate::antigravity::acp_env(&mut env);
+        crate::antigravity::oneshot_input(question)
+    } else {
+        question.to_string()
+    };
     let out =
-        oah_transport::run(&Spec { location, cwd, program: &prog, args, env: &env }, Some(question.as_bytes()), Duration::from_secs(180))?;
+        oah_transport::run(&Spec { location, cwd, program: &prog, args, env: &env }, Some(input.as_bytes()), Duration::from_secs(180))?;
     if !out.ok() {
         let why = out.stderr.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("no answer").to_string();
         return Err(if out.code == Some(127) { format!("{prog} isn't installed there") } else { why });
+    }
+    if kind == AgentKind::Antigravity {
+        return crate::antigravity::oneshot_answer(&out.stdout);
     }
     Ok(out.stdout)
 }

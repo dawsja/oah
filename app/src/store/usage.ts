@@ -63,7 +63,7 @@ export const useUsage = create<UsageStore>((set, get) => ({
 
 /** The agents whose limits are worth asking for: those on in Settings → Providers. */
 export function limitAgents(settings: Settings | null): AgentKind[] {
-  return LIMIT_AGENTS.filter((a) => settings?.providers[a].enabled !== false || (a === "opencode" && settings?.providers.opencode2?.enabled !== false))
+  return LIMIT_AGENTS.filter((a) => settings?.providers[a]?.enabled !== false || (a === "opencode" && settings?.providers.opencode2?.enabled !== false))
 }
 
 /** The agents with limits to show at a location: on in Settings, and installed there (an
@@ -80,8 +80,11 @@ export function useUsageAt(location: Location) {
   return { ...entry, load }
 }
 
-/** A window's chip label: `5h`, `wk`, `30d`, or the model a weekly limit is for. */
+/** A window's chip label: `5h`, `wk`, `30d`, or the model a weekly limit is for. A window for a
+ *  group of models ("Gemini · 5 hours", Antigravity's) keeps the group: `Gemini 5h`. */
 export function shortLabel(w: LimitWindow): string {
+  const group = /^(.+?) · (.+)$/.exec(w.label)
+  if (group) return `${group[1]} ${shortLabel({ ...w, label: group[2] })}`
   const l = w.label.toLowerCase()
   const model = /this week, (?!all)(.+)$/i.exec(w.label)
   if (model) return model[1]

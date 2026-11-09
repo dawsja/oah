@@ -8,7 +8,7 @@ import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type De
 export { needsYou, waitingOf } from "@/lib/chat"
 import { ipc, onChatEvent, onChatsChanged } from "@/lib/ipc"
 import { notify } from "@/lib/notify"
-import { isOpencode, type AgentKind, type PermissionMode } from "@/lib/types"
+import { isAcp, type AgentKind, type PermissionMode } from "@/lib/types"
 import { useApp } from "./app"
 import { draftKey, drafts } from "./drafts"
 
@@ -225,8 +225,8 @@ export const useChats = create<ChatsStore>((set, get) => ({
   async steer(chatId, text, images) {
     const opts = sendOpts(chatId, images)
     if (!opts) return
-    // OpenCode takes one prompt at a time: the running turn stops, then this goes.
-    if (get().transcripts[chatId]?.running && isOpencode(opts.agent)) await get().interrupt(chatId)
+    // OpenCode and Antigravity take one prompt at a time: the running turn stops, then this goes.
+    if (get().transcripts[chatId]?.running && isAcp(opts.agent)) await get().interrupt(chatId)
     await get().send(chatId, text, opts)
   },
 

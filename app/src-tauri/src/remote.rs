@@ -185,12 +185,7 @@ fn opt_param<T: for<'de> Deserialize<'de>>(p: &Value, k: &str) -> CmdResult<Opti
 }
 
 fn agent_name(k: AgentKind) -> &'static str {
-    match k {
-        AgentKind::Claude => "Claude Code",
-        AgentKind::Codex => "Codex",
-        AgentKind::Opencode => "OpenCode",
-        AgentKind::Opencode2 => "OpenCode 2",
-    }
+    k.label()
 }
 
 fn to_value(v: impl Serialize) -> CmdResult<Value> {

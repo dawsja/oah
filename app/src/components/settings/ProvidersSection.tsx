@@ -17,6 +17,7 @@ const BLURB: Record<AgentKind, string> = {
   codex: "OpenAI's agent. Uses your ChatGPT plan or API key from `codex` itself.",
   opencode: "The open source agent, over ACP (`opencode acp`). Uses the providers you signed in to with OpenCode.",
   opencode2: "OpenCode 2 by its `opencode2` command, for when `opencode` is still 1.x. Same sign-ins and history as OpenCode.",
+  antigravity: "Google's agent, over ACP (`agy acp`). Uses your Google AI plan, signed in with `agy` itself.",
 }
 
 /** Each built-in CLI's docs, and the commands that install it. */
@@ -49,6 +50,13 @@ const INSTALL: Partial<Record<AgentKind, { url: string; options: Installer[] }>>
     options: [
       { label: "macOS / Linux / WSL", os: "unix", command: "curl -fsSL https://opencode.ai/v2/install | bash" },
       { label: "npm", os: "any", command: "npm install -g @opencode/cli" },
+    ],
+  },
+  antigravity: {
+    url: "https://antigravity.google/docs/getting-started",
+    options: [
+      { label: "macOS / Linux / WSL", os: "unix", command: "curl -fsSL https://antigravity.google/cli/install.sh | bash" },
+      { label: "Windows", os: "windows", command: "irm https://antigravity.google/cli/install.ps1 | iex" },
     ],
   },
 }
@@ -165,7 +173,7 @@ function ProviderCard({ kind, provider }: { kind: AgentKind; provider: Provider 
           <Row label="Default model" description="Empty uses the CLI's own default.">
             <Input
               className="h-7 w-56 font-mono text-[12px]"
-              placeholder={kind === "claude" ? "e.g. opus, sonnet" : kind === "codex" ? "e.g. gpt-5.5-codex" : "e.g. anthropic/claude-sonnet-5"}
+              placeholder={kind === "claude" ? "e.g. opus, sonnet" : kind === "codex" ? "e.g. gpt-5.5-codex" : kind === "antigravity" ? "e.g. gemini-3.8-flash" : "e.g. anthropic/claude-sonnet-5"}
               defaultValue={provider.defaultModel}
               onBlur={(e) => edit((p) => void (p.defaultModel = e.target.value.trim()))}
             />

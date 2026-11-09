@@ -142,7 +142,7 @@ pub async fn git_suggest_message(app: AppHandle, project_id: String, cwd: Option
         // The project's agent first, then the others; each with its cheapest model.
         let first = project.default_agent.unwrap_or(settings.providers.default_agent);
         let mut tried = Vec::new();
-        for kind in std::iter::once(first).chain([AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode]) {
+        for kind in std::iter::once(first).chain([AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode, AgentKind::Antigravity]) {
             if tried.contains(&kind) {
                 continue;
             }
@@ -179,12 +179,7 @@ in the style of the recent subjects. Then, only if the change needs explaining, 
 a few short lines on what changed and why. Don't describe what's obvious from the summary.";
 
 fn kind_label(kind: AgentKind) -> &'static str {
-    match kind {
-        AgentKind::Claude => "Claude Code",
-        AgentKind::Codex => "Codex",
-        AgentKind::Opencode => "OpenCode",
-        AgentKind::Opencode2 => "OpenCode 2",
-    }
+    kind.label()
 }
 
 // ---- Worktrees and pull requests -------------------------------------------------------------

@@ -4,7 +4,7 @@
 import { toast } from "sonner"
 import { create } from "zustand"
 import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript } from "@/lib/chat"
-import { isOpencode, type AgentKind, type PermissionMode, type Project } from "@/lib/types"
+import { isAcp, type AgentKind, type PermissionMode, type Project } from "@/lib/types"
 import { api, native, phoneName, type AgentInfo, type Catalog, type Desktop, type Image, type LinkEvent, type LinkState, type Push, type Waiting } from "./rpc"
 
 /** A message typed while the agent worked: it goes when the turn ends, or now if asked. */
@@ -183,7 +183,7 @@ export const useMobile = create<Store>((set, get) => ({
   async steer(chatId, text, images) {
     const meta = get().metas.find((m) => m.id === chatId)
     // An agent that can't take a message mid-turn is stopped first (as on the desktop).
-    if (get().transcripts[chatId]?.running && isOpencode(meta?.agent)) await get().interrupt(chatId)
+    if (get().transcripts[chatId]?.running && isAcp(meta?.agent)) await get().interrupt(chatId)
     await get().send(chatId, text, images)
   },
 

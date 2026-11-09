@@ -6,6 +6,7 @@
 //!   token from `~/.claude/.credentials.json` (this computer only).
 //! - Codex limits: `account/read` and `account/rateLimits/read` from a short-lived
 //!   `codex app-server`.
+//! - Antigravity: see [`crate::antigravity`].
 
 use std::io::{BufRead, BufReader, Write};
 use std::time::Duration;
@@ -72,6 +73,8 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
         AgentKind::Claude => vec!["auth".into(), "status".into(), "--json".into()],
         AgentKind::Codex => vec!["login".into(), "status".into()],
         AgentKind::Opencode | AgentKind::Opencode2 => vec!["auth".into(), "list".into()],
+        // `agy` has no status command: its token store says who.
+        AgentKind::Antigravity => return crate::antigravity::account(location, &[]),
     };
     let cwd = if matches!(location, Location::Local) { oah_core::paths::home_dir().to_string_lossy().into_owned() } else { "~".into() };
     let out = match oah_transport::run(&Spec { location, cwd: &cwd, program: &prog, args, env: &[] }, None, Duration::from_secs(20)) {
@@ -94,6 +97,7 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
             a
         }
         AgentKind::Opencode | AgentKind::Opencode2 => parse_opencode_auth(&format!("{}\n{}", out.stdout, out.stderr)),
+        AgentKind::Antigravity => unreachable!("answered above"),
     }
 }
 
@@ -297,7 +301,7 @@ pub fn parse_claude_usage(v: &Value) -> Vec<LimitWindow> {
 }
 
 /// Seconds, milliseconds or an ISO date → Unix milliseconds.
-fn reset_ms(v: &Value) -> Option<u64> {
+pub(crate) fn reset_ms(v: &Value) -> Option<u64> {
     let n = v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()));
     if let Some(n) = n {
         return Some(if n > 1e10 { n as u64 } else { (n * 1000.0) as u64 });
@@ -545,6 +549,7 @@ pub fn open_login(kind: AgentKind, binary: &str, location: &Location) -> Result<
         AgentKind::Claude => format!("{prog} auth login"),
         AgentKind::Codex => format!("{prog} login"),
         AgentKind::Opencode | AgentKind::Opencode2 => format!("{prog} auth login"),
+        AgentKind::Antigravity => crate::antigravity::login_line(&prog),
     };
     match location {
         Location::Local => {}
