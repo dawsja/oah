@@ -240,11 +240,8 @@ pub fn parse_billing(v: &Value) -> Result<(Vec<LimitWindow>, Vec<LimitExtra>), S
     };
     let used = c["creditUsagePercent"].as_f64().or_else(|| c["creditUsagePercent"]["val"].as_f64()).unwrap_or(0.0);
     let ends = period["end"].as_str().map(|s| json!(s)).unwrap_or_else(|| c["billingPeriodEnd"].clone());
-    let windows = vec![LimitWindow {
-        label: label.into(),
-        used_percent: used.round().clamp(0.0, 100.0),
-        resets_at: crate::account::reset_ms(&ends),
-    }];
+    let windows =
+        vec![LimitWindow { label: label.into(), used_percent: used.round().clamp(0.0, 100.0), resets_at: crate::account::reset_ms(&ends) }];
     let extra = v["subscription_tier"]
         .as_str()
         .filter(|t| !t.is_empty())
@@ -265,7 +262,8 @@ pub fn parse_models(state: &Value) -> Vec<ModelOption> {
         .filter_map(|m| {
             let id = m["modelId"].as_str()?.to_string();
             let listed: Vec<&Value> = m["_meta"]["reasoningEfforts"].as_array().into_iter().flatten().collect();
-            let mut efforts: Vec<String> = listed.iter().filter_map(|e| e["value"].as_str().or(e["id"].as_str()).map(String::from)).collect();
+            let mut efforts: Vec<String> =
+                listed.iter().filter_map(|e| e["value"].as_str().or(e["id"].as_str()).map(String::from)).collect();
             efforts.sort_by_key(|e| crate::acp::effort_rank(e));
             let default_effort = listed
                 .iter()

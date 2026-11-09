@@ -1141,7 +1141,8 @@ mod tests {
             false
         };
         assert!(wait(&|ev| ev.iter().any(|e| matches!(e, ChatEvent::TurnFinished { .. }))), "the turn ends");
-        let last_tasks = |ev: &[ChatEvent]| ev.iter().rev().find_map(|e| if let ChatEvent::Tasks { tasks } = e { Some(tasks.clone()) } else { None });
+        let last_tasks =
+            |ev: &[ChatEvent]| ev.iter().rev().find_map(|e| if let ChatEvent::Tasks { tasks } = e { Some(tasks.clone()) } else { None });
         let tasks = last_tasks(&events.lock().unwrap()).expect("a background task");
         eprintln!("{}", serde_json::to_string(&tasks).unwrap());
         assert_eq!((tasks[0].kind, tasks[0].status), (TaskKind::Command, TaskStatus::Running));
@@ -1170,7 +1171,8 @@ mod tests {
             json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"m9"}}}),
             json!({"type":"result","subtype":"success","total_cost_usd":0.0,"usage":{}}),
         ]);
-        let lists: Vec<&Vec<BackgroundTask>> = ev.iter().filter_map(|e| if let ChatEvent::Tasks { tasks } = e { Some(tasks) } else { None }).collect();
+        let lists: Vec<&Vec<BackgroundTask>> =
+            ev.iter().filter_map(|e| if let ChatEvent::Tasks { tasks } = e { Some(tasks) } else { None }).collect();
         // The subagent the turn waited for never shows; the background command does, once.
         assert!(lists.iter().all(|l| l.iter().all(|t| t.id == "b1")));
         assert_eq!(lists[0][0].status, TaskStatus::Running);

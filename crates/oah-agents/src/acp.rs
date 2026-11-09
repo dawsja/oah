@@ -353,8 +353,11 @@ impl AcpDriver {
         variant_efforts(&mut models, &session["models"]);
         listed_efforts(&mut models, &session["models"]);
         st.windows.extend(crate::grok::context_windows(&session["models"]));
-        st.known_efforts =
-            models.iter().filter(|m| !m.efforts.is_empty()).map(|m| (m.id.clone(), (m.efforts.clone(), m.default_effort.clone()))).collect();
+        st.known_efforts = models
+            .iter()
+            .filter(|m| !m.efforts.is_empty())
+            .map(|m| (m.id.clone(), (m.efforts.clone(), m.default_effort.clone())))
+            .collect();
         if let Some(opts) = session["configOptions"].as_array() {
             if let Some(mode) = opts.iter().find(|o| o["category"] == "mode" || o["id"] == "mode") {
                 st.mode_option = mode["id"].as_str().map(String::from);
@@ -945,7 +948,10 @@ impl Translator {
                     st.open.remove(&id);
                     let status = if ok { TaskStatus::Completed } else { TaskStatus::Failed };
                     let detail = output.lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().chars().take(160).collect());
-                    st.tasks.finish(&id, status, detail).map(|t| format!("Background task ended: {}", t.title)).map(|n| (n, st.tasks.event()))
+                    st.tasks
+                        .finish(&id, status, detail)
+                        .map(|t| format!("Background task ended: {}", t.title))
+                        .map(|n| (n, st.tasks.event()))
                 };
                 self.emit(ChatEvent::ToolFinished { item_id: id, ok, output, diff });
                 if let Some((notice, tasks)) = ended {
@@ -2553,30 +2559,43 @@ opencode/big-pickle
     #[test]
     fn grok_questions_plans_and_modes() {
         let meta = |name: &str, kind: &str| json!({"x.ai/tool": {"version": 1, "name": name, "kind": kind, "namespace": "grok_build"}});
-        let ask_call = upd(json!({"sessionUpdate": "tool_call", "toolCallId": "call-a-0", "title": "ask_user_question", "rawInput": {}, "_meta": meta("ask_user_question", "ask_user")}));
+        let ask_call = upd(
+            json!({"sessionUpdate": "tool_call", "toolCallId": "call-a-0", "title": "ask_user_question", "rawInput": {}, "_meta": meta("ask_user_question", "ask_user")}),
+        );
         let ask_done = upd(json!({"sessionUpdate": "tool_call_update", "toolCallId": "call-a-0", "status": "completed", "content": []}));
         let ask = json!({"jsonrpc": "2.0", "id": 0, "method": "_x.ai/ask_user_question", "params": {"sessionId": "s", "toolCallId": "call-a-0", "mode": "default",
             "questions": [{"question": "What is your favorite color?", "options": [{"label": "red", "description": "Red"}, {"label": "blue", "description": "Warm"}], "multiSelect": null},
                           {"question": "Which sizes?", "options": [{"label": "S"}, {"label": "M"}], "multiSelect": true}]}});
-        let shell = upd(json!({"sessionUpdate": "tool_call", "toolCallId": "call-b-0", "title": "run_terminal_command", "rawInput": {"command": "ls"}, "_meta": meta("run_terminal_command", "execute")}));
+        let shell = upd(
+            json!({"sessionUpdate": "tool_call", "toolCallId": "call-b-0", "title": "run_terminal_command", "rawInput": {"command": "ls"}, "_meta": meta("run_terminal_command", "execute")}),
+        );
         let into_plan = upd(json!({"sessionUpdate": "current_mode_update", "currentModeId": "plan"}));
         let plan = json!({"jsonrpc": "2.0", "id": 1, "method": "_x.ai/exit_plan_mode", "params": {"sessionId": "s", "toolCallId": "call-c-2", "planContent": "1. Say done.\n"}});
         let out_of_plan = upd(json!({"sessionUpdate": "current_mode_update", "currentModeId": "default"}));
         let cmds = upd(json!({"sessionUpdate": "available_commands_update", "availableCommands": [
             {"name": "compact", "description": "Compress", "input": null}, {"name": "always-approve", "description": "Toggle", "input": {"hint": "on|off"}}]}));
-        let (ev, state) = run_as(Some(AgentKind::Grok), &[ask_call, ask, ask_done, shell, into_plan, plan, out_of_plan, cmds], PermissionMode::FullAccess);
+        let (ev, state) = run_as(
+            Some(AgentKind::Grok),
+            &[ask_call, ask, ask_done, shell, into_plan, plan, out_of_plan, cmds],
+            PermissionMode::FullAccess,
+        );
 
         // The question: a card per question, no tool row, never answered by the mode.
         let q = ev.iter().find_map(|e| if let ChatEvent::Question { request } = e { Some(request.clone()) } else { None }).unwrap();
         assert_eq!(q.questions.len(), 2);
-        assert_eq!((q.questions[0].question.as_str(), q.questions[0].options[0].description.as_str()), ("What is your favorite color?", ""));
+        assert_eq!(
+            (q.questions[0].question.as_str(), q.questions[0].options[0].description.as_str()),
+            ("What is your favorite color?", "")
+        );
         assert_eq!(q.questions[0].options[1].description, "Warm");
         assert!(q.questions[1].multi && q.questions[0].other);
         assert!(state.lock().unwrap().asks.contains_key(&q.request_id));
-        let tools: Vec<&ToolCall> = ev.iter().filter_map(|e| if let ChatEvent::ToolStarted { tool, .. } = e { Some(tool) } else { None }).collect();
+        let tools: Vec<&ToolCall> =
+            ev.iter().filter_map(|e| if let ChatEvent::ToolStarted { tool, .. } = e { Some(tool) } else { None }).collect();
         assert_eq!(tools.len(), 1, "only the shell command has a row");
         assert_eq!((tools[0].kind, tools[0].title.as_str()), (ToolKind::Bash, "ls"));
-        let answers = [("q0".to_string(), vec!["blue".to_string()]), ("q1".to_string(), vec!["S".into(), "M".into()])].into_iter().collect();
+        let answers =
+            [("q0".to_string(), vec!["blue".to_string()]), ("q1".to_string(), vec!["S".into(), "M".into()])].into_iter().collect();
         let asked = state.lock().unwrap().asks[&q.request_id].1.clone();
         assert_eq!(
             ask_reply(&asked, &answers),
@@ -2585,7 +2604,8 @@ opencode/big-pickle
         assert_eq!(ask_reply(&asked, &Default::default()), json!({"outcome": "cancelled"}));
 
         // Plan mode, by Grok's own doing: the chat follows in, then back to where it was.
-        let modes: Vec<PermissionMode> = ev.iter().filter_map(|e| if let ChatEvent::PermissionChanged { mode } = e { Some(*mode) } else { None }).collect();
+        let modes: Vec<PermissionMode> =
+            ev.iter().filter_map(|e| if let ChatEvent::PermissionChanged { mode } = e { Some(*mode) } else { None }).collect();
         assert_eq!(modes, [PermissionMode::Plan, PermissionMode::FullAccess]);
         // The finished plan is the user's to approve, even with full access.
         let p = ev
@@ -2598,7 +2618,8 @@ opencode/big-pickle
         assert_eq!(p.detail.as_deref(), Some("1. Say done.\n"));
         assert!(state.lock().unwrap().plans.contains_key(&p.request_id));
 
-        let cmds = ev.iter().rev().find_map(|e| if let ChatEvent::Commands { commands } = e { Some(commands.clone()) } else { None }).unwrap();
+        let cmds =
+            ev.iter().rev().find_map(|e| if let ChatEvent::Commands { commands } = e { Some(commands.clone()) } else { None }).unwrap();
         assert_eq!(cmds.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["compact"]);
         assert_eq!(agent_mode(Some(AgentKind::Grok), PermissionMode::Plan), "plan");
         assert_eq!(agent_mode(Some(AgentKind::Grok), PermissionMode::AcceptEdits), "default");
@@ -2660,10 +2681,16 @@ opencode/big-pickle
         thread::sleep(Duration::from_millis(800));
         {
             let evs = events.lock().unwrap();
-            let models = evs.iter().rev().find_map(|e| if let ChatEvent::Models { models, .. } = e { Some(models.clone()) } else { None }).expect("models");
+            let models = evs
+                .iter()
+                .rev()
+                .find_map(|e| if let ChatEvent::Models { models, .. } = e { Some(models.clone()) } else { None })
+                .expect("models");
             eprintln!("models: {}", models.iter().map(|m| format!("{} {:?}", m.id, m.efforts)).collect::<Vec<_>>().join(", "));
             assert!(models.iter().all(|m| m.efforts.len() > 1), "efforts for every model");
-            if let Some(c) = evs.iter().rev().find_map(|e| if let ChatEvent::Commands { commands } = e { Some(commands.clone()) } else { None }) {
+            if let Some(c) =
+                evs.iter().rev().find_map(|e| if let ChatEvent::Commands { commands } = e { Some(commands.clone()) } else { None })
+            {
                 eprintln!("commands: {}", c.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(" "));
                 assert!(!c.iter().any(|c| c.name == "always-approve"));
             }
@@ -2731,14 +2758,17 @@ opencode/big-pickle
     #[test]
     fn tool_calls_left_open_end_as_background_tasks() {
         let lines = [
-            upd(json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "execute", "title": "npm run dev", "status": "in_progress"})),
+            upd(
+                json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "execute", "title": "npm run dev", "status": "in_progress"}),
+            ),
             upd(json!({"sessionUpdate": "tool_call", "toolCallId": "c2", "kind": "read", "title": "a.txt", "status": "in_progress"})),
             upd(json!({"sessionUpdate": "tool_call_update", "toolCallId": "c2", "status": "completed"})),
         ];
         let out = Arc::new(Mutex::new(Vec::new()));
         let o = out.clone();
         let sink: Sink = Arc::new(move |e| o.lock().unwrap().push(e));
-        let state = Arc::new(Mutex::new(State { alive: true, busy: true, turn_id: Some("turn-1".into()), stretch: 1, ..Default::default() }));
+        let state =
+            Arc::new(Mutex::new(State { alive: true, busy: true, turn_id: Some("turn-1".into()), stretch: 1, ..Default::default() }));
         let mut tr = Translator { sink, state: state.clone(), rpc: Rpc::new(None, "OpenCode") };
         for l in &lines {
             tr.handle(l);
@@ -2791,7 +2821,10 @@ opencode/big-pickle
         }
         let evs = events.lock().unwrap().clone();
         for e in &evs {
-            if matches!(e, ChatEvent::Tasks { .. } | ChatEvent::TurnFinished { .. } | ChatEvent::ToolStarted { .. } | ChatEvent::ToolFinished { .. }) {
+            if matches!(
+                e,
+                ChatEvent::Tasks { .. } | ChatEvent::TurnFinished { .. } | ChatEvent::ToolStarted { .. } | ChatEvent::ToolFinished { .. }
+            ) {
                 eprintln!("{}", serde_json::to_string(e).unwrap());
             }
         }

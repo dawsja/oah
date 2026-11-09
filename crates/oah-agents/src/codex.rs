@@ -494,7 +494,8 @@ impl Translator {
                 let command = s(&item["command"]);
                 if !done {
                     // A command in a terminal Codex can leave running (it has a process id).
-                    let terminal = item["processId"].is_string() || item["source"].as_str().is_some_and(|s| s.to_ascii_lowercase().contains("unified"));
+                    let terminal = item["processId"].is_string()
+                        || item["source"].as_str().is_some_and(|s| s.to_ascii_lowercase().contains("unified"));
                     if terminal && item["source"].as_str().is_none_or(|s| !s.to_ascii_lowercase().contains("interaction")) {
                         let mut t = BackgroundTask::running(id.clone(), TaskKind::Command, strip_shell(&command));
                         t.item_id = Some(id.clone());
@@ -521,7 +522,10 @@ impl Translator {
                             None => s(&item["status"]),
                         };
                         let status = if ok { TaskStatus::Completed } else { TaskStatus::Failed };
-                        st.tasks.finish(&id, status, Some(how.clone())).map(|t| format!("Background command ended ({how}): {}", t.title)).map(|n| (n, st.tasks.event()))
+                        st.tasks
+                            .finish(&id, status, Some(how.clone()))
+                            .map(|t| format!("Background command ended ({how}): {}", t.title))
+                            .map(|n| (n, st.tasks.event()))
                     };
                     self.emit(ChatEvent::ToolFinished { item_id: id, ok, output: clip(s(&item["aggregatedOutput"])), diff: None });
                     if let Some((notice, tasks)) = ended {
@@ -591,7 +595,8 @@ impl Translator {
             let mut st = self.state.lock().unwrap();
             let mut changed = false;
             if item["tool"] == "spawnAgent" {
-                let title = item["prompt"].as_str().and_then(|p| p.lines().find(|l| !l.trim().is_empty())).unwrap_or("Subagent").trim().to_string();
+                let title =
+                    item["prompt"].as_str().and_then(|p| p.lines().find(|l| !l.trim().is_empty())).unwrap_or("Subagent").trim().to_string();
                 for thread in item["receiverThreadIds"].as_array().into_iter().flatten().filter_map(|t| t.as_str()) {
                     st.agents.insert(thread.to_string());
                     let mut t = BackgroundTask::running(thread, TaskKind::Agent, title.clone());
@@ -627,7 +632,9 @@ impl Translator {
         let event = {
             let mut st = self.state.lock().unwrap();
             let changed = match method {
-                "item/completed" if p["item"]["type"] == "agentMessage" => st.tasks.progress(thread, None, p["item"]["text"].as_str().map(first_line).as_deref()),
+                "item/completed" if p["item"]["type"] == "agentMessage" => {
+                    st.tasks.progress(thread, None, p["item"]["text"].as_str().map(first_line).as_deref())
+                }
                 "item/started" if p["item"]["type"] == "commandExecution" => {
                     st.tasks.progress(thread, None, Some(&format!("Running {}", strip_shell(&s(&p["item"]["command"])))))
                 }
