@@ -279,6 +279,12 @@ impl AcpDriver {
                     r["sessionId"] = json!(id);
                     session = Some(r);
                 }
+                // No answer, or the agent went away: the session may well still be there, so
+                // the chat keeps it (and fails to start) instead of carrying on in a new one
+                // that remembers nothing.
+                Err(e) if e.contains("didn't answer") || e.ends_with(" exited") => {
+                    return Err(format!("Couldn't reopen this chat's session ({e}). Try again."));
+                }
                 Err(e) => (d.sink)(ChatEvent::Notice {
                     level: NoticeLevel::Warn,
                     text: format!("Couldn't reopen the earlier session ({e}); this continues in a new one."),
@@ -592,7 +598,8 @@ impl Driver for AcpDriver {
         for id in plans {
             let _ = self.rpc.reply(&id, json!({"outcome": "revise"}));
         }
-        self.queue.lock().unwrap().clear();
+        // Messages already sent wait their turn: they're in the transcript as sent, and the
+        // window steers by stopping the turn and then sending, so this one must still go.
         self.rpc.notify("session/cancel", Some(json!({"sessionId": sid})))
     }
 

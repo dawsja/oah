@@ -134,11 +134,8 @@ pub fn pr_create(repo: &Repo, title: &str, body: &str, base: &str, draft: bool) 
     if title.trim().is_empty() {
         return Err("Give the pull request a title.".into());
     }
-    if repo.git(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).is_err() {
-        crate::sync(repo, crate::SyncOp::Push)?;
-    } else {
-        let _ = crate::sync(repo, crate::SyncOp::Push);
-    }
+    // A pull request for commits that never reached GitHub would be for the wrong thing.
+    crate::sync(repo, crate::SyncOp::Push)?;
     let mut args = vec!["pr", "create", "--title", title, "--body", body];
     if !base.trim().is_empty() {
         args.extend(["--base", base.trim()]);

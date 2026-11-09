@@ -20,7 +20,8 @@ type Props = {
   disabled?: boolean
   placeholder?: string
   /** `now`: into the running turn; otherwise it waits for the turn to end. */
-  onSend: (text: string, images: Image[], how: "queue" | "now") => void
+  /** Resolves false when the message didn't go: the box gets it back. */
+  onSend: (text: string, images: Image[], how: "queue" | "now") => void | Promise<boolean | void>
   onStop?: () => void
   models: ModelOption[]
   model: string
@@ -60,6 +61,11 @@ export function MobileComposer(p: Props) {
     return () => clearTimeout(t)
   }, [clearArmed])
   const box = useRef<HTMLTextAreaElement>(null)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => void (mounted.current = false)
+  }, [])
   const file = useRef<HTMLInputElement>(null)
 
   // Grows with the text, up to about six lines.
@@ -82,7 +88,12 @@ export function MobileComposer(p: Props) {
   const has = text.trim().length > 0 || images.length > 0
   const send = (how: "queue" | "now") => {
     if (!has || p.disabled || dictation.busy) return
-    p.onSend(text.trim() || "(see the attached image)", images, how)
+    const [t, sent] = [text.trim(), images]
+    void Promise.resolve(p.onSend(t || "(see the attached image)", sent, how)).then((ok) => {
+      if (ok !== false || !mounted.current) return
+      setText((cur) => (cur.trim() ? cur : t))
+      setImages((cur) => (cur.length ? cur : sent))
+    })
     setText("")
     setImages([])
   }
@@ -107,6 +118,7 @@ export function MobileComposer(p: Props) {
       ) : null}
       <div className="rounded-2xl border bg-card">
         <textarea
+          data-composer
           ref={box}
           rows={1}
           value={text}

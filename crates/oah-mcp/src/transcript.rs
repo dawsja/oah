@@ -94,7 +94,10 @@ pub fn render(events: &[serde_json::Value], opts: &Options) -> String {
                     bits.push(format!("{:.1}s", *ms as f64 / 1000.0));
                 }
                 if let Some(u) = usage {
-                    bits.push(format!("{} tokens", u.total()));
+                    bits.push(format!("{} tokens", u.fresh()));
+                    if u.cache_read_tokens > 0 {
+                        bits.push(format!("{} cached", u.cache_read_tokens));
+                    }
                 }
                 if let Some(c) = cost_usd.filter(|c| *c > 0.0) {
                     bits.push(format!("${c:.3}"));

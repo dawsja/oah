@@ -101,9 +101,9 @@ export function ChatScreen({ chatId }: { chatId: string }) {
         onSend={(text, images, how) => {
           const running = useMobile.getState().transcripts[chatId]?.running
           // A command never goes into a turn that's running: it waits its turn.
-          if (running && how === "now" && !text.startsWith("/")) void st.steer(chatId, text, images)
-          else if (running) st.enqueue(chatId, text, images)
-          else void st.send(chatId, text, images)
+          if (running && how === "now" && !text.startsWith("/")) return st.steer(chatId, text, images).then(Boolean)
+          if (running) return void st.enqueue(chatId, text, images)
+          return st.send(chatId, text, images).then(Boolean)
         }}
         onStop={() => void st.interrupt(chatId)}
         models={models}
@@ -111,7 +111,7 @@ export function ChatScreen({ chatId }: { chatId: string }) {
         effort={meta?.effort ?? ""}
         onModel={(m, e) => void st.setModel(chatId, m, e)}
         onModelsOpen={load}
-        permission={permission ?? agent?.permissionMode ?? null}
+        permission={permission ?? meta?.permission ?? agent?.permissionMode ?? null}
         onPermission={(m) => st.setPermission(chatId, m)}
         context={t.context}
         onCompact={() => void st.compact(chatId)}
@@ -167,6 +167,7 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
           const id = await useMobile.getState().send(null, text, images, { projectId, agent, model })
           setSending(false)
           if (id) go(`/chat/${encodeURIComponent(id)}`, true)
+          return !!id
         }}
         models={models}
         model={model || agent?.defaultModel || ""}

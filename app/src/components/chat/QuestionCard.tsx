@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Check, ChevronLeft, MessageCircleQuestion } from "lucide-react"
 import type { Question, QuestionRequest } from "@/lib/chat"
-import { inTerminal } from "@/lib/terminal"
+import { CARD_ARM_MS, cardKeyScope } from "@/lib/card-keys"
 import { cn } from "@/lib/utils"
 import { useTouch } from "./touch"
 
@@ -16,28 +16,39 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
   const [picked, setPicked] = useState<Record<string, string[]>>({})
   const [typed, setTyped] = useState<Record<string, string>>({})
   const advance = useRef<number | null>(null)
+  const card = useRef<HTMLDivElement>(null)
+  const shownAt = useRef(0)
   useEffect(() => {
     setStep(0)
     setPicked({})
     setTyped({})
+    shownAt.current = performance.now()
   }, [request.requestId])
   useEffect(() => () => void (advance.current && clearTimeout(advance.current)), [])
 
   const qs = request.questions
   const last = step >= qs.length - 1
-  const q = qs[Math.min(step, qs.length - 1)]
+  const q = qs[Math.min(step, qs.length - 1)] as Question | undefined
   const answerOf = (x: Question) => [...(picked[x.id] ?? []), ...(typed[x.id]?.trim() ? [typed[x.id].trim()] : [])]
   const answers = Object.fromEntries(qs.map((x) => [x.id, answerOf(x)]))
-  const answered = answerOf(q).length > 0
+  const answered = q ? answerOf(q).length > 0 : false
   const anyAnswered = qs.some((x) => answers[x.id].length > 0)
 
+  /** Every way of moving between questions goes through here, so a pending auto-advance
+   *  can't move a second time, and the step never runs past the last question. */
+  const go = (to: number) => {
+    if (advance.current) clearTimeout(advance.current)
+    advance.current = null
+    setStep(Math.max(0, Math.min(to, qs.length - 1)))
+  }
   const skip = () => onAnswer(Object.fromEntries(qs.map((x) => [x.id, []])))
   const next = (a = answers) => {
     if (!qs[step] || a[qs[step].id].length === 0) return
-    if (step < qs.length - 1) setStep(step + 1)
+    if (step < qs.length - 1) go(step + 1)
     else onAnswer(a)
   }
   const pick = (label: string) => {
+    if (!q) return
     if (q.multi) {
       setPicked((p) => {
         const cur = p[q.id] ?? []
@@ -51,22 +62,20 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
     // A single pick answers the question: move on after a beat, so the pick shows. The last
     // question never sends by itself; Submit (or Enter) does, so the answers can be checked.
     if (advance.current) clearTimeout(advance.current)
-    if (!last) advance.current = window.setTimeout(() => setStep((s) => s + 1), 160)
+    if (!last) advance.current = window.setTimeout(() => go(step + 1), 160)
   }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // A terminal's keys are the shell's.
-      if (inTerminal(e.target)) return
-      // The typed-answer field keeps its keys; an empty composer doesn't.
-      const inField = e.target instanceof HTMLInputElement
-      const composerTyping = e.target instanceof HTMLTextAreaElement && e.target.value.trim() !== ""
-      if (composerTyping || e.ctrlKey || e.altKey || e.metaKey) return
+      // Only when nothing else has the key; in the typed-answer field, only Esc.
+      const scope = cardKeyScope(e, card.current)
+      if (!scope || !q || performance.now() - shownAt.current < CARD_ARM_MS) return
       if (e.key === "Escape") skip()
-      else if (e.key === "Enter" && !(e.target instanceof HTMLInputElement)) next()
-      else if (!inField && /^[1-9]$/.test(e.key) && q.options[Number(e.key) - 1]) pick(q.options[Number(e.key) - 1].label)
-      else if (!inField && (e.key === "Backspace" || e.key === "ArrowLeft") && step > 0) setStep(step - 1)
-      else if (!inField && e.key === "ArrowRight" && answered && !last) setStep(step + 1)
+      else if (scope === "field") return
+      else if (e.key === "Enter") next()
+      else if (/^[1-9]$/.test(e.key) && q.options[Number(e.key) - 1]) pick(q.options[Number(e.key) - 1].label)
+      else if ((e.key === "Backspace" || e.key === "ArrowLeft") && step > 0) go(step - 1)
+      else if (e.key === "ArrowRight" && answered && !last) go(step + 1)
       else return
       e.preventDefault()
     }
@@ -77,7 +86,7 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
 
   if (!q) return null
   return (
-    <div className="flex min-h-0 max-h-[45vh] flex-col overflow-hidden rounded-2xl border border-input bg-card">
+    <div ref={card} className="flex min-h-0 max-h-[45vh] flex-col overflow-hidden rounded-2xl border border-input bg-card">
       <div className="min-h-0 overflow-y-auto overscroll-contain [overflow-wrap:anywhere]" role="region" aria-label="Question details" tabIndex={0}>
         {touch ? (
           // A phone: what it's about and how far along on one line, the question under it.
@@ -101,7 +110,7 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
                   key={x.id}
                   aria-label={`Question ${i + 1}`}
                   disabled={i > step && !qs.slice(0, i).every((y) => answers[y.id].length)}
-                  onClick={() => setStep(i)}
+                  onClick={() => go(i)}
                   className={cn("size-1.5 rounded-full", i === step ? "bg-primary" : answers[x.id].length ? "bg-foreground/40" : "bg-input")}
                 />
               ))}
@@ -164,7 +173,7 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
       </div>
       <div className={cn("flex shrink-0 flex-wrap items-center p-3", touch ? "gap-2" : "gap-1.5")}>
         {step > 0 ? (
-          <button className={cn("flex items-center gap-1 rounded-md px-2 text-muted-foreground hover:bg-accent hover:text-foreground", touch ? "h-11 text-[14px]" : "h-7 text-[12.5px]")} onClick={() => setStep(step - 1)}>
+          <button className={cn("flex items-center gap-1 rounded-md px-2 text-muted-foreground hover:bg-accent hover:text-foreground", touch ? "h-11 text-[14px]" : "h-7 text-[12.5px]")} onClick={() => go(step - 1)}>
             <ChevronLeft className="size-3.5" /> Back
           </button>
         ) : null}
@@ -175,7 +184,7 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
             answered || last ? "bg-primary text-primary-foreground hover:bg-primary/90" : "border border-input hover:bg-accent",
           )}
           disabled={last && !anyAnswered}
-          onClick={() => (last ? onAnswer(answers) : setStep(step + 1))}
+          onClick={() => (last ? onAnswer(answers) : go(step + 1))}
         >
           {last ? "Submit" : answered ? "Next" : "Skip"} {answered && !touch ? <kbd className="font-mono text-[10.5px] opacity-60">Enter</kbd> : null}
         </button>

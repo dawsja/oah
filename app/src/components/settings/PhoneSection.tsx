@@ -32,12 +32,9 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [open])
-  // A wrong code five times closes it on the desktop too.
-  useEffect(() => {
-    if (failedLeft === 0) setInfo(null)
-  }, [failedLeft])
-
-  const left = info ? Math.max(0, Math.round((info.expiresAt - now) / 1000)) : 0
+  // A wrong code five times closes it on the desktop too: the code is shown as used up, with a
+  // way to make a new one (`info` stays, so the dialog doesn't go back to "Making a code…").
+  const left = info && failedLeft !== 0 ? Math.max(0, Math.round((info.expiresAt - now) / 1000)) : 0
   const expired = !!info && left === 0
 
   return (

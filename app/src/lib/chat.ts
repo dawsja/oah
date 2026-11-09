@@ -90,9 +90,11 @@ export type ChatMeta = {
   updatedAt: number
   tokens: number
   costUsd: number
-  /** Listed first in its project. */
   sleeping?: boolean
+  /** Listed first in its project. */
   pinned: boolean
+  /** The mode it last ran with; absent: the agent's default in Settings → Providers. */
+  permission?: PermissionMode
 }
 
 export type ToolItem = { kind: "tool"; id: string; tool: ToolCall; status: "running" | "ok" | "error"; output: string; diff: FileDiff | null }

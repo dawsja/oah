@@ -1,21 +1,24 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { FilePen, ListChecks, ShieldQuestion, SquareTerminal } from "lucide-react"
 import type { ApprovalRequest, Decision } from "@/lib/chat"
 import { useRelative } from "./cwd"
 import { useTouch } from "./touch"
 import { DiffLines } from "./DiffView"
 import { Markdown } from "./Markdown"
-import { inTerminal } from "@/lib/terminal"
+import { CARD_ARM_MS, cardKeyScope } from "@/lib/card-keys"
 import { cn } from "@/lib/utils"
 
 /** The agent's question, docked above the composer: Allow (Enter), Always (A), Deny (Esc). */
 export function ApprovalCard({ request, queued = 0, onAnswer }: { request: ApprovalRequest; queued?: number; onAnswer: (d: Decision) => void }) {
+  const card = useRef<HTMLDivElement>(null)
+  const shownAt = useRef(0)
+  useEffect(() => {
+    shownAt.current = performance.now()
+  }, [request.requestId])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // A terminal's keys are the shell's (Enter there must not allow anything).
-      if (inTerminal(e.target)) return
-      const typing = e.target instanceof HTMLTextAreaElement && e.target.value.trim() !== ""
-      if (typing || e.ctrlKey || e.altKey || e.metaKey) return
+      // Only when nothing else has the key: not a field, a focused button, a menu or a terminal.
+      if (cardKeyScope(e, card.current) !== "card" || performance.now() - shownAt.current < CARD_ARM_MS) return
       if (e.key === "Enter") onAnswer("allow")
       else if (e.key === "Escape") onAnswer("deny")
       else if ((e.key === "a" || e.key === "A") && request.canRemember && !(e.target instanceof HTMLTextAreaElement)) onAnswer("allowAlways")
@@ -32,7 +35,7 @@ export function ApprovalCard({ request, queued = 0, onAnswer }: { request: Appro
   const plan = request.kind === "plan"
   const Icon = request.kind === "command" ? SquareTerminal : request.kind === "edit" ? FilePen : request.kind === "plan" ? ListChecks : ShieldQuestion
   return (
-    <div className="flex min-h-0 max-h-[45vh] flex-col overflow-hidden rounded-2xl border border-input bg-card">
+    <div ref={card} className="flex min-h-0 max-h-[45vh] flex-col overflow-hidden rounded-2xl border border-input bg-card">
       <div className="min-h-0 overflow-y-auto overscroll-contain [overflow-wrap:anywhere]" role="region" aria-label="Approval details" tabIndex={0}>
         <div className="flex items-start gap-2.5 px-3.5 pt-3">
           <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />

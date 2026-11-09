@@ -7,15 +7,19 @@
 //! 202. `DELETE /mcp` ends a session. There's no `GET` stream (oah sends nothing unasked): 405.
 //!
 //! Who gets in, checked in this order:
-//! - It listens on 0.0.0.0 for loopback and private-network peers only, and the `Host` must be
+//! - It listens on 127.0.0.1, or (Settings → MCP → other devices) on 0.0.0.0 for loopback and
+//!   private-network peers only. The `Host` must be
 //!   `localhost` or a loopback/private IP at its port, so a web page can't reach it through a
 //!   rebound DNS name.
-//! - No browsers: anything with an `Origin` or `Sec-Fetch-*` header is refused (MCP clients
-//!   don't send them), the body must be `application/json`, and there are no CORS headers.
+//! - No browsers: anything with an `Origin`, or a `Sec-Fetch-Site` other than `none`, is refused
+//!   (a page's requests always carry them; Node's fetch sends only `Sec-Fetch-Mode`), the body
+//!   must be `application/json`, and there are no CORS headers.
 //! - `Authorization: Bearer <token>`: a 256-bit random token (Settings → MCP), compared in
 //!   constant time. A wrong one gets a bare 401 after a short delay; past [`FAIL_MAX`] in
 //!   [`FAIL_WINDOW`], wrong tokens get 429 (the right one still works, so a noisy process can't
 //!   lock you out).
+//! - All of that is checked on the request's head, before any of its body is read. A request
+//!   has [`REQUEST_DEADLINE`] to arrive whole, and at most [`MAX_CONNECTIONS`] are served at once.
 //! - Sessions (`Mcp-Session-Id`) are random, end after [`SESSION_IDLE`] unused, and all end
 //!   when the token changes.
 //!
@@ -24,7 +28,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -46,8 +50,15 @@ pub const SESSION_IDLE: Duration = Duration::from_secs(60 * 60);
 const KEEPALIVE: Duration = Duration::from_secs(15);
 /// An idle keep-alive connection, or one sending a request too slowly, is closed after this.
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long one request (head and body) may take to arrive, however it trickles in.
+pub const REQUEST_DEADLINE: Duration = Duration::from_secs(60);
+/// Connections served at once; more are closed straight away.
+pub const MAX_CONNECTIONS: usize = 64;
 const MAX_HEAD: usize = 16 * 1024;
 const MAX_BODY: usize = 4 * 1024 * 1024;
+/// A chunk-size line or a trailer.
+const MAX_LINE: usize = 4 * 1024;
+const MAX_TRAILERS: usize = 32;
 /// Entries kept in the activity log.
 const ACTIVITY: usize = 60;
 
@@ -196,14 +207,15 @@ fn private_or_loopback(ip: IpAddr) -> bool {
     }
 }
 
-/// Listens on 0.0.0.0:`port` (0: any free port) for loopback and private-network peers until
-/// the [`Server`] is dropped.
-pub fn start(port: u16, ctx: Arc<Ctx>, state: Arc<HttpState>) -> io::Result<Server> {
-    let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))?;
+/// Listens on `port` (0: any free port) until the [`Server`] is dropped: on 127.0.0.1 only, or
+/// with `lan` on every address for loopback and private-network peers.
+pub fn start(port: u16, lan: bool, ctx: Arc<Ctx>, state: Arc<HttpState>) -> io::Result<Server> {
+    let listener = TcpListener::bind((if lan { Ipv4Addr::UNSPECIFIED } else { Ipv4Addr::LOCALHOST }, port))?;
     listener.set_nonblocking(true)?;
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, listener.local_addr()?.port()));
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
+    let open = Arc::new(AtomicUsize::new(0));
     let thread = thread::Builder::new().name("oah-mcp-http".into()).spawn(move || {
         while !s.load(Ordering::SeqCst) {
             match listener.accept() {
@@ -213,8 +225,18 @@ pub fn start(port: u16, ctx: Arc<Ctx>, state: Arc<HttpState>) -> io::Result<Serv
                     if !private_or_loopback(peer.ip()) || conn.set_nonblocking(false).is_err() {
                         continue;
                     }
-                    let (ctx, state) = (ctx.clone(), state.clone());
-                    thread::spawn(move || connection(conn, addr.port(), &ctx, &state));
+                    if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                        open.fetch_sub(1, Ordering::SeqCst);
+                        continue;
+                    }
+                    let (ctx, state, held, stop) = (ctx.clone(), state.clone(), open.clone(), s.clone());
+                    let spawned = thread::Builder::new().spawn(move || {
+                        connection(conn, addr.port(), &ctx, &state, &stop);
+                        held.fetch_sub(1, Ordering::SeqCst);
+                    });
+                    if spawned.is_err() {
+                        open.fetch_sub(1, Ordering::SeqCst);
+                    }
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(50)),
                 Err(_) => thread::sleep(Duration::from_millis(50)),
@@ -242,9 +264,28 @@ impl Request {
 /// A status, for a request that can't be read.
 struct Refuse(u16);
 
-/// Reads one request from `stream`; `buf` keeps what came after it. `None`: the client closed.
-fn read_request(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<Option<Request>, Refuse> {
+/// Reads from `stream` into `buf`, giving up at `deadline`. `Ok(0)`: the client closed.
+fn read_some(stream: &mut TcpStream, buf: &mut Vec<u8>, deadline: Instant) -> io::Result<usize> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(io::ErrorKind::TimedOut.into());
+    }
+    stream.set_read_timeout(Some(left.min(READ_TIMEOUT)))?;
     let mut chunk = [0u8; 8192];
+    let n = stream.read(&mut chunk)?;
+    buf.extend_from_slice(&chunk[..n]);
+    Ok(n)
+}
+
+/// Reads one request's head from `stream`; `buf` keeps what came after it (the body, and maybe
+/// the next request). `None`: the client closed, or went quiet between requests.
+fn read_head(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<Option<(Request, Instant)>, Refuse> {
+    // Waiting for the next request on a kept connection is idle time, not a slow request.
+    let mut deadline = Instant::now() + READ_TIMEOUT;
+    let mut started = !buf.is_empty();
+    if started {
+        deadline = Instant::now() + REQUEST_DEADLINE;
+    }
     let head_len = loop {
         if let Some(i) = find(buf, b"\r\n\r\n") {
             break i + 4;
@@ -252,9 +293,15 @@ fn read_request(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<Option<Requ
         if buf.len() > MAX_HEAD {
             return Err(Refuse(431));
         }
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => return Ok(None),
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        match read_some(stream, buf, deadline) {
+            Ok(0) => return Ok(None),
+            Ok(_) if !started => {
+                started = true;
+                deadline = Instant::now() + REQUEST_DEADLINE;
+            }
+            Ok(_) => {}
+            Err(_) if started => return Err(Refuse(408)),
+            Err(_) => return Ok(None),
         }
     };
     let mut raw = [httparse::EMPTY_HEADER; 64];
@@ -268,18 +315,20 @@ fn read_request(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<Option<Requ
     let headers: Vec<(String, String)> =
         parsed.headers.iter().map(|h| (h.name.to_ascii_lowercase(), String::from_utf8_lossy(h.value).trim().to_string())).collect();
     buf.drain(..head_len);
-    let get = |name: &str| headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
-    let body = if get("transfer-encoding").is_some_and(|t| t.to_ascii_lowercase().contains("chunked")) {
-        read_chunked(stream, buf)?
-    } else {
-        let len: usize = get("content-length").map(|l| l.parse().map_err(|_| Refuse(400))).transpose()?.unwrap_or(0);
-        if len > MAX_BODY {
-            return Err(Refuse(413));
-        }
-        fill(stream, buf, len)?;
-        buf.drain(..len).collect()
-    };
-    Ok(Some(Request { method, path, headers, body }))
+    Ok(Some((Request { method, path, headers, body: Vec::new() }, deadline)))
+}
+
+/// Reads the body of `req` (whose head has been read) by `deadline`.
+fn read_body(stream: &mut TcpStream, buf: &mut Vec<u8>, req: &Request, deadline: Instant) -> Result<Vec<u8>, Refuse> {
+    if req.header("transfer-encoding").is_some_and(|t| t.to_ascii_lowercase().contains("chunked")) {
+        return read_chunked(stream, buf, deadline);
+    }
+    let len: usize = req.header("content-length").map(|l| l.parse().map_err(|_| Refuse(400))).transpose()?.unwrap_or(0);
+    if len > MAX_BODY {
+        return Err(Refuse(413));
+    }
+    fill(stream, buf, len, deadline)?;
+    Ok(buf.drain(..len).collect())
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -287,50 +336,58 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 /// Reads until `buf` holds at least `len` bytes.
-fn fill(stream: &mut TcpStream, buf: &mut Vec<u8>, len: usize) -> Result<(), Refuse> {
-    let mut chunk = [0u8; 8192];
+fn fill(stream: &mut TcpStream, buf: &mut Vec<u8>, len: usize, deadline: Instant) -> Result<(), Refuse> {
     while buf.len() < len {
-        match stream.read(&mut chunk) {
+        match read_some(stream, buf, deadline) {
             Ok(0) | Err(_) => return Err(Refuse(400)),
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Ok(_) => {}
         }
     }
     Ok(())
 }
 
-fn read_chunked(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<Vec<u8>, Refuse> {
+/// The length of the next line in `buf` (up to its CRLF), reading more as needed; lines longer
+/// than [`MAX_LINE`] are refused.
+fn line(stream: &mut TcpStream, buf: &mut Vec<u8>, deadline: Instant) -> Result<usize, Refuse> {
+    loop {
+        if let Some(i) = find(&buf[..buf.len().min(MAX_LINE + 2)], b"\r\n") {
+            return Ok(i);
+        }
+        if buf.len() > MAX_LINE {
+            return Err(Refuse(400));
+        }
+        let have = buf.len();
+        fill(stream, buf, have + 1, deadline)?;
+    }
+}
+
+fn read_chunked(stream: &mut TcpStream, buf: &mut Vec<u8>, deadline: Instant) -> Result<Vec<u8>, Refuse> {
     let mut body = Vec::new();
     loop {
-        let line_end = loop {
-            if let Some(i) = find(buf, b"\r\n") {
-                break i;
-            }
-            let have = buf.len();
-            fill(stream, buf, have + 1)?;
-        };
+        let line_end = line(stream, buf, deadline)?;
         let size_text = String::from_utf8_lossy(&buf[..line_end]).to_string();
         let size = usize::from_str_radix(size_text.split(';').next().unwrap_or("").trim(), 16).map_err(|_| Refuse(400))?;
         buf.drain(..line_end + 2);
         if size == 0 {
             // Trailers, if any, end with an empty line.
-            loop {
-                let i = loop {
-                    if let Some(i) = find(buf, b"\r\n") {
-                        break i;
-                    }
-                    let have = buf.len();
-                    fill(stream, buf, have + 1)?;
-                };
+            for _ in 0..=MAX_TRAILERS {
+                let i = line(stream, buf, deadline)?;
                 buf.drain(..i + 2);
                 if i == 0 {
                     return Ok(body);
                 }
             }
+            return Err(Refuse(400));
         }
-        if body.len() + size > MAX_BODY {
+        // `body` never exceeds MAX_BODY, so this can't underflow; and `size` is checked before
+        // any arithmetic on it.
+        if size > MAX_BODY - body.len() {
             return Err(Refuse(413));
         }
-        fill(stream, buf, size + 2)?;
+        fill(stream, buf, size + 2, deadline)?;
+        if &buf[size..size + 2] != b"\r\n" {
+            return Err(Refuse(400));
+        }
         body.extend_from_slice(&buf[..size]);
         buf.drain(..size + 2);
     }
@@ -349,6 +406,7 @@ fn reason(status: u16) -> &'static str {
         404 => "Not Found",
         405 => "Method Not Allowed",
         406 => "Not Acceptable",
+        408 => "Request Timeout",
         413 => "Payload Too Large",
         415 => "Unsupported Media Type",
         429 => "Too Many Requests",
@@ -385,12 +443,12 @@ fn rpc_error(code: i64, message: &str) -> Vec<u8> {
 
 // ---- Serving ---------------------------------------------------------------------------------
 
-fn connection(mut stream: TcpStream, port: u16, ctx: &Arc<Ctx>, state: &Arc<HttpState>) {
-    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+fn connection(mut stream: TcpStream, port: u16, ctx: &Arc<Ctx>, state: &Arc<HttpState>, stop: &AtomicBool) {
     let _ = stream.set_nodelay(true);
+    let _ = stream.set_write_timeout(Some(READ_TIMEOUT));
     let mut buf = Vec::new();
-    loop {
-        let req = match read_request(&mut stream, &mut buf) {
+    while !stop.load(Ordering::SeqCst) {
+        let (req, deadline) = match read_head(&mut stream, &mut buf) {
             Ok(Some(r)) => r,
             Ok(None) => return,
             Err(Refuse(status)) => {
@@ -399,7 +457,7 @@ fn connection(mut stream: TcpStream, port: u16, ctx: &Arc<Ctx>, state: &Arc<Http
             }
         };
         let close = req.header("connection").is_some_and(|c| c.eq_ignore_ascii_case("close"));
-        match serve(&mut stream, req, port, ctx, state) {
+        match serve(&mut stream, &mut buf, req, deadline, port, ctx, state) {
             Ok(true) if !close => continue,
             _ => return,
         }
@@ -421,20 +479,32 @@ fn local_host(host: Option<&str>, port: u16) -> bool {
     raw.parse::<IpAddr>().is_ok_and(private_or_loopback)
 }
 
-/// Answers one request. Ok(true): the connection can take another.
-fn serve(stream: &mut TcpStream, req: Request, port: u16, ctx: &Arc<Ctx>, state: &Arc<HttpState>) -> io::Result<bool> {
+/// A web page's request: it names an origin, or the browser says where it came from.
+fn from_a_browser(req: &Request) -> bool {
+    req.header("origin").is_some() || req.header("sec-fetch-site").is_some_and(|s| !s.eq_ignore_ascii_case("none"))
+}
+
+/// Answers one request whose head has been read; its body is read only once it's let in.
+/// Ok(true): the connection can take another.
+fn serve(
+    stream: &mut TcpStream,
+    buf: &mut Vec<u8>,
+    mut req: Request,
+    deadline: Instant,
+    port: u16,
+    ctx: &Arc<Ctx>,
+    state: &Arc<HttpState>,
+) -> io::Result<bool> {
     // A web page: never, whatever else it sends.
-    if !local_host(req.header("host"), port)
-        || req.header("origin").is_some()
-        || req.headers.iter().any(|(k, _)| k.starts_with("sec-fetch-"))
-    {
+    if !local_host(req.header("host"), port) || from_a_browser(&req) {
         state.log("refused", "A request from a browser or another host".into());
         respond(stream, 403, &[], &[], false)?;
         return Ok(false);
     }
     if req.path.split('?').next() != Some(PATH) {
-        respond(stream, 404, &[], &[], true)?;
-        return Ok(true);
+        // Its body is never read, so the connection can't take another request.
+        respond(stream, 404, &[], &[], false)?;
+        return Ok(false);
     }
     if !state.token_ok(req.header("authorization")) {
         let throttled = state.fail();
@@ -447,6 +517,13 @@ fn serve(stream: &mut TcpStream, req: Request, port: u16, ctx: &Arc<Ctx>, state:
         }
         return Ok(false);
     }
+    req.body = match read_body(stream, buf, &req, deadline) {
+        Ok(b) => b,
+        Err(Refuse(status)) => {
+            respond(stream, status, &[], &[], false)?;
+            return Ok(false);
+        }
+    };
     state.purge();
     match req.method.as_str() {
         "POST" => post(stream, req, ctx, state),
@@ -620,7 +697,7 @@ mod tests {
     fn server() -> (Server, Arc<HttpState>) {
         let (ctx, _) = fake(true);
         let state = Arc::new(HttpState::with_tarpit(TOKEN.into(), Duration::ZERO));
-        (start(0, ctx, state.clone()).unwrap(), state)
+        (start(0, true, ctx, state.clone()).unwrap(), state)
     }
 
     struct Reply {
@@ -726,6 +803,54 @@ mod tests {
         assert_eq!(send(&s, "POST", PATH, &[("Host", &format!("100.100.1.2:{port}"))], &body).status, 200);
         assert_eq!(send(&s, "POST", "/other", &[], &body).status, 404);
         assert_eq!(send(&s, "POST", PATH, &[("Content-Type", "text/plain")], &body).status, 415);
+        // Node's fetch (undici, the MCP TypeScript SDK) sends Sec-Fetch-Mode on its own.
+        assert_eq!(send(&s, "POST", PATH, &[("Sec-Fetch-Mode", "cors")], &body).status, 200);
+        assert_eq!(send(&s, "POST", PATH, &[("Sec-Fetch-Site", "none")], &body).status, 200);
+    }
+
+    /// Writes `raw` on a new connection and returns the status line's code (0: no answer).
+    fn raw(s: &Server, raw: &[u8]) -> u16 {
+        let mut c = TcpStream::connect(s.addr()).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let _ = c.write_all(raw);
+        let mut out = String::new();
+        let _ = c.read_to_string(&mut out);
+        out.split(' ').nth(1).and_then(|c| c.parse().ok()).unwrap_or(0)
+    }
+
+    fn chunked(s: &Server, auth: &str, body: &str) -> u16 {
+        let port = s.addr().port();
+        let head = format!(
+            "POST {PATH} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{auth}Content-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+        );
+        raw(s, format!("{head}{body}").as_bytes())
+    }
+
+    #[test]
+    fn malformed_chunk_sizes_are_refused_not_a_crash() {
+        let (s, _) = server();
+        let auth = format!("Authorization: Bearer {TOKEN}\r\n");
+        // A size that overflows `body.len() + size` (it used to panic, and abort the app).
+        assert_eq!(chunked(&s, &auth, "1\r\nA\r\nffffffffffffffff\r\nB"), 413);
+        assert_eq!(chunked(&s, &auth, "3\r\nABC\r\nfffffffffffffffd\r\nB"), 413);
+        // A size line that never ends.
+        assert_eq!(chunked(&s, &auth, &"1".repeat(MAX_LINE + 10)), 400);
+        // Data longer than its size.
+        assert_eq!(chunked(&s, &auth, "1\r\nABC\r\n0\r\n\r\n"), 400);
+        // The server is still up.
+        let init = rpc(1, "initialize", json!({}));
+        let ok = format!("{:x}\r\n{init}\r\n0\r\n\r\n", init.len());
+        assert_eq!(chunked(&s, &auth, &ok), 200);
+    }
+
+    #[test]
+    fn nothing_of_the_body_is_read_before_the_token() {
+        let (s, _) = server();
+        // No token, and a body that would be refused if it were read: 401 first.
+        assert_eq!(chunked(&s, "", "ffffffffffffffff\r\n"), 401);
+        let port = s.addr().port();
+        let big = format!("POST {PATH} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: {}\r\n\r\n", MAX_BODY * 10);
+        assert_eq!(raw(&s, big.as_bytes()), 401);
     }
 
     #[test]
@@ -853,7 +978,7 @@ mod tests {
         let token = std::env::var("OAH_TEST_TOKEN").unwrap_or_else(|_| new_token());
         let state = Arc::new(HttpState::new(token.clone()));
         let port = std::env::var("OAH_TEST_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(0);
-        let s = start(port, ctx, state.clone()).unwrap();
+        let s = start(port, true, ctx, state.clone()).unwrap();
         eprintln!("serving http://{}{PATH} token {token}", s.addr());
         let secs = std::env::var("OAH_TEST_SECS").ok().and_then(|p| p.parse().ok()).unwrap_or(60);
         thread::sleep(Duration::from_secs(secs));

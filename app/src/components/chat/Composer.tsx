@@ -59,7 +59,8 @@ export type ComposerProps = {
   disabled?: boolean
   placeholder?: string
   /** `steer` (Ctrl/⌘+Enter): send it now, into the turn that's running. */
-  onSend?: (text: string, images: Attachment[], how: "send" | "steer") => void
+  /** Resolves false when the message didn't go: the composer puts it back. */
+  onSend?: (text: string, images: Attachment[], how: "send" | "steer") => void | Promise<boolean | void>
   onStop?: () => void
   /** Ctrl/⌘+Enter with nothing typed while the agent works: the first queued message goes now. */
   onSteerQueued?: () => void
@@ -189,12 +190,24 @@ export function Composer(p: ComposerProps) {
     })
   }
   const [text, setText] = useState(() => (p.draftKey ? drafts.get(p.draftKey).text : ""))
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => void (mounted.current = false)
+  }, [])
   const [images, setImages] = useState<Attachment[]>(() => (p.draftKey ? drafts.get(p.draftKey).images : []))
   useEffect(() => {
     if (p.draftKey) drafts.set(p.draftKey, text, images)
   }, [p.draftKey, text, images])
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  // Grows with the text up to its max height (then scrolls), and shrinks back after sending.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${el.scrollHeight}px`
+  }, [text])
   useEffect(() => {
     if (p.autoFocus) ref.current?.focus({ preventScroll: true })
   }, [p.autoFocus])
@@ -255,7 +268,13 @@ export function Composer(p: ComposerProps) {
       setText("")
       return
     }
-    p.onSend?.(t || "(see the attached image)", images, how)
+    const sent = images
+    void Promise.resolve(p.onSend?.(t || "(see the attached image)", sent, how)).then((ok) => {
+      // Didn't go: back in the box, unless something new was typed meanwhile.
+      if (ok !== false || !mounted.current) return
+      setText((cur) => (cur.trim() ? cur : t))
+      setImages((cur) => (cur.length ? cur : sent))
+    })
     setText("")
     setImages([])
   }
@@ -340,6 +359,8 @@ export function Composer(p: ComposerProps) {
         e.target.value = ""
       }} />
       <textarea
+        data-composer
+        aria-label="Message"
         ref={ref}
         value={text}
         rows={3}

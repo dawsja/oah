@@ -49,9 +49,16 @@ export function notification(event: ChatEvent, meta: ChatMeta | undefined): { ti
   }
 }
 
-/** One notification per chat per few seconds (a burst of approvals is one ping). */
+/** One notification per chat and kind per few seconds (a burst of approvals is one ping). A
+ *  "waiting for you" is never held back by the "Done" just before it. */
 const last = new Map<string, number>()
 const COOLDOWN = 5_000
+
+/** Chats with messages queued behind the running turn: their "Done" isn't the end. */
+let hasQueued: (chatId: string) => boolean = () => false
+export function setQueuedCheck(check: (chatId: string) => boolean) {
+  hasQueued = check
+}
 let nextId = 1
 
 export async function notify(event: ChatEvent, meta: ChatMeta | undefined) {
@@ -59,7 +66,9 @@ export async function notify(event: ChatEvent, meta: ChatMeta | undefined) {
   const n = event.type === "tasks" || !document.hasFocus() ? notification(event, meta) : null
   if (document.hasFocus()) return
   if (!n) return
-  const key = meta?.id ?? ""
+  // The next queued message goes as this turn ends; the last one's end is the "Done".
+  if (event.type === "turnFinished" && meta && hasQueued(meta.id)) return
+  const key = `${meta?.id ?? ""}|${n.waits ? "waits" : "other"}`
   const now = Date.now()
   if (now - (last.get(key) ?? 0) < COOLDOWN) return
   last.set(key, now)

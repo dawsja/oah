@@ -260,6 +260,7 @@ impl Host for AppHost {
                 let mut prompt: Prompt = param(&p, "prompt")?;
                 // Saved image names come from the desktop, never from the phone.
                 prompt.files.clear();
+                check_phone_images(&prompt)?;
                 let permission: Option<PermissionMode> = opt_param(&p, "permission")?;
                 chats.send(app, &settings(), &str_param(&p, "chatId")?, prompt, permission).map(|_| Value::Null)
             }
@@ -357,14 +358,35 @@ impl Host for AppHost {
 
 // ---- Starting and stopping -------------------------------------------------------------------
 
-/// Starts the server on `port` (or, when that's taken, on a free one, which is then saved).
+/// What a phone may attach, checked here and not only in its app: up to eight PNG, JPEG, GIF
+/// or WebP images of 5 MB each.
+fn check_phone_images(prompt: &Prompt) -> Result<(), String> {
+    const MAX: usize = 8;
+    const MAX_BYTES: usize = 5 * 1024 * 1024;
+    if prompt.images.len() > MAX {
+        return Err(format!("At most {MAX} images go with one message."));
+    }
+    for img in &prompt.images {
+        if !matches!(img.mime.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/webp") {
+            return Err("Only PNG, JPEG, GIF and WebP images can be attached.".into());
+        }
+        // Base64 is 4 characters for every 3 bytes.
+        if img.data.len() / 4 * 3 > MAX_BYTES + 3 {
+            return Err("Images must be 5 MB or smaller.".into());
+        }
+    }
+    Ok(())
+}
+
+/// Starts the server on `port`. A port that's taken is an error, not a move to another one:
+/// paired phones dial the port they paired on, and a new one saved here would strand them.
 async fn start(app: &AppHandle, port: u16) -> Result<u16, String> {
     let host = Arc::new(AppHost { app: app.clone(), identity: identity(app), name: desktop_name() });
     let any = |port| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     let server = match Server::bind(any(port), host.clone()).await {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            Server::bind(any(0), host).await.map_err(|e| format!("couldn't listen for phones: {e}"))?
+            return Err(format!("Port {port} is in use by another program, so phones can't connect. Close it, or pick another port here (paired phones then need pairing again)."))
         }
         Err(e) => return Err(format!("couldn't listen for phones on port {port}: {e}")),
     };
@@ -376,14 +398,6 @@ async fn start(app: &AppHandle, port: u16) -> Result<u16, String> {
     let state = app.state::<AppState>();
     *state.remote.discovery.lock().unwrap() = discovery.ok();
     *state.remote.server.lock().unwrap() = Some(server);
-    if bound != port {
-        let mut s = state.settings.lock().unwrap();
-        let mut next = s.clone();
-        next.remote.port = bound;
-        if next.save(&paths::settings_file()).is_ok() {
-            *s = next;
-        }
-    }
     Ok(bound)
 }
 

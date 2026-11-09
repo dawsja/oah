@@ -42,8 +42,10 @@ type Store = {
   open(chatId: string): Promise<void>
   leave(): void
   /** Sends a prompt; with no chat yet (`chatId` null), creates one in `projectId` first. */
+  /** The chat it went to, or null (after saying why) when it didn't go. A new chat whose
+   *  first message didn't go is removed again. */
   send(chatId: string | null, text: string, images: Image[], o?: { projectId?: string; agent?: AgentInfo; model?: string }): Promise<string | null>
-  steer(chatId: string, text: string, images: Image[]): Promise<void>
+  steer(chatId: string, text: string, images: Image[]): Promise<string | null>
   enqueue(chatId: string, text: string, images: Image[]): void
   unqueue(chatId: string, id: string): void
   sendQueued(chatId: string): Promise<void>
@@ -175,8 +177,13 @@ export const useMobile = create<Store>((set, get) => ({
       return chat
     } catch (e) {
       fail(e)
-      if (id) push(id, { type: "error", message: String(e) })
-      return id
+      if (id && !chatId) {
+        await get().remove(id)
+        set({ chatId: null })
+      } else if (id) {
+        push(id, { type: "error", message: String(e) })
+      }
+      return null
     }
   },
 
@@ -184,7 +191,7 @@ export const useMobile = create<Store>((set, get) => ({
     const meta = get().metas.find((m) => m.id === chatId)
     // An agent that can't take a message mid-turn is stopped first (as on the desktop).
     if (get().transcripts[chatId]?.running && isAcp(meta?.agent)) await get().interrupt(chatId)
-    await get().send(chatId, text, images)
+    return get().send(chatId, text, images)
   },
 
   enqueue(chatId, text, images) {

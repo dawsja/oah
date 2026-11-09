@@ -13,11 +13,26 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
   const run = useGit((s) => s.run)
   const [text, setText] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const status = useGit((s) => s.status[`${scope.projectId}|${scope.cwd ?? ""}`])
+  // A diff follows the working tree, but only this file's part of it: a refresh that changed
+  // nothing here (every few seconds) doesn't reload it or jump back to the top.
+  const fileState = useGit((s) => {
+    if (viewer.kind !== "diff") return ""
+    const st = s.status[`${scope.projectId}|${scope.cwd ?? ""}`]
+    if (!st) return ""
+    const all = [...st.staged, ...st.unstaged, ...st.untracked, ...st.conflicted]
+    return JSON.stringify(all.filter((c) => c.path === viewer.path))
+  })
+  const shown = useRef("")
 
   useEffect(() => {
-    setText(null)
-    setError(null)
+    const what = JSON.stringify([viewer, scope.projectId, scope.cwd])
+    // Another file: "Loading…" until it's read. The same one again: the old text stays meanwhile.
+    if (shown.current !== what) {
+      setText(null)
+      setError(null)
+    }
+    shown.current = what
+    let current = true
     const p =
       viewer.kind === "diff"
         ? git.diff(scope, viewer.path, viewer.staged, viewer.untracked)
@@ -26,9 +41,13 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
           : isImagePath(viewer.path)
             ? git.readImage(scope, viewer.path)
             : git.read(scope, viewer.path)
-    p.then(setText, (e) => setError(String(e)))
-    // Diffs follow the working tree.
-  }, [viewer, scope.projectId, scope.cwd, viewer.kind === "diff" ? status : null])
+    // A slow answer for a file clicked before this one never lands under this one's name.
+    p.then(
+      (t) => current && setText(t),
+      (e) => current && setError(String(e)),
+    )
+    return () => void (current = false)
+  }, [viewer, scope.projectId, scope.cwd, fileState])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !(e.target instanceof HTMLTextAreaElement) && !inTerminal(e.target) && open(null)

@@ -74,6 +74,9 @@ pub trait Host: Send + Sync + 'static {
     fn set_model(&self, chat_id: &str, model: &str) -> HostResult<()>;
     fn set_effort(&self, chat_id: &str, effort: &str) -> HostResult<()>;
     fn set_permission(&self, chat_id: &str, mode: PermissionMode) -> HostResult<()>;
+    /// The mode the chat's next message runs with when none is given: the one it last ran
+    /// with, else its agent's default in Settings → Providers.
+    fn permission(&self, chat_id: &str) -> PermissionMode;
     fn compact(&self, chat_id: &str, instructions: &str) -> HostResult<()>;
     fn clear(&self, chat_id: &str) -> HostResult<()>;
     fn rename(&self, chat_id: &str, title: &str) -> HostResult<ChatMeta>;

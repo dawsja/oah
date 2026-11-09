@@ -67,7 +67,10 @@ export function TitleBar() {
         <button className="grid w-11 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Maximize" onClick={() => win().then((w) => w.toggleMaximize())}>
           <WinMax />
         </button>
-        <button className="grid w-11 place-items-center text-muted-foreground hover:bg-[#c42b1c] hover:text-white" aria-label="Close" onClick={() => win().then((w) => w.close())}>
+        <button className="grid w-11 place-items-center text-muted-foreground hover:bg-[#c42b1c] hover:text-white" aria-label="Close" onClick={async () => {
+            // Agents mid-turn are asked about first, then stopped with what they'd written kept.
+            if (await (await import("@/lib/quit")).stopAgentsForQuit("Close")) await (await win()).close()
+          }}>
           <WinClose />
         </button>
       </div>

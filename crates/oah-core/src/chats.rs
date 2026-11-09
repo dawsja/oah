@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::settings::AgentKind;
+use crate::settings::{permission_or_none, AgentKind, PermissionMode};
 use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,6 +33,10 @@ pub struct ChatMeta {
     /// Listed first in its project, above the unpinned chats.
     pub pinned: bool,
     pub sleeping: bool,
+    /// The permission mode the chat last ran with (from the window, a phone or MCP); none: the
+    /// agent's default in Settings → Providers.
+    #[serde(deserialize_with = "permission_or_none", skip_serializing_if = "Option::is_none")]
+    pub permission: Option<PermissionMode>,
 }
 
 impl Default for ChatMeta {
@@ -52,6 +56,7 @@ impl Default for ChatMeta {
             cost_usd: 0.0,
             pinned: false,
             sleeping: false,
+            permission: None,
         }
     }
 }
@@ -102,10 +107,7 @@ impl ChatStore {
     pub fn save(&self, meta: &ChatMeta) -> Result<()> {
         let dir = self.dir(&meta.id)?;
         std::fs::create_dir_all(&dir)?;
-        let tmp = dir.join("meta.json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(meta)?)?;
-        std::fs::rename(&tmp, dir.join("meta.json"))?;
-        Ok(())
+        crate::write_atomic(&dir.join("meta.json"), serde_json::to_string_pretty(meta)?.as_bytes())
     }
 
     pub fn get(&self, id: &str) -> Result<ChatMeta> {
@@ -125,15 +127,39 @@ impl ChatStore {
         out
     }
 
-    /// Appends one event line.
+    /// Appends one event line, to a chat that exists (a deleted chat's late events are
+    /// refused rather than bringing its folder back).
     pub fn append(&self, id: &str, event: &impl Serialize) -> Result<()> {
         let dir = self.dir(id)?;
-        std::fs::create_dir_all(&dir)?;
+        if !dir.join("meta.json").is_file() {
+            return Err(Error::Invalid(format!("no chat {id}")));
+        }
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("events.jsonl"))?;
         let mut line = serde_json::to_vec(event)?;
         line.push(b'\n');
         f.write_all(&line)?;
         Ok(())
+    }
+
+    /// Removes chat folders with no `meta.json` left by older versions: a deleted chat's
+    /// agent wrote its last events after the folder was removed. Only folders holding nothing
+    /// but an `events.jsonl` of such end-of-run events go; returns how many.
+    pub fn prune_orphans(&self) -> usize {
+        let Ok(entries) = std::fs::read_dir(&self.root) else { return 0 };
+        let mut n = 0;
+        for dir in entries.flatten().map(|e| e.path()).filter(|p| p.is_dir() && !p.join("meta.json").exists()) {
+            let only_log = std::fs::read_dir(&dir).map(|d| d.flatten().all(|e| e.file_name() == "events.jsonl")).unwrap_or(false);
+            let ending = std::fs::read_to_string(dir.join("events.jsonl")).is_ok_and(|t| {
+                t.lines().filter(|l| !l.trim().is_empty()).all(|l| {
+                    serde_json::from_str::<serde_json::Value>(l)
+                        .is_ok_and(|v| matches!(v["type"].as_str(), Some("exited" | "turnFinished" | "tasks" | "notice")))
+                })
+            });
+            if only_log && ending && std::fs::remove_dir_all(&dir).is_ok() {
+                n += 1;
+            }
+        }
+        n
     }
 
     /// The chat's events as JSON values (a torn last line is dropped).
@@ -218,6 +244,27 @@ mod tests {
         store.delete(&a.id).unwrap();
         assert_eq!(store.list().len(), 1);
         assert!(store.get("../etc").is_err());
+        // A deleted chat's late event doesn't bring its folder back.
+        assert!(store.append(&a.id, &serde_json::json!({"type": "exited"})).is_err());
+        assert!(!dir.path().join(&a.id).exists());
+    }
+
+    #[test]
+    fn prunes_only_folders_older_versions_left_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ChatStore::new(dir.path());
+        let kept = store.create("p1", AgentKind::Claude, "", "/code").unwrap();
+        let orphan = |name: &str, log: &str| {
+            std::fs::create_dir_all(dir.path().join(name)).unwrap();
+            std::fs::write(dir.path().join(name).join("events.jsonl"), log).unwrap();
+        };
+        orphan("deadbeef00000001", "{\"type\":\"exited\",\"code\":null}\n");
+        orphan("deadbeef00000002", "{\"type\":\"turnFinished\"}\n{\"type\":\"exited\"}\n");
+        // Anything with real content stays, meta or not.
+        orphan("deadbeef00000003", "{\"type\":\"userMessage\",\"text\":\"hi\"}\n");
+        assert_eq!(store.prune_orphans(), 2);
+        assert!(dir.path().join("deadbeef00000003").exists());
+        assert!(dir.path().join(&kept.id).exists());
     }
 
     #[test]

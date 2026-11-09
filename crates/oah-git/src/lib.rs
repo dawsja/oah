@@ -25,8 +25,15 @@ pub struct Repo {
     pub path: String,
 }
 
+/// Reading: status, diffs, logs. Killing one of these loses nothing.
 const QUICK: Duration = Duration::from_secs(20);
 const NETWORK: Duration = Duration::from_secs(180);
+/// Changing the repo: a checkout, a commit's hooks, a worktree. Killed half-way, these leave
+/// `index.lock` or a half-made worktree behind, so they get as long as they need, within reason.
+const WRITE: Duration = Duration::from_secs(15 * 60);
+/// Paths per git command line, by length: Windows caps a command line at 32,767 characters
+/// and Linux one ssh argument at 128 KiB.
+const PATHS_PER_CALL: usize = 8_000;
 
 impl Repo {
     pub fn new(location: Location, path: impl Into<String>) -> Repo {
@@ -34,7 +41,9 @@ impl Repo {
     }
 
     fn env() -> Vec<EnvVar> {
-        [("GIT_OPTIONAL_LOCKS", "0"), ("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C"), ("GIT_PAGER", "cat")]
+        // Paths are file names, never patterns: discarding a file named `*` must not discard
+        // every file.
+        [("GIT_OPTIONAL_LOCKS", "0"), ("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C"), ("GIT_PAGER", "cat"), ("GIT_LITERAL_PATHSPECS", "1")]
             .iter()
             .map(|(k, v)| EnvVar { key: (*k).into(), value: (*v).into(), in_keychain: false })
             .collect()
@@ -51,6 +60,23 @@ impl Repo {
     /// `git args…`, failing with git's own message.
     pub fn git(&self, args: &[&str]) -> Result<String, String> {
         self.git_with(args, None, QUICK)
+    }
+
+    /// `git args…` that changes the repo (see [`WRITE`]).
+    pub fn git_write(&self, args: &[&str]) -> Result<String, String> {
+        self.git_with(args, None, WRITE)
+    }
+
+    /// Where the project folder is inside its repo (`frontend/`), empty at the top. Git prints
+    /// some paths from the top; oah shows and passes them from the project folder.
+    fn prefix(&self) -> String {
+        static KNOWN: std::sync::Mutex<Vec<(Location, String, String)>> = std::sync::Mutex::new(Vec::new());
+        if let Some((_, _, p)) = KNOWN.lock().unwrap().iter().find(|(l, d, _)| *l == self.location && *d == self.path) {
+            return p.clone();
+        }
+        let Ok(p) = self.git(&["rev-parse", "--show-prefix"]).map(|p| p.trim().to_string()) else { return String::new() };
+        KNOWN.lock().unwrap().push((self.location.clone(), self.path.clone(), p.clone()));
+        p
     }
 
     fn git_with(&self, args: &[&str], input: Option<&[u8]>, limit: Duration) -> Result<String, String> {
@@ -79,7 +105,8 @@ fn git_error(out: &Output) -> String {
 
 /// The working tree: branch, sync state and changed files with line counts.
 pub fn status(repo: &Repo) -> Result<Status, String> {
-    let out = repo.exec("git", &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"], None, QUICK)?;
+    // Only the project folder's changes (it can be a folder inside a bigger repo).
+    let out = repo.exec("git", &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--", "."], None, QUICK)?;
     if !out.ok() {
         if out.stderr.contains("not a git repository") {
             return Ok(Status { is_repo: false, ..Default::default() });
@@ -87,8 +114,23 @@ pub fn status(repo: &Repo) -> Result<Status, String> {
         return Err(git_error(&out));
     }
     let mut st = parse_status(&out.stdout);
-    let unstaged = repo.git(&["diff", "--numstat", "-z"]).unwrap_or_default();
-    let staged = repo.git(&["diff", "--cached", "--numstat", "-z"]).unwrap_or_default();
+    // Status paths are from the top of the repo; everything else here is from the folder.
+    let prefix = repo.prefix();
+    if !prefix.is_empty() {
+        let strip = |p: &mut String| {
+            if let Some(rest) = p.strip_prefix(&prefix) {
+                *p = rest.to_string();
+            }
+        };
+        for c in st.staged.iter_mut().chain(&mut st.unstaged).chain(&mut st.untracked).chain(&mut st.conflicted) {
+            strip(&mut c.path);
+            if let Some(o) = c.orig_path.as_mut() {
+                strip(o);
+            }
+        }
+    }
+    let unstaged = repo.git(&["diff", "--numstat", "-z", "--relative"]).unwrap_or_default();
+    let staged = repo.git(&["diff", "--cached", "--numstat", "-z", "--relative"]).unwrap_or_default();
     apply_numstat(&mut st.unstaged, &parse_numstat(&unstaged));
     apply_numstat(&mut st.staged, &parse_numstat(&staged));
     Ok(st)
@@ -134,13 +176,22 @@ pub fn discard(repo: &Repo, tracked: &[String], untracked: &[String]) -> Result<
     Ok(())
 }
 
+/// `git base… paths…`, in as many calls as the command line needs (see [`PATHS_PER_CALL`]).
 fn with_paths(repo: &Repo, base: &[&str], paths: &[String]) -> Result<(), String> {
-    if paths.is_empty() {
-        return Ok(());
+    let mut rest = paths;
+    while !rest.is_empty() {
+        let mut len = 0;
+        let n = rest.iter().take_while(|p| {
+            len += p.len() + 3;
+            len <= PATHS_PER_CALL
+        });
+        let n = n.count().max(1);
+        let mut args: Vec<&str> = base.to_vec();
+        args.extend(rest[..n].iter().map(String::as_str));
+        repo.git_write(&args)?;
+        rest = &rest[n..];
     }
-    let mut args: Vec<&str> = base.to_vec();
-    args.extend(paths.iter().map(String::as_str));
-    repo.git(&args).map(|_| ())
+    Ok(())
 }
 
 /// Commits what's staged (`all`: stages everything first). Returns the new commit's short hash.
@@ -149,7 +200,8 @@ pub fn commit(repo: &Repo, message: &str, amend: bool, all: bool) -> Result<Stri
         return Err("Write a commit message first.".into());
     }
     if all {
-        repo.git(&["add", "--all"])?;
+        // The project folder's changes, not the whole repo's when it's a folder inside one.
+        repo.git_write(&["add", "--all", "--", "."])?;
     }
     let mut args = vec!["commit", "-q", "-F", "-"];
     if amend {
@@ -158,7 +210,7 @@ pub fn commit(repo: &Repo, message: &str, amend: bool, all: bool) -> Result<Stri
             args = vec!["commit", "-q", "--amend", "--no-edit"];
         }
     }
-    repo.git_with(&args, Some(message.as_bytes()), QUICK)?;
+    repo.git_with(&args, Some(message.as_bytes()), WRITE)?;
     Ok(repo.git(&["rev-parse", "--short", "HEAD"])?.trim().to_string())
 }
 
@@ -191,7 +243,7 @@ pub fn switch(repo: &Repo, branch: &str, create: bool) -> Result<(), String> {
         return Err("not a branch name".into());
     }
     let args: Vec<&str> = if create { vec!["switch", "-c", branch] } else { vec!["switch", branch] };
-    repo.git(&args).map(|_| ())
+    repo.git_write(&args).map(|_| ())
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
@@ -204,14 +256,25 @@ pub enum SyncOp {
     Sync,
 }
 
+/// The branch's upstream (`origin/feat`), if it has one.
+pub(crate) fn upstream(repo: &Repo) -> Option<String> {
+    repo.git(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).ok().map(|u| u.trim().to_string()).filter(|u| !u.is_empty())
+}
+
+/// Whether a plain `git push` goes where the user means: the upstream is the branch of the same
+/// name. A branch made from `origin/main` can track it, and git then refuses a plain push.
+fn pushes_to_own_name(repo: &Repo, upstream: &str) -> bool {
+    let local = repo.git(&["rev-parse", "--abbrev-ref", "HEAD"]).map(|b| b.trim().to_string()).unwrap_or_default();
+    upstream.split_once('/').is_some_and(|(_, name)| name == local)
+}
+
 pub fn sync(repo: &Repo, op: SyncOp) -> Result<String, String> {
-    let has_upstream = repo.git(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).is_ok();
-    let push = |repo: &Repo| {
-        if has_upstream {
-            repo.git_with(&["push"], None, NETWORK)
-        } else {
-            repo.git_with(&["push", "-u", "origin", "HEAD"], None, NETWORK)
-        }
+    let upstream = upstream(repo);
+    let has_upstream = upstream.is_some();
+    let push = |repo: &Repo| match &upstream {
+        Some(u) if pushes_to_own_name(repo, u) => repo.git_with(&["push"], None, NETWORK),
+        // No upstream, or one under another name: publish this branch under its own.
+        _ => repo.git_with(&["push", "-u", "origin", "HEAD"], None, NETWORK),
     };
     match op {
         SyncOp::Fetch => repo.git_with(&["fetch", "--prune"], None, NETWORK),
@@ -287,7 +350,8 @@ pub fn grep(repo: &Repo, pattern: &str, limit: usize) -> Result<Vec<GrepHit>, St
     if pattern.is_empty() {
         return Ok(vec![]);
     }
-    let mut args = vec!["grep", "-n", "-I", "--no-color", "--untracked", "-F", "--full-name"];
+    // Paths from the project folder, which is where they're opened from.
+    let mut args = vec!["grep", "-n", "-I", "--no-color", "--untracked", "-F"];
     if !pattern.chars().any(char::is_uppercase) {
         args.push("-i");
     }
@@ -350,11 +414,12 @@ pub fn commit_context(repo: &Repo, max: usize) -> Result<String, String> {
         vec!["diff"]
     };
     let stat = repo.git(&[range.clone(), vec!["--stat"]].concat()).unwrap_or_default();
-    let diff = repo.git(&[range, vec!["--no-color", "--no-ext-diff"]].concat())?;
+    // One line of context is enough to say what changed, and fewer tokens than git's three.
+    let diff = repo.git(&[range, vec!["--no-color", "--no-ext-diff", "-U1"]].concat())?;
     out.push_str(if staged { "The staged changes:\n" } else { "The changes:\n" });
     out.push_str(stat.trim_end());
     out.push_str("\n\n");
-    out.push_str(&diff);
+    out.push_str(&trim_diff_for_message(&diff, PER_FILE));
     if !staged {
         let new: Vec<&str> = st.untracked.iter().map(|c| c.path.as_str()).collect();
         for path in new.iter().take(12) {
@@ -379,6 +444,68 @@ pub fn commit_context(repo: &Repo, max: usize) -> Result<String, String> {
         out.push_str("\n…(cut)\n");
     }
     Ok(out)
+}
+
+/// Most of one file's diff that goes into a commit-message prompt.
+const PER_FILE: usize = 6 * 1024;
+
+/// Lockfiles and minified or generated files: their diffs say nothing a commit message needs
+/// (the stat above already lists them) and can push the real changes past the prompt's cap.
+fn generated(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name.ends_with(".lock")
+        || matches!(
+            name,
+            "package-lock.json"
+                | "pnpm-lock.yaml"
+                | "yarn.lock"
+                | "bun.lockb"
+                | "go.sum"
+                | "composer.lock"
+                | "Gemfile.lock"
+                | "poetry.lock"
+        )
+        || name.ends_with(".min.js")
+        || name.ends_with(".min.css")
+        || name.ends_with(".map")
+        || name.ends_with(".snap")
+}
+
+/// A diff for a commit-message prompt: generated files as one line each, every other file's
+/// part cut to `per_file` bytes.
+pub fn trim_diff_for_message(diff: &str, per_file: usize) -> String {
+    let mut out = String::with_capacity(diff.len().min(64 * 1024));
+    let mut parts = diff.split("\ndiff --git ").peekable();
+    let mut first = true;
+    while let Some(part) = parts.next() {
+        let part = if first { part.strip_prefix("diff --git ").unwrap_or(part) } else { part };
+        first = false;
+        if part.trim().is_empty() {
+            continue;
+        }
+        // `a/path b/path` on the header line.
+        let header = part.lines().next().unwrap_or("");
+        let path = header.rsplit(" b/").next().unwrap_or(header);
+        if generated(path) {
+            out.push_str(&format!("diff --git {header}\n(generated file changed; not shown)\n"));
+            continue;
+        }
+        out.push_str("diff --git ");
+        if part.len() > per_file {
+            let mut cut = per_file;
+            while !part.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            out.push_str(&part[..cut]);
+            out.push_str("\n…(rest of this file's changes cut)\n");
+        } else {
+            out.push_str(part);
+            if parts.peek().is_some() {
+                out.push('\n');
+            }
+        }
+    }
+    out
 }
 
 /// An image file's type, from its extension (`None`: not one oah shows).

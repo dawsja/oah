@@ -148,7 +148,7 @@ function Row({ item }: { item: Item }) {
     case "user":
       return (
         <div className="flex justify-end">
-          <div className="rounded-2xl max-w-[85%] border bg-user px-3.5 py-2.5 text-[length:var(--oah-chat-size,14px)] leading-relaxed whitespace-pre-wrap select-text">
+          <div className="rounded-2xl max-w-[85%] border bg-user px-3.5 py-2.5 text-[length:var(--oah-chat-size,14px)] leading-relaxed whitespace-pre-wrap select-text [overflow-wrap:anywhere]">
             {item.text}
             <MessageImages files={item.files} count={item.images.length} />
           </div>
@@ -156,6 +156,23 @@ function Row({ item }: { item: Item }) {
       )
     case "assistant":
       return <AssistantText text={item.text} />
+    case "question": {
+      // What the agent asked and what it was told (live questions are the card above the box).
+      if (!item.answers) return null
+      const answers = item.answers
+      return (
+        <div className="flex flex-col gap-1 border-l-2 border-input pl-3 text-[12.5px] text-muted-foreground">
+          {item.request.questions.map((q) => {
+            const a = answers[q.id] ?? []
+            return (
+              <div key={q.id} className="select-text [overflow-wrap:anywhere]">
+                <span className="text-foreground/80">{q.question}</span> → {a.length ? a.join(", ") : <span className="text-faint">skipped</span>}
+              </div>
+            )
+          })}
+        </div>
+      )
+    }
     case "approval":
       if (item.decision && item.request.kind === "plan" && item.request.detail) return <PlanCard text={item.request.detail} decision={item.decision} />
       return item.decision ? (
@@ -169,7 +186,12 @@ function Row({ item }: { item: Item }) {
         <div className="flex items-center gap-2 font-mono text-[11px] text-faint">
           {item.interrupted ? <span className="text-warn">Interrupted</span> : null}
           {item.durationMs ? <span>{formatDuration(item.durationMs)}</span> : null}
-          {item.usage ? <span>· {formatTokens(item.usage.inputTokens + item.usage.outputTokens + item.usage.cacheReadTokens + item.usage.cacheWriteTokens)} tokens</span> : null}
+          {item.usage ? (
+            <span title={`${item.usage.inputTokens} in · ${item.usage.outputTokens} out · ${item.usage.cacheWriteTokens} written to cache · ${item.usage.cacheReadTokens} read from cache`}>
+              · {formatTokens(item.usage.inputTokens + item.usage.outputTokens + item.usage.cacheWriteTokens)} tokens
+              {item.usage.cacheReadTokens ? ` · ${formatTokens(item.usage.cacheReadTokens)} cached` : null}
+            </span>
+          ) : null}
           {item.costUsd ? <span>· ${item.costUsd.toFixed(2)}</span> : null}
         </div>
       )

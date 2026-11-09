@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 import { markdownUrlTransform } from "@/lib/images"
+import { linkTarget } from "@/lib/links"
 import { MarkdownImage } from "./MarkdownImage"
 import { useTouch } from "./touch"
 
@@ -14,6 +15,15 @@ function text(node: ReactNode): string {
   if (Array.isArray(node)) return node.map(text).join("")
   if (node && typeof node === "object" && "props" in node) return text((node as { props: { children?: ReactNode } }).props.children)
   return ""
+}
+
+/** A link in an answer: web links in the browser, project files in the viewer, nothing else.
+ *  The app's own window never navigates. */
+function openLink(e: React.MouseEvent, href: string | undefined) {
+  e.preventDefault()
+  const t = linkTarget(href)
+  if (t.kind === "url") void import("@tauri-apps/plugin-opener").then((o) => o.openUrl(t.url)).catch(() => undefined)
+  else if (t.kind === "file") void import("@/store/git").then((g) => g.useGit.getState().open({ kind: "file", path: t.path, line: t.line })).catch(() => undefined)
 }
 
 /** A fenced code block: language label and a copy button over the code. */
@@ -54,7 +64,7 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
           pre: Pre,
           img: ({ src, alt }) => <MarkdownImage src={typeof src === "string" ? src : undefined} alt={alt} />,
           a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer">
+            <a href={href} rel="noreferrer" onClick={(e) => openLink(e, href)}>
               {children}
             </a>
           ),

@@ -1,6 +1,7 @@
 // App-wide state: settings (saved through Rust), what's on screen, and the layout.
 
 import { create } from "zustand"
+import { toast } from "sonner"
 import { ipc } from "@/lib/ipc"
 import { BASE_UI_SIZE, type AppInfo, type Appearance, type Location, type Settings } from "@/lib/types"
 
@@ -32,7 +33,8 @@ type AppStore = {
   load(): Promise<void>
   /** Applies `edit` to a copy of the settings and saves it. */
   update(edit: (s: Settings) => void): Promise<void>
-  addProject(location: Location, path: string): Promise<void>
+  /** Adds a project and opens it; false (after saying why) when it couldn't be added. */
+  addProject(location: Location, path: string): Promise<boolean>
   removeProject(id: string): Promise<void>
   openSettings(section?: SettingsSection): void
   closeSettings(): void
@@ -51,6 +53,11 @@ function loadLayout(): Layout {
   }
 }
 
+/** The settings as last saved, to go back to when a save fails. */
+let lastSaved: Settings | null = null
+let saveSeq = 0
+let saving: Promise<void> = Promise.resolve()
+
 export const useApp = create<AppStore>((set, get) => ({
   info: null,
   settings: null,
@@ -67,9 +74,11 @@ export const useApp = create<AppStore>((set, get) => ({
       const [info, settings] = await Promise.all([ipc.appInfo(), ipc.settingsGet()])
       const last = localStorage.getItem("oah.project")
       const projectId = settings.projects.find((p) => p.id === last)?.id ?? settings.projects[0]?.id ?? null
-      set({ info, settings, projectId })
+      lastSaved = settings
+      set({ info, settings, projectId, error: null })
       import("@/lib/updates").then((u) => u.updater.start(info.bundle))
       applyAppearance(settings.appearance)
+      if (info.settingsProblem) toast.error("Settings were reset", { description: info.settingsProblem, duration: Infinity })
     } catch (e) {
       set({ error: String(e) })
     }
@@ -81,32 +90,68 @@ export const useApp = create<AppStore>((set, get) => ({
     const next = structuredClone(cur)
     edit(next)
     set({ settings: next })
-    applyAppearance(next.appearance)
-    try {
-      set({ settings: await ipc.settingsSet(next) })
-    } catch (e) {
-      set({ settings: cur, error: String(e) })
-      applyAppearance(cur.appearance)
-    }
+    if (JSON.stringify(next.appearance) !== JSON.stringify(cur.appearance)) applyAppearance(next.appearance)
+    // Saves go one at a time, each with the settings as they are by then, and only the newest
+    // answer is applied: quick edits can't land out of order or undo each other.
+    const seq = ++saveSeq
+    saving = saving.then(async () => {
+      if (seq !== saveSeq) return
+      const want = get().settings
+      if (!want) return
+      try {
+        const saved = await ipc.settingsSet(want)
+        lastSaved = saved
+        if (seq === saveSeq) set({ settings: saved })
+      } catch (e) {
+        if (seq !== saveSeq) return
+        const before = get().settings
+        set({ settings: lastSaved })
+        if (lastSaved && JSON.stringify(before?.appearance) !== JSON.stringify(lastSaved.appearance)) applyAppearance(lastSaved.appearance)
+        toast.error("Couldn't save settings", { description: String(e) })
+      }
+    })
+    await saving
   },
 
   async addProject(location, path) {
     try {
       const [settings, project] = await ipc.projectAdd(location, path)
-      set({ settings, projectId: project.id, error: null })
+      lastSaved = settings
+      // A new chat starts in the new project, not in a worktree of the one before.
+      set({ settings, projectId: project.id, chatId: null, draftCwd: null, view: "chat", error: null })
+      import("./git").then((m) => m.useGit.getState().open(null))
       localStorage.setItem("oah.project", project.id)
+      return true
     } catch (e) {
-      set({ error: String(e) })
+      toast.error("Couldn't add the project", { description: String(e) })
+      return false
     }
   },
 
   async removeProject(id) {
+    const project = get().settings?.projects.find((p) => p.id === id)
+    if (!project) return
+    const { useChats } = await import("./chats")
+    const chats = useChats.getState().metas.filter((m) => m.projectId === id)
+    const { confirmAction } = await import("@/components/Prompt")
+    const ok = await confirmAction({
+      title: `Remove ${project.name} from oah?`,
+      description: `The folder isn't touched.${chats.length ? ` Its ${chats.length === 1 ? "chat is" : `${chats.length} chats are`} kept and come back if you add the folder again; any agent running in them stops.` : ""}`,
+      confirm: "Remove",
+      danger: true,
+    })
+    if (!ok) return
     try {
       const settings = await ipc.projectRemove(id)
-      const projectId = get().projectId === id ? (settings.projects[0]?.id ?? null) : get().projectId
-      set({ settings, projectId })
+      lastSaved = settings
+      if (get().projectId === id) {
+        import("./git").then((m) => m.useGit.getState().open(null))
+        set({ settings, projectId: settings.projects[0]?.id ?? null, chatId: null, draftCwd: null })
+      } else {
+        set({ settings })
+      }
     } catch (e) {
-      set({ error: String(e) })
+      toast.error("Couldn't remove the project", { description: String(e) })
     }
   },
 

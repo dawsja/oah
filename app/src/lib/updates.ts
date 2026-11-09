@@ -32,8 +32,8 @@ export class Updater {
 
   constructor(
     private changed: () => void,
-    /** Stop the agents before the app is replaced. */
-    private stopEngine: () => Promise<void>,
+    /** Stop the agents before the app is replaced; false: the user would rather not now. */
+    private stopEngine: () => Promise<boolean>,
     private auto: () => boolean,
   ) {}
 
@@ -97,9 +97,9 @@ export class Updater {
     const u = this.update
     if (this.state.kind !== "ready" || !u) return
     const { version, installed } = this.state
+    if (!(await this.stopEngine())) return
     this.set({ kind: "installing", version })
     try {
-      await this.stopEngine()
       if (!installed) {
         // Automatic updates off: it hasn't been downloaded yet.
         if (!this.fetched) await u.download()
@@ -123,6 +123,6 @@ import { create } from "zustand"
 export const useUpdates = create<{ state: UpdateState }>(() => ({ state: { kind: "off" } }))
 export const updater = new Updater(
   () => useUpdates.setState({ state: updater.state }),
-  async () => {},
+  () => import("./quit").then((q) => q.stopAgentsForQuit("Restart")),
   () => true,
 )

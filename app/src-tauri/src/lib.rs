@@ -47,7 +47,12 @@ struct AppInfo {
     home: String,
     /// How this copy was installed (`nsis`, `deb`, `appimage`…); none in development.
     bundle: Option<&'static str>,
+    /// The settings file couldn't be read at start, and what was done with it.
+    settings_problem: Option<String>,
 }
+
+/// Set once at start when settings.json couldn't be read.
+static SETTINGS_PROBLEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 fn bundle_name() -> Option<&'static str> {
     use tauri::utils::config::BundleType;
@@ -59,6 +64,17 @@ fn bundle_name() -> Option<&'static str> {
         BundleType::Msi => "msi",
         _ => return None,
     })
+}
+
+/// Runs `f` on a worker thread. Tauri runs plain (non-async) commands on the main thread, so
+/// one that waits on the disk, the keychain or an agent would freeze the window meanwhile.
+async fn off_main<T: Send + 'static>(app: AppHandle, f: impl FnOnce(&AppHandle, &AppState) -> T + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        f(&app, &state)
+    })
+    .await
+    .map_err(err)
 }
 
 #[tauri::command]
@@ -75,6 +91,7 @@ fn app_info() -> AppInfo {
         data_dir: paths::app_dir().to_string_lossy().into_owned(),
         home: paths::home_dir().to_string_lossy().into_owned(),
         bundle: bundle_name(),
+        settings_problem: SETTINGS_PROBLEM.get().cloned(),
     }
 }
 
@@ -85,39 +102,59 @@ fn settings_get(state: State<AppState>) -> Settings {
 
 /// Replaces the settings with `settings` and saves them.
 #[tauri::command]
-fn settings_set(state: State<AppState>, mut settings: Settings) -> CmdResult<Settings> {
-    let before = state.settings.lock().unwrap().clone();
-    // Voice on/off follows the model download (voice.rs), not the page's copy.
-    settings.voice.enabled = before.voice.enabled;
-    // Phones: on/off, port and paired devices change only through the remote_* commands.
-    settings.remote = before.remote.clone();
-    secrets::stash(&mut settings, &before)?;
-    settings.save(&paths::settings_file()).map_err(err)?;
-    *state.settings.lock().unwrap() = settings.clone();
-    if settings.mcp != before.mcp {
-        mcp::apply_http(&settings.mcp);
-    }
-    Ok(settings)
+async fn settings_set(app: AppHandle, mut settings: Settings) -> CmdResult<Settings> {
+    off_main(app, move |_, state| {
+        let before = state.settings.lock().unwrap().clone();
+        // Voice on/off follows the model download (voice.rs), not the page's copy.
+        settings.voice.enabled = before.voice.enabled;
+        // Phones: on/off, port and paired devices change only through the remote_* commands.
+        settings.remote = before.remote.clone();
+        secrets::stash(&mut settings, &before)?;
+        settings.save(&paths::settings_file()).map_err(err)?;
+        *state.settings.lock().unwrap() = settings.clone();
+        if settings.mcp != before.mcp {
+            mcp::apply_http(&settings.mcp);
+        }
+        Ok(settings)
+    })
+    .await?
 }
 
 #[tauri::command]
-fn project_add(state: State<AppState>, location: Location, path: String) -> CmdResult<(Settings, Project)> {
-    let mut s = state.settings.lock().unwrap();
-    let mut next = s.clone();
-    let project = next.add_project(location, &path).map_err(err)?;
-    next.save(&paths::settings_file()).map_err(err)?;
-    *s = next.clone();
-    Ok((next, project))
+async fn project_add(app: AppHandle, location: Location, path: String) -> CmdResult<(Settings, Project)> {
+    off_main(app, move |app, state| {
+        let mut s = state.settings.lock().unwrap();
+        let mut next = s.clone();
+        let project = next.add_project(location, &path).map_err(err)?;
+        next.save(&paths::settings_file()).map_err(err)?;
+        *s = next.clone();
+        drop(s);
+        // The folder was a project before and was removed: its chats come back with it.
+        if state.chats.adopt(&next, &project) > 0 {
+            state.chats.changed(app);
+        }
+        Ok((next, project))
+    })
+    .await?
 }
 
 #[tauri::command]
-fn project_remove(state: State<AppState>, id: String) -> CmdResult<Settings> {
-    let mut s = state.settings.lock().unwrap();
-    let mut next = s.clone();
-    next.remove_project(&id);
-    next.save(&paths::settings_file()).map_err(err)?;
-    *s = next.clone();
-    Ok(next)
+async fn project_remove(app: AppHandle, id: String) -> CmdResult<Settings> {
+    off_main(app, move |app, state| {
+        // Its agents stop (nothing would show them); its chats stay on disk, and come back if the
+        // folder is added again.
+        for chat in state.chats.store.list().into_iter().filter(|c| c.project_id == id) {
+            state.chats.close(&chat.id);
+        }
+        state.chats.changed(app);
+        let mut s = state.settings.lock().unwrap();
+        let mut next = s.clone();
+        next.remove_project(&id);
+        next.save(&paths::settings_file()).map_err(err)?;
+        *s = next.clone();
+        Ok(next)
+    })
+    .await?
 }
 
 /// Hosts named in `~/.ssh/config`.
@@ -304,27 +341,39 @@ fn provider_login(state: State<AppState>, kind: AgentKind, location: Option<Loca
 // ---- Chats -----------------------------------------------------------------------------------
 
 #[tauri::command]
-fn chat_list(state: State<AppState>) -> Vec<ChatMeta> {
-    state.chats.store.list()
+async fn chat_list(app: AppHandle) -> Vec<ChatMeta> {
+    off_main(app, move |_, state| state.chats.store.list()).await.unwrap_or_default()
 }
 
 /// What each chat waits on the user for (`approval`, `plan` or `question`), whether or not the
 /// window has it open: a phone or MCP may have started it.
 #[tauri::command]
-fn chat_waiting(state: State<AppState>) -> std::collections::BTreeMap<String, &'static str> {
-    state.chats.waiting()
+async fn chat_waiting(app: AppHandle) -> std::collections::BTreeMap<String, &'static str> {
+    off_main(app, move |_, state| state.chats.waiting()).await.unwrap_or_default()
 }
 
 /// Chats with background work running (commands, subagents), whether or not the window has
 /// them open.
+/// Chats mid-turn, whether or not the window has them open (a phone or MCP may drive them).
 #[tauri::command]
-fn chat_background(state: State<AppState>) -> Vec<String> {
-    state.chats.background()
+async fn chat_busy(app: AppHandle) -> Vec<String> {
+    off_main(app, |_, state| state.chats.busy()).await.unwrap_or_default()
+}
+
+/// Stops every agent, keeping what they'd streamed (before an update restarts the app).
+#[tauri::command]
+async fn chats_stop_all(app: AppHandle) -> CmdResult<()> {
+    off_main(app, |_, state| state.chats.stop_all()).await
 }
 
 #[tauri::command]
-fn chat_stop_task(state: State<AppState>, chat_id: String, task_id: String) -> CmdResult<()> {
-    state.chats.stop_task(&chat_id, &task_id)
+async fn chat_background(app: AppHandle) -> Vec<String> {
+    off_main(app, move |_, state| state.chats.background()).await.unwrap_or_default()
+}
+
+#[tauri::command]
+async fn chat_stop_task(app: AppHandle, chat_id: String, task_id: String) -> CmdResult<()> {
+    off_main(app, move |_, state| state.chats.stop_task(&chat_id, &task_id)).await?
 }
 
 /// Chats whose text has every word of `query`, newest first.
@@ -341,27 +390,29 @@ async fn chat_search(app: AppHandle, query: String) -> CmdResult<Vec<oah_mcp::se
 /// The chat as Markdown for people (an issue, a PR description): its title, what was asked and
 /// answered, one line per tool, failures' output.
 #[tauri::command]
-fn chat_markdown(state: State<AppState>, chat_id: String) -> CmdResult<String> {
-    let meta = state.chats.store.get(&chat_id).map_err(err)?;
-    let snapshot = state.chats.snapshot(&chat_id)?;
-    let opts = oah_mcp::transcript::Options { last_turns: 0, tool_output: false, request_ids: false };
-    let body = oah_mcp::transcript::render(&snapshot.events, &opts);
-    let title = if meta.title.trim().is_empty() { "Chat" } else { meta.title.trim() };
-    Ok(format!("# {title}\n\n{body}\n"))
+async fn chat_markdown(app: AppHandle, chat_id: String) -> CmdResult<String> {
+    off_main(app, move |_, state| {
+        let meta = state.chats.store.get(&chat_id).map_err(err)?;
+        let snapshot = state.chats.snapshot(&chat_id)?;
+        let opts = oah_mcp::transcript::Options { last_turns: 0, tool_output: false, request_ids: false };
+        let body = oah_mcp::transcript::render(&snapshot.events, &opts);
+        let title = if meta.title.trim().is_empty() { "Chat" } else { meta.title.trim() };
+        Ok(format!("# {title}\n\n{body}\n"))
+    })
+    .await?
 }
 
 /// A new, empty chat in `project_id` (its agent starts with the first message).
 #[tauri::command]
-fn chat_create(
+async fn chat_create(
     app: AppHandle,
-    state: State<AppState>,
     project_id: String,
     agent: Option<AgentKind>,
     model: Option<String>,
     effort: Option<String>,
     cwd: Option<String>,
 ) -> CmdResult<ChatMeta> {
-    create_chat(&app, &state, NewChat { project_id, agent, model, effort, cwd })
+    off_main(app, move |app, state| create_chat(app, state, NewChat { project_id, agent, model, effort, cwd })).await?
 }
 
 /// What `chat_create` (and a phone's `chat.create`) takes.
@@ -385,8 +436,8 @@ pub(crate) fn create_chat(app: &AppHandle, state: &AppState, c: NewChat) -> CmdR
 
 /// The chat as it is now: its log, the text still streaming, and whether a turn is running.
 #[tauri::command]
-fn chat_snapshot(state: State<AppState>, chat_id: String) -> CmdResult<chats::Snapshot> {
-    state.chats.snapshot(&chat_id)
+async fn chat_snapshot(app: AppHandle, chat_id: String) -> CmdResult<chats::Snapshot> {
+    off_main(app, move |_, state| state.chats.snapshot(&chat_id)).await?
 }
 
 #[tauri::command]
@@ -414,33 +465,33 @@ async fn chat_compact(app: AppHandle, chat_id: String, instructions: String, per
 
 /// `/clear`: a fresh agent session from the next message.
 #[tauri::command]
-fn chat_clear(app: AppHandle, state: State<AppState>, chat_id: String) -> CmdResult<()> {
-    state.chats.clear(&app, &chat_id)
+async fn chat_clear(app: AppHandle, chat_id: String) -> CmdResult<()> {
+    off_main(app, move |app, state| state.chats.clear(app, &chat_id)).await?
 }
 
 #[tauri::command]
-fn chat_interrupt(state: State<AppState>, chat_id: String) -> CmdResult<()> {
-    state.chats.interrupt(&chat_id)
+async fn chat_interrupt(app: AppHandle, chat_id: String) -> CmdResult<()> {
+    off_main(app, move |_, state| state.chats.interrupt(&chat_id)).await?
 }
 
 #[tauri::command]
-fn chat_answer(state: State<AppState>, chat_id: String, request_id: String, decision: Decision) -> CmdResult<()> {
-    state.chats.answer(&chat_id, &request_id, decision)
+async fn chat_answer(app: AppHandle, chat_id: String, request_id: String, decision: Decision) -> CmdResult<()> {
+    off_main(app, move |_, state| state.chats.answer(&chat_id, &request_id, decision)).await?
 }
 
 #[tauri::command]
-fn chat_answer_question(
-    state: State<AppState>,
+async fn chat_answer_question(
+    app: AppHandle,
     chat_id: String,
     request_id: String,
     answers: std::collections::BTreeMap<String, Vec<String>>,
 ) -> CmdResult<()> {
-    state.chats.answer_question(&chat_id, &request_id, answers)
+    off_main(app, move |_, state| state.chats.answer_question(&chat_id, &request_id, answers)).await?
 }
 
 #[tauri::command]
-fn chat_set_model(state: State<AppState>, chat_id: String, model: String) -> CmdResult<ChatMeta> {
-    state.chats.set_model(&chat_id, &model)
+async fn chat_set_model(app: AppHandle, chat_id: String, model: String) -> CmdResult<ChatMeta> {
+    off_main(app, move |_, state| state.chats.set_model(&chat_id, &model)).await?
 }
 
 /// An image saved with a chat, as a `data:` URL.
@@ -450,37 +501,49 @@ async fn chat_image(app: AppHandle, chat_id: String, file: String) -> CmdResult<
 }
 
 #[tauri::command]
-fn chat_set_effort(state: State<AppState>, chat_id: String, effort: String) -> CmdResult<ChatMeta> {
-    state.chats.set_effort(&chat_id, &effort)
+async fn chat_set_effort(app: AppHandle, chat_id: String, effort: String) -> CmdResult<ChatMeta> {
+    off_main(app, move |_, state| state.chats.set_effort(&chat_id, &effort)).await?
 }
 
 #[tauri::command]
-fn chat_set_permission(app: AppHandle, state: State<AppState>, chat_id: String, mode: PermissionMode) -> CmdResult<()> {
-    state.chats.set_permission(&app, &chat_id, mode, false)
+async fn chat_set_permission(app: AppHandle, chat_id: String, mode: PermissionMode) -> CmdResult<()> {
+    off_main(app, move |app, state| state.chats.set_permission(app, &chat_id, mode, false)).await?
 }
 
 #[tauri::command]
-fn chat_sleep(app: AppHandle, state: State<AppState>, chat_id: String) -> CmdResult<()> {
-    state.chats.sleep(&app, &chat_id, std::time::Duration::ZERO)
+async fn chat_sleep(app: AppHandle, chat_id: String) -> CmdResult<()> {
+    off_main(app, move |app, state| state.chats.sleep(app, &chat_id, std::time::Duration::ZERO)).await?
 }
 
 #[tauri::command]
-fn chat_delete(app: AppHandle, state: State<AppState>, chat_id: String) -> CmdResult<()> {
-    state.chats.delete(&chat_id)?;
-    state.chats.changed(&app);
-    Ok(())
+async fn chat_delete(app: AppHandle, chat_id: String) -> CmdResult<()> {
+    off_main(app, move |app, state| {
+        state.chats.delete(&chat_id)?;
+        state.chats.changed(app);
+        Ok(())
+    })
+    .await?
 }
 
 #[tauri::command]
-fn chat_rename(app: AppHandle, state: State<AppState>, chat_id: String, title: String) -> CmdResult<ChatMeta> {
-    let m = state.chats.edit(&chat_id, |m| m.title = title.trim().to_string())?;
-    state.chats.changed(&app);
-    Ok(m)
+async fn chat_rename(app: AppHandle, chat_id: String, title: String) -> CmdResult<ChatMeta> {
+    off_main(app, move |app, state| {
+        let m = state.chats.edit(&chat_id, |m| m.title = title.trim().to_string())?;
+        state.chats.changed(app);
+        Ok(m)
+    })
+    .await?
 }
 
 #[tauri::command]
-fn chat_pin(state: State<AppState>, chat_id: String, pinned: bool) -> CmdResult<ChatMeta> {
-    state.chats.edit(&chat_id, |m| m.pinned = pinned)
+async fn chat_pin(app: AppHandle, chat_id: String, pinned: bool) -> CmdResult<ChatMeta> {
+    off_main(app, move |app, state| {
+        let m = state.chats.edit(&chat_id, |m| m.pinned = pinned)?;
+        // Phones list pinned chats first too.
+        state.chats.changed(app);
+        Ok(m)
+    })
+    .await?
 }
 
 /// `oah mcp`: passes stdio through to the running app's MCP socket; the exit code.
@@ -490,16 +553,28 @@ pub fn mcp_bridge() -> i32 {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut settings = Settings::load(&paths::settings_file()).unwrap_or_else(|e| {
-        eprintln!("oah: {e}; starting with default settings");
-        Settings::default()
-    });
+    // A file that can't be read is moved aside and reported, never saved over.
+    let (mut settings, problem) = Settings::load_or_recover(&paths::settings_file());
+    if let Some(p) = problem {
+        eprintln!("oah: {p}");
+        let _ = SETTINGS_PROBLEM.set(p);
+    }
     // Values typed before the keychain existed move there now.
     let before = settings.clone();
     if secrets::stash(&mut settings, &before).is_ok() && settings != before {
         let _ = settings.save(&paths::settings_file());
     }
     tauri::Builder::default()
+        // One oah at a time: a second launch shows the first window instead. Two would each
+        // keep their own copy of the settings and save over each other's changes, and fight
+        // over the phone port and the MCP socket.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -510,7 +585,11 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState {
             settings: Mutex::new(settings),
-            chats: chats::Chats::new(ChatStore::new(paths::chats_dir())),
+            chats: chats::Chats::new({
+                let store = ChatStore::new(paths::chats_dir());
+                store.prune_orphans();
+                store
+            }),
             terminals: terminal::Terminals::default(),
             voice: voice::Voice::default(),
             remote: remote::Remote::default(),
@@ -558,6 +637,8 @@ pub fn run() {
             chat_list,
             chat_waiting,
             chat_background,
+            chat_busy,
+            chats_stop_all,
             chat_stop_task,
             chat_search,
             chat_markdown,

@@ -1,6 +1,6 @@
 // Plan limits by location, shared by the title bar and Settings → Usage.
 
-import { useCallback } from "react"
+import { useCallback, useRef } from "react"
 import { create } from "zustand"
 import { ipc } from "@/lib/ipc"
 import { LIMIT_AGENTS, type AgentKind, type LimitWindow, type Limits, type Location, type Settings } from "@/lib/types"
@@ -76,7 +76,11 @@ export function useUsageAt(location: Location) {
   const key = usageLocationKey(location)
   const entry = useUsage((s) => s.entries[key] ?? EMPTY)
   const fetch = useUsage((s) => s.load)
-  const load = useCallback((force = false) => fetch(location, force), [fetch, location])
+  // Keyed by where, not by the location object: every settings edit makes a new one, and a
+  // refetch is a CLI start and an HTTP call per agent.
+  const at = useRef(location)
+  at.current = location
+  const load = useCallback((force = false) => fetch(at.current, force), [fetch, key])
   return { ...entry, load }
 }
 

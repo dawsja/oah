@@ -168,7 +168,7 @@ function HttpGroup({ status, token, onToken }: { status: McpStatus | null; token
     <Group title="HTTP">
       <Row
         label="Serve over HTTP"
-        description="Clients on this computer or your private network connect to a URL with a token instead of running `oah mcp`."
+        description="Clients connect to a URL with a token instead of running `oah mcp`."
       >
         <Switch checked={mcp.http} onCheckedChange={(v) => update((s) => void (s.mcp.http = v))} />
       </Row>
@@ -191,7 +191,13 @@ function HttpGroup({ status, token, onToken }: { status: McpStatus | null; token
             }
             description={state === "error" ? <span className="text-red">{http!.error}</span> : <span className="font-mono text-[11px] break-all">{urls.join(" · ")}</span>}
           />
-          <Row label="Port" description="On 127.0.0.1 and this computer's private network addresses.">
+          <Row
+            label="Other devices"
+            description="Also reachable from your private network (another computer, a VM, Tailscale), not just this computer. The connection isn't encrypted; the token keeps others out, so only turn this on for networks you trust."
+          >
+            <Switch checked={mcp.httpLan ?? mcp.http} onCheckedChange={(v) => update((s) => void (s.mcp.httpLan = v))} />
+          </Row>
+          <Row label="Port" description={(mcp.httpLan ?? mcp.http) ? "On 127.0.0.1 and this computer's private network addresses." : "On 127.0.0.1."}>
             <Input
               type="number"
               min={1024}

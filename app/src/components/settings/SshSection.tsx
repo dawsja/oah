@@ -38,8 +38,7 @@ export function SshSection() {
   const addFolder = async (host: string) => {
     const path = await pickRemoteFolder({ kind: "ssh", host })
     if (path) {
-      await addProject({ kind: "ssh", host }, path)
-      useApp.getState().closeSettings()
+      if (await addProject({ kind: "ssh", host }, path)) useApp.getState().closeSettings()
     }
   }
 

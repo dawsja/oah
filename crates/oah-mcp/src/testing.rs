@@ -105,8 +105,16 @@ impl Host for Fake {
     fn set_effort(&self, _: &str, _: &str) -> HostResult<()> {
         Ok(())
     }
-    fn set_permission(&self, _: &str, _: PermissionMode) -> HostResult<()> {
+    fn set_permission(&self, id: &str, mode: PermissionMode) -> HostResult<()> {
+        if let Some(m) = self.chats.lock().unwrap().iter_mut().find(|c| c.id == id) {
+            m.permission = Some(mode);
+        }
         Ok(())
+    }
+    fn permission(&self, id: &str) -> PermissionMode {
+        let chat = self.chats.lock().unwrap().iter().find(|c| c.id == id).cloned();
+        let settings = self.settings.lock().unwrap();
+        chat.and_then(|c| c.permission.or(Some(settings.providers.get(c.agent).permission_mode))).unwrap_or_default()
     }
     fn compact(&self, _: &str, _: &str) -> HostResult<()> {
         Ok(())

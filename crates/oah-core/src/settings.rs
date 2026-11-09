@@ -36,11 +36,24 @@ pub struct Mcp {
     /// Also serve MCP over HTTP (`http://<ip>:<http_port>/mcp`, a bearer token).
     pub http: bool,
     pub http_port: u16,
+    /// HTTP is reachable from other devices on the private network too, not just this
+    /// computer. None: a settings file from before the switch (it was always on then, so it
+    /// stays on where HTTP was already in use).
+    /// (Missing from the file reads as none, not as the default below.)
+    #[serde(default)]
+    pub http_lan: Option<bool>,
+}
+
+impl Mcp {
+    /// Whether HTTP listens on the network as well as on this computer.
+    pub fn lan(&self) -> bool {
+        self.http_lan.unwrap_or(self.http)
+    }
 }
 
 impl Default for Mcp {
     fn default() -> Self {
-        Mcp { enabled: false, allow_full_access: false, allow_delete: false, http: false, http_port: 7421 }
+        Mcp { enabled: false, allow_full_access: false, allow_delete: false, http: false, http_port: 7421, http_lan: Some(false) }
     }
 }
 
@@ -142,6 +155,19 @@ fn agent_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Resu
     Ok(agent_or_none(d)?.unwrap_or(AgentKind::Claude))
 }
 
+/// A value oah doesn't know (written by a newer version) reads as the default, instead of
+/// making the whole file unreadable.
+fn or_default<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned + Default>(d: D) -> std::result::Result<T, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default())
+}
+
+/// A permission mode oah doesn't know (from a newer version) reads as none.
+pub fn permission_or_none<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Option<PermissionMode>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.and_then(|v| serde_json::from_value(v).ok()))
+}
+
 /// An agent oah no longer has reads as none (the Providers default).
 fn agent_or_none<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Option<AgentKind>, D::Error> {
     let v = Option::<serde_json::Value>::deserialize(d)?;
@@ -224,6 +250,7 @@ pub struct Provider {
     pub binary: String,
     /// Empty means the CLI's own default.
     pub default_model: String,
+    #[serde(deserialize_with = "or_default")]
     pub permission_mode: PermissionMode,
     /// Extra environment for the CLI process.
     pub env: Vec<EnvVar>,
@@ -302,6 +329,7 @@ pub enum Theme {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Appearance {
+    #[serde(deserialize_with = "or_default")]
     pub theme: Theme,
     /// The window's zoom, as a base text size in px: 13 is 100%.
     pub ui_font_size: u32,
@@ -413,20 +441,41 @@ impl Settings {
     pub fn load(path: &Path) -> Result<Settings> {
         match std::fs::read_to_string(path) {
             Ok(text) if text.trim().is_empty() => Ok(Settings::default()),
-            Ok(text) => Ok(serde_json::from_str(&text)?),
+            Ok(text) => {
+                let mut s: Settings = serde_json::from_str(&text)?;
+                // Decided once, from what the file had: see `Mcp::http_lan`.
+                if s.mcp.http_lan.is_none() {
+                    s.mcp.http_lan = Some(s.mcp.http);
+                }
+                Ok(s)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
             Err(e) => Err(e.into()),
         }
     }
 
-    /// Writes `path` whole: to a temp file beside it, then renamed over it.
+    /// Reads `path`; one that can't be read is moved aside (kept, never overwritten) and the
+    /// defaults are used. The second value says what happened, for the user.
+    pub fn load_or_recover(path: &Path) -> (Settings, Option<String>) {
+        match Settings::load(path) {
+            Ok(s) => (s, None),
+            Err(e) => {
+                let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                let backup: PathBuf = path.with_extension(format!("json.bad-{stamp}"));
+                let kept = match std::fs::rename(path, &backup) {
+                    Ok(()) => format!("It was kept as {}.", backup.display()),
+                    Err(err) => format!("It couldn't be moved aside ({err}); it's still at {}.", path.display()),
+                };
+                (Settings::default(), Some(format!("Your settings couldn't be read ({e}), so oah started with the defaults. {kept}")))
+            }
+        }
+    }
+
+    /// Writes `path` whole (see [`crate::write_atomic`]).
     pub fn save(&self, path: &Path) -> Result<()> {
         let dir = path.parent().ok_or_else(|| Error::Invalid("settings path has no folder".into()))?;
         std::fs::create_dir_all(dir)?;
-        let tmp: PathBuf = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(self)? + "\n")?;
-        std::fs::rename(&tmp, path)?;
-        Ok(())
+        crate::write_atomic(path, (serde_json::to_string_pretty(self)? + "\n").as_bytes())
     }
 
     /// Adds a project, unless one for the same folder is already there (that one is returned).
@@ -513,6 +562,53 @@ mod tests {
         assert_eq!(s.projects[0].default_agent, None);
         assert_eq!(s.projects[1].default_agent, Some(AgentKind::Codex));
         assert!(!serde_json::to_string(&s).unwrap().contains("acp\""), "saved without the ACP agents");
+    }
+
+    /// MCP over HTTP used to listen on the network always: a file from then keeps that where
+    /// HTTP was on, and everyone else starts on this computer only.
+    #[test]
+    fn mcp_http_stays_on_the_network_only_where_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"mcp": {"enabled": true, "http": true}}"#).unwrap();
+        assert!(Settings::load(&path).unwrap().mcp.lan());
+        std::fs::write(&path, r#"{"mcp": {"enabled": true, "http": false}}"#).unwrap();
+        let s = Settings::load(&path).unwrap();
+        assert!(!s.mcp.lan());
+        let mut later = s.clone();
+        later.mcp.http = true;
+        assert!(!later.mcp.lan(), "turning HTTP on later doesn't open it to the network");
+        assert!(!Settings::default().mcp.lan());
+    }
+
+    /// A value from a newer version costs that one field, not the whole file.
+    #[test]
+    fn unknown_modes_and_themes_read_as_defaults() {
+        let json = r#"{"providers": {"codex": {"permissionMode": "yolo", "binary": "/opt/codex"}},
+            "appearance": {"theme": "solarized", "uiFontSize": 15}}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.providers.codex.permission_mode, PermissionMode::Ask);
+        assert_eq!(s.providers.codex.binary, "/opt/codex");
+        assert_eq!(s.appearance.theme, Theme::default());
+        assert_eq!(s.appearance.ui_font_size, 15);
+    }
+
+    /// A file that can't be read is moved aside, never saved over.
+    #[test]
+    fn an_unreadable_file_is_kept_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, "\u{feff}{\"projects\": [").unwrap();
+        let (s, problem) = Settings::load_or_recover(&path);
+        assert_eq!(s, Settings::default());
+        assert!(problem.unwrap().contains("settings.json.bad-"));
+        assert!(!path.exists(), "moved aside");
+        let kept: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(kept.iter().any(|n| n.starts_with("settings.json.bad-")), "{kept:?}");
+        s.save(&path).unwrap();
+        assert_eq!(Settings::load_or_recover(&path), (Settings::default(), None));
+        let files = std::fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(files, 2, "no temp file is left behind");
     }
 
     #[test]

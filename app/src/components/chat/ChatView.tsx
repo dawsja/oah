@@ -43,8 +43,10 @@ export function ChatView() {
   if (!settings) return null
   if (!project) return <NoProject />
   if (viewer && scope) return <Viewer scope={scope} viewer={viewer} />
-  if (chatId && meta && meta.projectId === project.id) return <OpenChat project={project} meta={meta} transcript={transcript ?? emptyTranscript()} />
-  return <NewChat project={project} />
+  // Keyed, so nothing of one chat (how far it's scrolled, an open dock) carries to the next, and
+  // a new chat in another project starts from that project's agent and model.
+  if (chatId && meta && meta.projectId === project.id) return <OpenChat key={meta.id} project={project} meta={meta} transcript={transcript ?? emptyTranscript()} />
+  return <NewChat key={project.id} project={project} />
 }
 
 function useAgentDefaults(project: Project, agent: AgentKind) {
@@ -52,18 +54,35 @@ function useAgentDefaults(project: Project, agent: AgentKind) {
   return { model: project.defaultModel || provider.defaultModel || "", permission: provider.permissionMode }
 }
 
-/** Share in-flight catalog requests; opening the menu refreshes externally changed credentials. */
-const catalogCache = new Map<string, Promise<Catalog>>()
+/** Catalogs by agent and project, kept a few minutes: listing one starts the agent's CLI (a
+ *  whole `claude -p`, a throwaway OpenCode session), so the model menu and every lone `/`
+ *  shouldn't. A failed one isn't kept. */
+const catalogCache = new Map<string, { at: number; catalog: Promise<Catalog> }>()
+const CATALOG_FRESH = 5 * 60_000
 /** The commands a running chat of each agent last listed, so a new chat has them at once. */
 const seenCommands = new Map<string, SlashCommand[]>()
 function useCatalog(agent: AgentKind, projectId: string, live: { models: ModelOption[]; commands: SlashCommand[] } = { models: [], commands: [] }) {
   const key = `${agent}|${projectId}`
   const [fetched, setFetched] = useState<Catalog | undefined>(undefined)
+  // An answer for the agent picked before this one is dropped.
+  const keyRef = useRef(key)
+  keyRef.current = key
   useEffect(() => setFetched(undefined), [key])
   if (live.commands.length) seenCommands.set(key, live.commands)
   const load = () => {
-    if (!catalogCache.has(key)) catalogCache.set(key, ipc.providerCatalog(agent, projectId).finally(() => catalogCache.delete(key)))
-    catalogCache.get(key)!.then(setFetched).catch(() => {})
+    // A running chat already has its agent's own lists (only OpenCode's are fuller from the catalog).
+    if (live.models.length && live.commands.length && !isOpencode(agent)) return
+    const hit = catalogCache.get(key)
+    if (!hit || Date.now() - hit.at > CATALOG_FRESH) {
+      const catalog = ipc.providerCatalog(agent, projectId)
+      catalogCache.set(key, { at: Date.now(), catalog })
+      catalog.catch(() => catalogCache.delete(key))
+    }
+    const asked = key
+    catalogCache
+      .get(key)!
+      .catalog.then((c) => asked === keyRef.current && setFetched(c))
+      .catch(() => asked === keyRef.current && setFetched({ models: [], commands: [] }))
   }
   const models = isOpencode(agent) && fetched ? fetched.models : live.models.length ? live.models : fetched?.models
   const commands = live.commands.length ? live.commands : (seenCommands.get(key) ?? fetched?.commands ?? [])
@@ -83,7 +102,7 @@ function NewChat({ project }: { project: Project }) {
   const { distro, starting } = useStartOpenDistro(project.location)
   const draftCwd = useApp((s) => s.draftCwd)
   const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
-  const send = (text: string, images: { mime: string; data: string }[] = []) =>
+  const send = (text: string, images: { mime: string; data: string; name?: string }[] = []) =>
     useChats.getState().send(null, text, { agent, model: model ?? undefined, effort: effort || undefined, permission, cwd: draftCwd ?? undefined, images })
 
   return (
@@ -117,6 +136,8 @@ function NewChat({ project }: { project: Project }) {
               setAgent(a)
               setModel(null)
               setEffort("")
+              // That agent's own default mode, not the last one's (which may be Full access).
+              setPermission(settings.providers[a].permissionMode)
             }}
             model={model ?? d.model}
             effort={effort}
@@ -134,7 +155,7 @@ function NewChat({ project }: { project: Project }) {
           />
           <div className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
             {["Explain how this project is laid out", "Find and fix a failing test", "Review my uncommitted changes"].map((t) => (
-              <button key={t} className="rounded-lg border bg-card px-3.5 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => send(t)}>
+              <button key={t} className="rounded-lg border bg-card px-3.5 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => editInComposer(t, [])}>
                 {t}
               </button>
             ))}
@@ -149,7 +170,8 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
   const agent = meta.agent
   const d = useAgentDefaults(project, agent)
   const { models, commands, load } = useCatalog(agent, project.id, transcript)
-  const permission = useChats((s) => s.permission[meta.id]) ?? d.permission
+  // The mode it last ran with (from here, a phone or MCP) before the agent's default.
+  const permission = useChats((s) => s.permission[meta.id]) ?? meta.permission ?? d.permission
   const queued = useChats((s) => s.queued[meta.id]) ?? NONE
   const chats = useChats.getState()
   const dock = useRef<HTMLDivElement>(null)
@@ -216,9 +238,9 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
             onSend={(text, images, how) => {
               const running = useChats.getState().transcripts[meta.id]?.running
               // A command never goes into a turn that's running: it waits its turn.
-              if (running && how === "steer" && !text.startsWith("/")) void chats.steer(meta.id, text, images)
-              else if (running) chats.enqueue(meta.id, text, images)
-              else void chats.send(meta.id, text, { agent: meta.agent, permission, images })
+              if (running && how === "steer" && !text.startsWith("/")) return chats.steer(meta.id, text, images)
+              if (running) return void chats.enqueue(meta.id, text, images)
+              return chats.send(meta.id, text, { agent: meta.agent, permission, images })
             }}
             onSteerQueued={queued.length ? () => void chats.sendQueued(meta.id) : undefined}
             onStop={() => chats.interrupt(meta.id)}
@@ -263,7 +285,7 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
             Copy the agent's session id
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onSelect={() => useChats.getState().remove(meta.id)}>
+          <DropdownMenuItem variant="destructive" onSelect={() => void useChats.getState().confirmRemove(meta.id)}>
             <Trash2 /> Delete chat
           </DropdownMenuItem>
         </DropdownMenuContent>

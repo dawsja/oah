@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { imageSource, markdownUrlTransform } from "./images"
+import { imageSource, markdownUrlTransform, remoteHost } from "./images"
 
 describe("Markdown image sources", () => {
   it.each([
@@ -29,5 +29,16 @@ describe("Markdown image sources", () => {
     expect(markdownUrlTransform("file:///tmp/image.png", "href", { tagName: "a" })).toBe("")
     expect(markdownUrlTransform("javascript:alert(1)", "href", { tagName: "a" })).toBe("")
     expect(markdownUrlTransform("https://example.com", "href", { tagName: "a" })).toBe("https://example.com")
+  })
+})
+
+describe("remoteHost", () => {
+  it("names the server a remote image would come from", () => {
+    expect(remoteHost("https://evil.example/x.png?d=secret")).toBe("evil.example")
+    expect(remoteHost("http://10.0.0.2:8080/a.png")).toBe("10.0.0.2:8080")
+    expect(remoteHost("//cdn.example/a.png")).toBe("cdn.example")
+  })
+  it("is null for what isn't fetched from a server", () => {
+    for (const s of ["data:image/png;base64,AAAA", "blob:abc", "/home/me/a.png", "C:/a.png", "shot.png"]) expect(remoteHost(s)).toBe(null)
   })
 })

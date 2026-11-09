@@ -28,7 +28,7 @@ export async function addLocalFolder() {
   if (!path) return
   const wsl = await ipc.wslPath(path).catch(() => null)
   if (wsl) {
-    await useApp.getState().addProject({ kind: "wsl", distro: wsl.distro }, wsl.path)
+    if (!(await useApp.getState().addProject({ kind: "wsl", distro: wsl.distro }, wsl.path))) return
     toast.success(`Added as a WSL project in ${wsl.distro}`, { description: "Chats, git and files run inside the distro." })
     return
   }

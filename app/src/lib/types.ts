@@ -111,7 +111,7 @@ export type Settings = {
 
 /** Another agent driving oah's chats over MCP (`oah mcp`, or HTTP on this computer and private networks). */
 /** `http`: also serve MCP at `http://<ip>:<httpPort>/mcp` with a bearer token. */
-export type Mcp = { enabled: boolean; allowFullAccess: boolean; allowDelete: boolean; http: boolean; httpPort: number }
+export type Mcp = { enabled: boolean; allowFullAccess: boolean; allowDelete: boolean; http: boolean; httpPort: number; httpLan?: boolean | null }
 
 /** Where MCP listens, and who's connected. */
 /** Something that happened over MCP's HTTP (`connected`, `closed`, `call`, `refused`). */
@@ -120,7 +120,7 @@ export type McpActivity = { at: number; kind: "connected" | "closed" | "call" | 
 export type McpHttpStatus = { url: string | null; urls: string[]; error: string | null; sessions: number; tokenKept: boolean; activity: McpActivity[] }
 export type McpStatus = { socket: string; clients: number; exe: string; http: McpHttpStatus }
 
-export type AppInfo = { version: string; platform: "windows" | "linux" | "macos" | "web"; dataDir: string; home: string; bundle: string | null }
+export type AppInfo = { version: string; platform: "windows" | "linux" | "macos" | "web"; dataDir: string; home: string; bundle: string | null; settingsProblem?: string | null }
 
 export function locationLabel(l: Location): string {
   return l.kind === "local" ? "This computer" : l.kind === "ssh" ? l.host : l.distro

@@ -27,3 +27,13 @@ export function imageSource(src: string): ImageSource | null {
 export function markdownUrlTransform(url: string, key: string, node: { tagName: string }): string {
   return key === "src" && node.tagName === "img" ? (imageSource(url) ? url : "") : defaultUrlTransform(url)
 }
+
+/** The host a remote image would be fetched from (`https://`, `http://`, `//`), else null. */
+export function remoteHost(src: string): string | null {
+  if (!/^(https?:)?\/\//i.test(src)) return null
+  try {
+    return new URL(src, "https://x").host || null
+  } catch {
+    return null
+  }
+}

@@ -432,9 +432,14 @@ fn opencode_go_key(location: &Location, env: &[EnvVar]) -> Option<String> {
         let v: Value = serde_json::from_str(text.trim()).ok()?;
         v["key"].as_str().filter(|k| !k.is_empty()).map(String::from)
     };
+    // `~` only means home to a shell; on this computer it's a folder name, and spawning in it fails.
+    let home = match location {
+        Location::Local => oah_core::paths::home_dir().to_string_lossy().into_owned(),
+        _ => "~".to_string(),
+    };
     let sh = |script: &str| -> Option<String> {
         let args = vec!["-c".into(), script.into()];
-        oah_transport::run(&Spec { location, cwd: "~", program: "sh", args, env }, None, Duration::from_secs(20))
+        oah_transport::run(&Spec { location, cwd: &home, program: "sh", args, env }, None, Duration::from_secs(20))
             .ok()
             .filter(|o| o.ok() && !o.stdout.trim().is_empty())
             .map(|o| o.stdout)

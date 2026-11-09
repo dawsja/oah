@@ -213,7 +213,7 @@ pub fn connect(path: &str) -> std::io::Result<Stream> {
 mod tests {
     use super::*;
     use crate::testing::fake;
-    use oah_core::settings::PermissionMode;
+    use oah_core::settings::{AgentKind, PermissionMode};
 
     /// Plays `requests` to a server over pipes; returns every line it wrote.
     fn talk(ctx: Arc<Ctx>, requests: &[Value]) -> Vec<Value> {
@@ -308,7 +308,7 @@ mod tests {
         }
         writeln!(w, "{}", call(3, "list_projects", json!({}))).unwrap();
         let reply: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
-        assert!(text(&reply).contains("\"id\": \"p1\""), "{reply}");
+        assert!(text(&reply).contains("\"id\":\"p1\""), "{reply}");
     }
 
     #[test]
@@ -333,8 +333,8 @@ mod tests {
         );
         let t = text(&reply(&lines, 1));
         assert!(t.starts_with("Session c0 created."), "{t}");
-        assert!(t.contains("\"reply\": \"You said hello\""), "{t}");
-        assert!(t.contains("\"state\": \"idle\""), "{t}");
+        assert!(t.contains("\"reply\":\"You said hello\""), "{t}");
+        assert!(t.contains("\"state\":\"idle\""), "{t}");
         let chat = host.chats.lock().unwrap()[0].clone();
         assert_eq!(chat.cwd, "/wt/feature");
         assert_eq!(chat.title, "Fix");
@@ -348,7 +348,7 @@ mod tests {
             ],
         );
         let t = text(&reply(&lines, 2));
-        assert!(t.contains("\"state\": \"needsApproval\"") && t.contains("\"requestId\": \"r1\""), "{t}");
+        assert!(t.contains("\"state\":\"needsApproval\"") && t.contains("\"requestId\":\"r1\""), "{t}");
         let lines = talk(ctx.clone(), &[call(3, "answer_approval", json!({"session_id": "c0", "request_id": "r1", "decision": "allow"}))]);
         assert!(text(&reply(&lines, 3)).starts_with("Answered"));
 
@@ -375,5 +375,36 @@ mod tests {
         assert!(text(&reply(&lines, 2)).contains("no session zz"));
         assert!(text(&reply(&lines, 3)).contains("\"efforts\""));
         assert!(text(&reply(&lines, 4)).starts_with("bad arguments"));
+    }
+
+    /// The switch is about what the turn runs with, not just the argument: a chat set to Full
+    /// access in the window, or an agent whose default is Full access, is refused too.
+    #[test]
+    fn full_access_from_the_chat_or_the_default_is_refused_too() {
+        let (ctx, host) = fake(true);
+        host.settings.lock().unwrap().providers.get_mut(AgentKind::Claude).permission_mode = PermissionMode::FullAccess;
+        let lines = talk(ctx.clone(), &[call(1, "create_session", json!({"project_id": "p1", "prompt": "hi"}))]);
+        assert!(text(&reply(&lines, 1)).contains("Full access isn't allowed"), "{lines:?}");
+        assert!(host.chats.lock().unwrap().is_empty(), "no chat is made for it");
+        // Asking for a lower mode works, and is remembered for the chat.
+        let lines = talk(ctx.clone(), &[call(2, "create_session", json!({"project_id": "p1", "prompt": "hi", "permission": "ask"}))]);
+        assert!(text(&reply(&lines, 2)).contains("Session c0 created"), "{lines:?}");
+
+        host.settings.lock().unwrap().providers.get_mut(AgentKind::Claude).permission_mode = PermissionMode::Ask;
+        host.chats.lock().unwrap()[0].permission = Some(PermissionMode::FullAccess);
+        let lines = talk(
+            ctx,
+            &[
+                call(3, "send_message", json!({"session_id": "c0", "text": "again"})),
+                call(4, "compact_session", json!({"session_id": "c0"})),
+                call(5, "create_session", json!({"project_id": "p1", "cwd": "/etc"})),
+                call(6, "create_session", json!({"project_id": "p1", "cwd": "/p/sub"})),
+            ],
+        );
+        assert!(text(&reply(&lines, 3)).contains("Full access isn't allowed"));
+        assert!(text(&reply(&lines, 4)).contains("Full access isn't allowed"));
+        assert!(text(&reply(&lines, 5)).contains("cwd must be"));
+        assert!(!text(&reply(&lines, 6)).contains("cwd must be"));
+        assert_eq!(host.sent.lock().unwrap().len(), 1, "only the allowed turn was sent");
     }
 }

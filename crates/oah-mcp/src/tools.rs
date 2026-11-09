@@ -185,8 +185,10 @@ fn args<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, String> {
     serde_json::from_value(if v.is_null() { json!({}) } else { v }).map_err(|e| format!("bad arguments: {e}"))
 }
 
+/// A result as compact JSON: the client's model reads every byte of it, and indentation is
+/// 20–60% of a pretty-printed result.
 fn to_text(v: &Value) -> String {
-    serde_json::to_string_pretty(v).unwrap_or_default()
+    serde_json::to_string(v).unwrap_or_default()
 }
 
 pub fn call(ctx: &Ctx, name: &str, a: Value, progress: Progress) -> ToolResult {
@@ -376,6 +378,7 @@ pub fn call(ctx: &Ctx, name: &str, a: Value, progress: Progress) -> ToolResult {
             }
             let a: A = args(a)?;
             meta(ctx, &a.session_id)?;
+            check_permission(&settings, Some(ctx.host.permission(&a.session_id)))?;
             ctx.host.compact(&a.session_id, &a.instructions)?;
             Ok("Compacting. wait_for_session to know when it's done.".into())
         }
@@ -481,18 +484,41 @@ fn session_json(m: &ChatMeta, state: &str) -> Value {
     })
 }
 
+/// Refuses Full access unless Settings → MCP allows it. Callers pass the mode the turn will
+/// really run with (given, else the chat's own, else the agent's default), not just what the
+/// client asked for: a chat set to Full access in the window is Full access here too.
 fn check_permission(settings: &Settings, p: Option<PermissionMode>) -> Result<(), String> {
     if p == Some(PermissionMode::FullAccess) && !settings.mcp.allow_full_access {
-        return Err("Full access isn't allowed over MCP (Settings → MCP in oah). Use acceptEdits, ask or plan.".into());
+        return Err("Full access isn't allowed over MCP (Settings → MCP in oah). This would run with Full access; pass permission acceptEdits, ask or plan.".into());
     }
     Ok(())
+}
+
+/// `cwd` must be the project's folder, a folder inside it, or one of its worktrees.
+fn check_cwd(ctx: &Ctx, project_id: &str, cwd: &str) -> Result<(), String> {
+    let settings = ctx.host.settings();
+    let project = settings.projects.iter().find(|p| p.id == project_id).ok_or("no such project: list_projects shows them")?;
+    let norm = |p: &str| p.trim().trim_end_matches(['/', '\\']).replace('\\', "/");
+    let (cwd, root) = (norm(cwd), norm(&project.path));
+    if cwd.split('/').any(|c| c == "..") {
+        return Err("cwd can't contain `..`".into());
+    }
+    let inside = |base: &str| cwd == base || cwd.starts_with(&format!("{base}/"));
+    if inside(&root) || ctx.host.worktrees(project_id).unwrap_or_default().iter().any(|w| inside(&norm(&w.path))) {
+        return Ok(());
+    }
+    Err("cwd must be the project's folder, a folder inside it, or one of its worktrees (list_worktrees)".into())
 }
 
 /// The folder for `worktree` (a branch) or `cwd`; with `create`, a missing branch gets a new
 /// worktree.
 fn folder(ctx: &Ctx, project_id: &str, worktree: Option<&str>, cwd: Option<String>, create: bool) -> Result<Option<String>, String> {
     let Some(branch) = worktree.map(str::trim).filter(|b| !b.is_empty()) else {
-        return Ok(cwd.filter(|c| !c.trim().is_empty()));
+        let cwd = cwd.filter(|c| !c.trim().is_empty());
+        if let Some(c) = &cwd {
+            check_cwd(ctx, project_id, c)?;
+        }
+        return Ok(cwd);
     };
     let found = ctx.host.worktrees(project_id)?.into_iter().find(|w| w.branch.as_deref() == Some(branch));
     match found {
@@ -629,10 +655,12 @@ fn create_session(ctx: &Ctx, settings: &Settings, a: Value, progress: Progress) 
         timeout_s: Option<u64>,
     }
     let a: A = args(a)?;
-    check_permission(settings, a.permission)?;
-    if !settings.projects.iter().any(|p| p.id == a.project_id) {
+    let Some(project) = settings.projects.iter().find(|p| p.id == a.project_id) else {
         return Err("no such project: list_projects shows them".into());
-    }
+    };
+    // What the new chat would run with: the mode given, else its agent's default.
+    let agent = a.agent.or(project.default_agent).unwrap_or(settings.providers.default_agent);
+    check_permission(settings, Some(a.permission.unwrap_or(settings.providers.get(agent).permission_mode)))?;
     let cwd = folder(ctx, &a.project_id, a.worktree.as_deref(), a.cwd, true)?;
     let mut m = ctx.host.create(NewChat { project_id: a.project_id, agent: a.agent, model: a.model, effort: a.effort, cwd })?;
     if let Some(t) = a.title.filter(|t| !t.trim().is_empty()) {
@@ -643,10 +671,15 @@ fn create_session(ctx: &Ctx, settings: &Settings, a: Value, progress: Progress) 
         ctx.host.set_permission(&m.id, p)?;
     }
     match prompt {
-        Some(prompt) => {
-            let out = send(ctx, settings, &m.id, prompt, vec![], a.permission, a.wait.unwrap_or(true), a.timeout_s, progress)?;
-            Ok(format!("Session {} created.\n{out}", m.id))
-        }
+        Some(prompt) => match send(ctx, settings, &m.id, prompt, vec![], a.permission, a.wait.unwrap_or(true), a.timeout_s, progress) {
+            Ok(out) => Ok(format!("Session {} created.\n{out}", m.id)),
+            // Its agent didn't start (turned off, not installed…): don't leave an empty chat.
+            Err(e) => {
+                ctx.host.close(&m.id);
+                let _ = ctx.host.delete(&m.id);
+                Err(e)
+            }
+        },
         None => Ok(to_text(&session_json(&m, "idle"))),
     }
 }
@@ -663,7 +696,7 @@ fn send(
     timeout_s: Option<u64>,
     progress: Progress,
 ) -> ToolResult {
-    check_permission(settings, permission)?;
+    check_permission(settings, Some(permission.unwrap_or_else(|| ctx.host.permission(id))))?;
     if text.trim().is_empty() && images.is_empty() {
         return Err("the message is empty".into());
     }

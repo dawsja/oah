@@ -230,14 +230,15 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
     if (!tree) return
     const ok = await confirmAction({
       title: `Remove worktree ${tree.branch ?? ""}?`,
-      description: `Deletes the folder ${tree.path}${project.git.deleteBranchOnRemove ? " and its branch" : ""}. Uncommitted changes there are lost.`,
+      description: `Deletes the folder ${tree.path}${project.git.deleteBranchOnRemove ? " and its branch (commits not on another branch are lost)" : ""}. Uncommitted changes there are lost${chats.length ? `, and its ${chats.length === 1 ? "chat is" : `${chats.length} chats are`} deleted` : ""}.`,
       confirm: "Remove",
       danger: true,
     })
     if (!ok) return
     try {
-      await wt.remove(project.id, tree.path, true)
+      // Its chats' agents first: on Windows a folder an agent runs in can't be deleted.
       for (const c of chats) await useChats.getState().remove(c.id)
+      await wt.remove(project.id, tree.path, true)
       await useGit.getState().loadWorktrees(project.id)
       if (samePath(useApp.getState().draftCwd, tree.path)) useApp.setState({ draftCwd: null })
     } catch (e) {
@@ -296,7 +297,9 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
   const view = useApp((s) => s.view)
   const t = useChats((s) => s.transcripts[meta.id])
   const waits = useChats((s) => waitingOf(s, meta.id))
-  const running = !!t?.running
+  // This window's own view of it when it has the chat open, else what the app says.
+  const busyElsewhere = useChats((s) => s.busy.includes(meta.id))
+  const running = t ? !!t.running : busyElsewhere
   // Background work between turns: what the open transcript says, else what the app says.
   const background = useChats((s) => (s.transcripts[meta.id] ? runningTasks(s.transcripts[meta.id]).some((k) => k.tracked) : s.background.includes(meta.id)))
   const active = chatId === meta.id && view === "chat"
@@ -351,7 +354,7 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
           <FileText /> Copy as Markdown
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem variant="destructive" onSelect={() => useChats.getState().remove(meta.id)}>
+        <ContextMenuItem variant="destructive" onSelect={() => void useChats.getState().confirmRemove(meta.id)}>
           <Trash2 /> Delete chat
         </ContextMenuItem>
       </ContextMenuContent>

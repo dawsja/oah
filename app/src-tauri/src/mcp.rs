@@ -137,6 +137,10 @@ impl Host for AppHost {
         self.state().chats.set_permission(&self.app, chat_id, mode, true)
     }
 
+    fn permission(&self, chat_id: &str) -> PermissionMode {
+        self.state().chats.permission_for(&self.settings(), chat_id)
+    }
+
     fn compact(&self, chat_id: &str, instructions: &str) -> HostResult<()> {
         let settings = self.settings();
         self.state().chats.compact(&self.app, &settings, chat_id, instructions, None)
@@ -206,11 +210,13 @@ struct Http {
     /// The keychain keeps the token (else it's new each time oah starts).
     kept: bool,
     server: Option<oah_mcp::http::Server>,
+    /// The server listens for other devices too.
+    lan: bool,
     /// Why it isn't listening (the port is taken…).
     error: Option<String>,
 }
 
-static HTTP: Mutex<Http> = Mutex::new(Http { ctx: None, state: None, kept: false, server: None, error: None });
+static HTTP: Mutex<Http> = Mutex::new(Http { ctx: None, state: None, kept: false, server: None, lan: false, error: None });
 
 fn http_state(h: &mut Http) -> Arc<oah_mcp::http::HttpState> {
     h.state
@@ -226,17 +232,20 @@ fn http_state(h: &mut Http) -> Arc<oah_mcp::http::HttpState> {
 /// are both on.
 pub fn apply_http(mcp: &oah_core::settings::Mcp) {
     let mut h = HTTP.lock().unwrap();
-    let want = (mcp.enabled && mcp.http).then_some(mcp.http_port);
-    let running = h.server.as_ref().map(|s| s.addr().port());
+    let want = (mcp.enabled && mcp.http).then_some((mcp.http_port, mcp.lan()));
+    let running = h.server.as_ref().map(|s| (s.addr().port(), h.lan));
     if want.is_some() && want == running {
         return;
     }
     h.server = None;
     h.error = None;
-    let (Some(port), Some(ctx)) = (want, h.ctx.clone()) else { return };
+    let (Some((port, lan)), Some(ctx)) = (want, h.ctx.clone()) else { return };
     let state = http_state(&mut h);
-    match oah_mcp::http::start(port, ctx, state) {
-        Ok(server) => h.server = Some(server),
+    match oah_mcp::http::start(port, lan, ctx, state) {
+        Ok(server) => {
+            h.server = Some(server);
+            h.lan = lan;
+        }
         Err(e) => h.error = Some(format!("couldn't listen on port {port}: {e}")),
     }
 }
@@ -279,9 +288,10 @@ fn http_status() -> HttpStatus {
     let h = HTTP.lock().unwrap();
     let port = h.server.as_ref().map(|s| s.addr().port());
     let url = port.map(|p| format!("http://127.0.0.1:{p}{}", oah_mcp::http::PATH));
+    let lan = h.lan;
     let urls = match port {
         Some(p) => std::iter::once("127.0.0.1".to_string())
-            .chain(crate::remote::addresses().into_iter().map(|a| a.ip))
+            .chain(if lan { crate::remote::addresses().into_iter().map(|a| a.ip).collect() } else { Vec::new() })
             .map(|ip| format!("http://{ip}:{p}{}", oah_mcp::http::PATH))
             .collect(),
         None => Vec::new(),

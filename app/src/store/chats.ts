@@ -7,7 +7,7 @@ import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type De
 
 export { needsYou, waitingOf } from "@/lib/chat"
 import { ipc, onChatEvent, onChatsChanged } from "@/lib/ipc"
-import { notify } from "@/lib/notify"
+import { notify, setQueuedCheck } from "@/lib/notify"
 import { isAcp, type AgentKind, type PermissionMode } from "@/lib/types"
 import { useApp } from "./app"
 import { draftKey, drafts } from "./drafts"
@@ -29,6 +29,9 @@ type ChatsStore = {
   waiting: Record<string, Waiting>
   /** Chats with background work running, as the app last said (`chat_background`). */
   background: string[]
+  /** Chats mid-turn, as the app last said (`chat_busy`): it knows about chats this window
+   *  never opened (a phone or MCP runs them). */
+  busy: string[]
   /** A chat opened to answer it: its waiting card takes the cursor once it shows. */
   focus: string | null
 
@@ -37,12 +40,14 @@ type ChatsStore = {
   open(chatId: string): Promise<void>
   /** Opens the chat on its approval or question, wherever the window was. */
   answerChat(chatId: string): Promise<void>
-  /** Sends a prompt; with no chat yet, creates one in the current project first. */
+  /** Sends a prompt; with no chat yet, creates one in the current project first. True once
+   *  it's sent; false (after saying why) when it wasn't. A new chat whose first message didn't
+   *  go is removed again, and the message goes back in the new-chat box. */
   send(
     chatId: string | null,
     text: string,
-    opts: { agent: AgentKind; model?: string; effort?: string; permission: PermissionMode; cwd?: string; images?: { mime: string; data: string }[] },
-  ): Promise<void>
+    opts: { agent: AgentKind; model?: string; effort?: string; permission: PermissionMode; cwd?: string; images?: Image[] },
+  ): Promise<boolean>
   /** `/compact`: the agent summarizes the conversation so far. */
   compact(chatId: string, instructions: string, permission: PermissionMode): Promise<void>
   /** `/clear`: the agent starts a fresh session from the next message. */
@@ -57,6 +62,8 @@ type ChatsStore = {
   /** Reasoning effort for the chat (empty: the model's default). */
   setEffort(chatId: string, effort: string): Promise<void>
   remove(chatId: string): Promise<void>
+  /** Asks first ("Delete … ?"), then removes it. */
+  confirmRemove(chatId: string): Promise<void>
   rename(chatId: string, title: string): Promise<void>
   pin(chatId: string, pinned: boolean): Promise<void>
   setPermission(chatId: string, mode: PermissionMode): void
@@ -66,12 +73,13 @@ type ChatsStore = {
   unqueue(chatId: string, id: string): Queued | undefined
   /** Sends now, into the turn that's running: Claude Code takes it at its next step and Codex
    *  steers with it; an agent that can't take one mid-turn is stopped first. */
-  steer(chatId: string, text: string, images: Image[]): Promise<void>
+  steer(chatId: string, text: string, images: Image[]): Promise<boolean>
   /** Sends a queued message now (the first one, without an id). */
   sendQueued(chatId: string, id?: string): Promise<void>
 }
 
 let started = false
+setQueuedCheck((id) => (useChats.getState().queued[id]?.length ?? 0) > 0)
 
 export const useChats = create<ChatsStore>((set, get) => ({
   metas: [],
@@ -80,6 +88,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
   queued: {},
   waiting: {},
   background: [],
+  busy: [],
   focus: null,
 
   async init() {
@@ -92,12 +101,13 @@ export const useChats = create<ChatsStore>((set, get) => ({
   },
 
   async refresh() {
-    const [metas, waiting, background] = await Promise.all([
+    const [metas, waiting, background, busy] = await Promise.all([
       ipc.chatList().catch(() => [] as ChatMeta[]),
       ipc.chatWaiting().catch(() => ({})),
       ipc.chatBackground().catch(() => [] as string[]),
+      ipc.chatBusy().catch(() => [] as string[]),
     ])
-    set({ metas, waiting, background })
+    set({ metas, waiting, background, busy })
   },
 
   async open(chatId) {
@@ -109,6 +119,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
     const snap = await ipc.chatSnapshot(chatId).catch(() => ({ events: [] as ChatEvent[], seq: 0, live: false, busy: false }))
     const held = loading.get(chatId) ?? []
     loading.delete(chatId)
+    snapshotSeq.set(chatId, snap.seq)
     const t = held.filter(([seq]) => seq > snap.seq).reduce((t, [, e]) => reduce(t, e), replay(snap.events, snap.busy, snap.live))
     set((s) => ({ transcripts: { ...s.transcripts, [chatId]: t } }))
   },
@@ -126,7 +137,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
     let id = chatId
     try {
       if (!id) {
-        if (!app.projectId) return
+        if (!app.projectId) return false
         const meta = await ipc.chatCreate(app.projectId, opts.agent, opts.model ?? null, opts.effort ?? null, opts.cwd ?? null)
         id = meta.id
         set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: emptyTranscript() }, permission: { ...s.permission, [meta.id]: opts.permission } }))
@@ -137,6 +148,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
       const images = (opts.images ?? []).map(({ mime, data }) => ({ mime, data }))
       await ipc.chatSend(chat, { id: crypto.randomUUID(), text, images }, get().permission[chat] ?? opts.permission)
       get().refresh()
+      return true
     } catch (e) {
       const msg = String(e)
       // Not signed in: the CLI's sign-in is one click away.
@@ -147,7 +159,16 @@ export const useChats = create<ChatsStore>((set, get) => ({
       const where = project?.location.kind === "wsl" ? project.location : null
       const canSignIn = login && project?.location.kind !== "ssh"
       toast.error(msg, canSignIn ? { action: { label: "Sign in", onClick: () => void ipc.providerLogin(login, where).catch((err) => toast.error(String(err))) } } : undefined)
-      if (id) apply(id, { type: "error", message: msg })
+      if (id && !chatId && app.projectId) {
+        // Its first message never went: no empty chat is left, and the message is back in the
+        // box it was typed in.
+        drafts.set(draftKey(null, app.projectId, opts.cwd), text, (opts.images ?? []).map((i) => ({ ...i, name: i.name ?? "image" })))
+        await get().remove(id)
+        useApp.setState({ chatId: null, draftCwd: opts.cwd ?? null })
+      } else if (id) {
+        apply(id, { type: "error", message: msg })
+      }
+      return false
     }
   },
 
@@ -199,7 +220,12 @@ export const useChats = create<ChatsStore>((set, get) => ({
   },
 
   async remove(chatId) {
-    await ipc.chatDelete(chatId).catch((e) => toast.error(String(e)))
+    // A delete that failed leaves the chat listed (it's still there).
+    const ok = await ipc.chatDelete(chatId).then(
+      () => true,
+      (e) => (toast.error(`Couldn't delete the chat: ${e}`), false),
+    )
+    if (!ok) return
     set((s) => {
       const { [chatId]: _, ...rest } = s.transcripts
       const { [chatId]: __, ...queued } = s.queued
@@ -207,6 +233,19 @@ export const useChats = create<ChatsStore>((set, get) => ({
     })
     drafts.drop(draftKey(chatId, ""))
     if (useApp.getState().chatId === chatId) useApp.setState({ chatId: null })
+  },
+
+  async confirmRemove(chatId) {
+    const meta = get().metas.find((m) => m.id === chatId)
+    const running = get().transcripts[chatId]?.running || get().busy.includes(chatId)
+    const { confirmAction } = await import("@/components/Prompt")
+    const ok = await confirmAction({
+      title: `Delete ${meta?.title ? `"${meta.title}"` : "this chat"}?`,
+      description: `Its messages and attached images are deleted for good.${running ? " Its agent is working and stops now." : ""}`,
+      confirm: "Delete",
+      danger: true,
+    })
+    if (ok) await get().remove(chatId)
   },
 
   async rename(chatId, title) {
@@ -237,18 +276,19 @@ export const useChats = create<ChatsStore>((set, get) => ({
 
   async steer(chatId, text, images) {
     const opts = sendOpts(chatId, images)
-    if (!opts) return
+    if (!opts) return false
     // OpenCode and Antigravity take one prompt at a time: the running turn stops, then this goes.
     if (get().transcripts[chatId]?.running && isAcp(opts.agent)) await get().interrupt(chatId)
-    await get().send(chatId, text, opts)
+    return get().send(chatId, text, opts)
   },
 
   async sendQueued(chatId, id) {
     const item = get().unqueue(chatId, id ?? get().queued[chatId]?.[0]?.id ?? "")
     if (!item) return
-    if (get().transcripts[chatId]?.running) return get().steer(chatId, item.text, item.images)
     const opts = sendOpts(chatId, item.images)
-    if (opts) await get().send(chatId, item.text, opts)
+    const ok = get().transcripts[chatId]?.running ? await get().steer(chatId, item.text, item.images) : opts ? await get().send(chatId, item.text, opts) : false
+    // Didn't go: it stays first in line instead of disappearing.
+    if (!ok) set((s) => ({ queued: { ...s.queued, [chatId]: [item, ...(s.queued[chatId] ?? [])] } }))
   },
 }))
 
@@ -265,12 +305,12 @@ export async function copyChatMarkdown(chatId: string) {
 }
 
 /** How an open chat sends: its agent, and the permission chosen for it (else the agent's default). */
-function sendOpts(chatId: string, images: Image[]) {
-  const meta = useChats.getState().metas.find((m) => m.id === chatId)
+function sendOpts(chatId: string, images: Image[]): { agent: AgentKind; permission: PermissionMode; images: Image[] } | null {
+  const meta: ChatMeta | undefined = useChats.getState().metas.find((m) => m.id === chatId)
   if (!meta) return null
   const settings = useApp.getState().settings
   const provider = settings?.providers[meta.agent]
-  const permission = useChats.getState().permission[chatId] ?? provider?.permissionMode ?? "ask"
+  const permission = useChats.getState().permission[chatId] ?? meta.permission ?? provider?.permissionMode ?? "ask"
   return { agent: meta.agent, permission, images: images.map(({ mime, data }) => ({ mime, data })) }
 }
 
@@ -278,7 +318,10 @@ function sendOpts(chatId: string, images: Image[]) {
 const loading = new Map<string, [number, ChatEvent][]>()
 
 /** Batches events per animation frame so streaming text doesn't re-render per token. */
-let queue: [string, ChatEvent][] = []
+let queue: [string, ChatEvent, number | undefined][] = []
+/** Per chat, the number of the last event its snapshot had: an event queued before the
+ *  snapshot came back, and already in it, isn't applied twice. */
+const snapshotSeq = new Map<string, number>()
 let scheduled = false
 function apply(chatId: string, event: ChatEvent, seq?: number) {
   notify(event, useChats.getState().metas.find((m) => m.id === chatId))
@@ -288,23 +331,34 @@ function apply(chatId: string, event: ChatEvent, seq?: number) {
     if (seq !== undefined) held.push([seq, event])
     return
   }
-  queue.push([chatId, event])
+  queue.push([chatId, event, seq])
   if (scheduled) return
   scheduled = true
-  requestAnimationFrame(() => {
-    scheduled = false
-    const batch = queue
-    queue = []
-    useChats.setState((s) => {
-      const transcripts = { ...s.transcripts }
-      // A chat that isn't open here (a phone drives it) loads whole when it's opened.
-      for (const [id, e] of batch) if (transcripts[id]) transcripts[id] = reduce(transcripts[id], e)
-      return { transcripts }
-    })
-    if (batch.some(([, e]) => e.type === "turnFinished" || e.type === "started")) useChats.getState().refresh()
-    // A turn that ended by itself sends the next queued message; one that was stopped holds them.
-    const ended = new Set(batch.flatMap(([id, e]) => (e.type === "turnFinished" && !e.interrupted ? [id] : [])))
-    const s = useChats.getState()
-    for (const id of ended) if (s.queued[id]?.length && !s.transcripts[id]?.running) void s.sendQueued(id)
+  // Once a frame while it's shown; while hidden there are no frames (a minimized window would
+  // hold every event, and the queued messages waiting on a turn's end), so a timer instead.
+  // A frame that never comes (the window was hidden after this was scheduled) is covered too:
+  // whichever runs first applies the batch.
+  if (!document.hidden) requestAnimationFrame(flushEvents)
+  setTimeout(flushEvents, 250)
+}
+
+function flushEvents() {
+  if (!scheduled) return
+  scheduled = false
+  const batch = queue
+  queue = []
+  useChats.setState((s) => {
+    const transcripts = { ...s.transcripts }
+    // A chat that isn't open here (a phone drives it) loads whole when it's opened.
+    for (const [id, e, seq] of batch) {
+      if (!transcripts[id] || (seq !== undefined && seq <= (snapshotSeq.get(id) ?? 0))) continue
+      transcripts[id] = reduce(transcripts[id], e)
+    }
+    return { transcripts }
   })
+  if (batch.some(([, e]) => e.type === "turnFinished" || e.type === "started")) useChats.getState().refresh()
+  // A turn that ended by itself sends the next queued message; one that was stopped holds them.
+  const ended = new Set(batch.flatMap(([id, e]) => (e.type === "turnFinished" && !e.interrupted ? [id] : [])))
+  const s = useChats.getState()
+  for (const id of ended) if (s.queued[id]?.length && !s.transcripts[id]?.running) void s.sendQueued(id)
 }

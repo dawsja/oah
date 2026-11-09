@@ -102,9 +102,10 @@ pub fn add(repo: &Repo, path: &str, branch: &str, base: &str) -> Result<Worktree
     }
     let exists = repo.git(&["rev-parse", "--verify", "-q", &format!("refs/heads/{branch}")]).is_ok();
     if exists {
-        repo.git(&["worktree", "add", "--", path, branch])?;
+        repo.git_write(&["worktree", "add", "--", path, branch])?;
     } else {
-        repo.git(&["worktree", "add", "-b", branch, "--", path, base])?;
+        // Not tracking the base (`origin/main`): the branch is published under its own name.
+        repo.git_write(&["worktree", "add", "--no-track", "-b", branch, "--", path, base])?;
     }
     worktrees(repo)?
         .into_iter()
@@ -121,10 +122,10 @@ pub fn remove(repo: &Repo, path: &str, force: bool, delete_branch: bool) -> Resu
         args.push("--force");
     }
     args.extend(["--", path]);
-    repo.git(&args)?;
+    repo.git_write(&args)?;
     if delete_branch {
         if let Some(b) = branch {
-            repo.git(&["branch", if force { "-D" } else { "-d" }, "--", &b])?;
+            repo.git_write(&["branch", if force { "-D" } else { "-d" }, "--", &b])?;
         }
     }
     let _ = repo.git(&["worktree", "prune"]);

@@ -507,8 +507,16 @@ pub struct Usage {
 }
 
 impl Usage {
+    /// Everything the model read and wrote, cache included.
     pub fn total(&self) -> u64 {
         self.input_tokens + self.output_tokens + self.cache_read_tokens + self.cache_write_tokens
+    }
+
+    /// New tokens in and out: what a turn added, without the cached context it re-read (an
+    /// agent re-reads the whole conversation from cache at every step, so counting that
+    /// makes a one-cent turn look like 150k tokens).
+    pub fn fresh(&self) -> u64 {
+        self.input_tokens + self.output_tokens + self.cache_write_tokens
     }
 }
 

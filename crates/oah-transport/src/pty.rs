@@ -68,7 +68,7 @@ pub fn shell_spec(location: &Location, cwd: &str) -> Result<ShellSpec, String> {
             let program = which::which("ssh").map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "ssh".into());
             let line = format!("sh -lc {}", sh_quote(&login_script(cwd)));
             // Not BatchMode: this is a real terminal, so a password or host-key prompt can be answered.
-            let args = ["-t", "-o", "ServerAliveInterval=30", "--", host, &line].map(String::from).to_vec();
+            let args = ["-t", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=30", "--", host, &line].map(String::from).to_vec();
             Ok(ShellSpec { program, args, cwd: None, env: vec![("TERM".into(), "xterm-256color".into())], shell: None })
         }
     }
@@ -127,7 +127,9 @@ pub enum PtyEvent {
 /// A running shell. Dropping it ends the shell.
 pub struct Pty {
     master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    /// To the thread that writes to the terminal. A write blocks while the program in it isn't
+    /// reading (a paste into a running server); that thread waits, not whoever typed.
+    input: Mutex<std::sync::mpsc::Sender<Vec<u8>>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
 }
 
@@ -191,13 +193,22 @@ impl Pty {
                 on_event(PtyEvent::Exit(code));
             });
         }
-        Ok(Pty { master, writer: Mutex::new(writer), killer: Mutex::new(killer) })
+        let (input, keys) = std::sync::mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            let mut writer = writer;
+            for data in keys {
+                if writer.write_all(&data).and_then(|_| writer.flush()).is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(Pty { master, input: Mutex::new(input), killer: Mutex::new(killer) })
     }
 
     /// Types `data` into the shell.
+    /// Queues `data` for the terminal, in order; never waits for the program to read it.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
-        let mut w = self.writer.lock().unwrap();
-        w.write_all(data).and_then(|_| w.flush()).map_err(|e| format!("the terminal is closed: {e}"))
+        self.input.lock().unwrap().send(data.to_vec()).map_err(|_| "the terminal is closed".to_string())
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
@@ -278,8 +289,8 @@ mod tests {
     #[test]
     fn ssh_terminals_run_the_start_script() {
         let s = shell_spec(&Location::Ssh { host: "devbox".into() }, "~/code/it's").unwrap();
-        assert_eq!(&s.args[..5], ["-t", "-o", "ServerAliveInterval=30", "--", "devbox"]);
-        assert_eq!(s.args[5], format!("sh -lc {}", sh_quote(&login_script("~/code/it's"))));
+        assert_eq!(&s.args[..7], ["-t", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=30", "--", "devbox"]);
+        assert_eq!(s.args[7], format!("sh -lc {}", sh_quote(&login_script("~/code/it's"))));
         assert!(shell_spec(&Location::Ssh { host: "-oProxyCommand=x".into() }, "/").is_err());
     }
 
@@ -400,5 +411,20 @@ mod tests {
         .unwrap();
         drop(pty);
         rx.recv_timeout(Duration::from_secs(10)).expect("an exit");
+    }
+
+    /// A big paste into a program that isn't reading returns at once (the terminal's buffer
+    /// holds about 16 KB; the rest waits in oah, not in the caller).
+    #[test]
+    #[cfg(unix)]
+    fn a_paste_nobody_reads_doesnt_block() {
+        let spec = ShellSpec { program: "/bin/sh".into(), args: vec!["-c".into(), "sleep 30".into()], cwd: None, env: vec![], shell: None };
+        let pty = Pty::spawn(&spec, 80, 24, |_| {}).unwrap();
+        let start = std::time::Instant::now();
+        for _ in 0..64 {
+            pty.write(&[b'x'; 16 * 1024]).unwrap();
+        }
+        assert!(start.elapsed() < Duration::from_secs(2), "{:?}", start.elapsed());
+        drop(pty);
     }
 }

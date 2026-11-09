@@ -64,7 +64,9 @@ pub fn command(spec: &Spec) -> Result<Command, String> {
                 return Err(format!("not a valid SSH host: {host:?}"));
             }
             let mut c = Command::new("ssh");
-            c.args(["-T", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "--", host]).arg(remote_line(spec));
+            // A host that doesn't answer fails in seconds, not after the command's whole limit.
+            c.args(["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=30", "--", host])
+                .arg(remote_line(spec));
             c
         }
         Location::Wsl { distro } => wsl::command(distro, &remote_script(spec, true))?,

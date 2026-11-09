@@ -34,31 +34,44 @@ pub fn cheapest(kind: AgentKind, binary: &str, location: &Location, cwd: &str) -
     if let Some((_, _, c)) = PICKED.lock().unwrap().iter().find(|(k, l, _)| *k == kind && l == location) {
         return c.clone();
     }
-    let c = match kind {
-        AgentKind::Claude => Cheap { model: Some("haiku".into()), label: "Haiku".into(), ..Default::default() },
+    let fallback = || Cheap { model: None, label: "default model".into(), ..Default::default() };
+    // `listed`: the models could be asked for. A lookup that failed (the CLI slow to start,
+    // offline) isn't remembered, or every later answer would use the default model.
+    let (c, listed) = match kind {
+        AgentKind::Claude => (Cheap { model: Some("haiku".into()), label: "Haiku".into(), ..Default::default() }, true),
         AgentKind::Codex => {
             let prog = program(kind, binary);
-            let models =
-                crate::account::codex_once(&prog, location, "model/list", serde_json::json!({"limit": 100, "includeHidden": false}))
-                    .map(|v| crate::codex::parse_models(&v))
-                    .unwrap_or_default();
-            pick_codex(&models)
-        }
-        AgentKind::Opencode | AgentKind::Opencode2 => {
-            pick_opencode(&crate::acp::opencode_models(binary, location, cwd, &[]).unwrap_or_default())
-        }
-        AgentKind::Antigravity => {
-            match crate::antigravity::models(binary, location, cwd, &[]).ok().and_then(|m| crate::antigravity::pick_cheap(&m)) {
-                Some((model, effort, label)) => Cheap { model: Some(model), effort, label },
-                None => Cheap { model: None, label: "default model".into(), ..Default::default() },
+            match crate::account::codex_once(&prog, location, "model/list", serde_json::json!({"limit": 100, "includeHidden": false})) {
+                Ok(v) => (pick_codex(&crate::codex::parse_models(&v)), true),
+                Err(_) => (pick_codex(&[]), false),
             }
         }
-        AgentKind::Grok => match crate::grok::models(binary, location, &[]).ok().and_then(|m| crate::grok::pick_cheap(&m)) {
-            Some((model, effort, label)) => Cheap { model: Some(model), effort, label },
-            None => Cheap { model: None, label: "default model".into(), ..Default::default() },
+        AgentKind::Opencode | AgentKind::Opencode2 => match crate::acp::opencode_models(binary, location, cwd, &[]) {
+            Ok(m) => (pick_opencode(&m), true),
+            Err(_) => (pick_opencode(&[]), false),
+        },
+        AgentKind::Antigravity => match crate::antigravity::models(binary, location, cwd, &[]) {
+            Ok(m) => (
+                crate::antigravity::pick_cheap(&m)
+                    .map(|(model, effort, label)| Cheap { model: Some(model), effort, label })
+                    .unwrap_or_else(fallback),
+                true,
+            ),
+            Err(_) => (fallback(), false),
+        },
+        AgentKind::Grok => match crate::grok::models(binary, location, &[]) {
+            Ok(m) => (
+                crate::grok::pick_cheap(&m)
+                    .map(|(model, effort, label)| Cheap { model: Some(model), effort, label })
+                    .unwrap_or_else(fallback),
+                true,
+            ),
+            Err(_) => (fallback(), false),
         },
     };
-    PICKED.lock().unwrap().push((kind, location.clone(), c.clone()));
+    if listed {
+        PICKED.lock().unwrap().push((kind, location.clone(), c.clone()));
+    }
     c
 }
 

@@ -176,3 +176,112 @@ fn worktrees_add_and_remove() {
     assert_eq!(worktree::worktrees(&r).unwrap().len(), 1);
     assert!(!branches(&r).unwrap().iter().any(|b| b.name == "feat/new-thing"), "branch deleted");
 }
+
+/// A file named `*` is a file, not a pattern: discarding it leaves every other change alone.
+#[cfg(unix)]
+#[test]
+fn discarding_a_file_named_star_discards_only_it() {
+    let (dir, r) = repo();
+    for f in ["keep.txt", "*"] {
+        std::fs::write(dir.path().join(f), "1\n").unwrap();
+    }
+    sh(dir.path(), &["add", "-A"]);
+    sh(dir.path(), &["commit", "-q", "-m", "init"]);
+    for f in ["keep.txt", "*"] {
+        std::fs::write(dir.path().join(f), "2\n").unwrap();
+    }
+    std::fs::write(dir.path().join("new.txt"), "n\n").unwrap();
+    discard(&r, &["*".into()], &[]).unwrap();
+    assert_eq!(std::fs::read_to_string(dir.path().join("keep.txt")).unwrap(), "2\n", "keep.txt keeps its change");
+    assert_eq!(std::fs::read_to_string(dir.path().join("*")).unwrap(), "1\n");
+    // An untracked `*` beside other untracked files.
+    std::fs::remove_file(dir.path().join("*")).unwrap();
+    sh(dir.path(), &["rm", "-q", "--cached", "--", ":(literal)*"]);
+    std::fs::write(dir.path().join("*"), "x\n").unwrap();
+    discard(&r, &[], &["*".into()]).unwrap();
+    assert!(!dir.path().join("*").exists());
+    assert!(dir.path().join("new.txt").exists(), "other untracked files stay");
+}
+
+/// A worktree made from `origin/main` (the default base in a clone) pushes under its own name
+/// instead of failing on a plain `git push`; one already tracking `origin/main` is fixed too.
+#[test]
+fn a_worktree_from_the_remote_default_pushes_under_its_own_name() {
+    let (dir, r) = repo();
+    let remote = tempfile::tempdir().unwrap();
+    sh(remote.path(), &["init", "-q", "--bare", "-b", "main"]);
+    std::fs::write(dir.path().join("a"), "1").unwrap();
+    commit(&r, "one", false, true).unwrap();
+    sh(dir.path(), &["remote", "add", "origin", &remote.path().to_string_lossy()]);
+    sync(&r, SyncOp::Push).unwrap();
+    sh(dir.path(), &["fetch", "-q", "origin"]);
+
+    let path = worktree::default_dir(&r, "", "feat/x");
+    worktree::add(&r, &path, "feat/x", "origin/main").unwrap();
+    let wt = Repo::new(Location::Local, path.clone());
+    assert_eq!(status(&wt).unwrap().upstream, None, "not tracking origin/main");
+    std::fs::write(std::path::Path::new(&path).join("b"), "2").unwrap();
+    commit(&wt, "two", false, true).unwrap();
+    sync(&wt, SyncOp::Push).unwrap();
+    assert_eq!(status(&wt).unwrap().upstream.as_deref(), Some("origin/feat/x"));
+
+    // A branch an older oah made, tracking origin/main.
+    sh(dir.path(), &["branch", "-q", "--track", "old", "origin/main"]);
+    let old_path = worktree::default_dir(&r, "", "old");
+    worktree::add(&r, &old_path, "old", "").unwrap();
+    let old = Repo::new(Location::Local, old_path.clone());
+    std::fs::write(std::path::Path::new(&old_path).join("c"), "3").unwrap();
+    commit(&old, "three", false, true).unwrap();
+    sync(&old, SyncOp::Push).unwrap();
+    assert_eq!(status(&old).unwrap().upstream.as_deref(), Some("origin/old"));
+    worktree::remove(&r, &path, true, false).unwrap();
+    worktree::remove(&r, &old_path, true, false).unwrap();
+}
+
+/// A project that's a folder inside a bigger repo sees its own changes, with paths from the
+/// folder, and staging, diffs and commit-all work on them.
+#[test]
+fn a_project_inside_a_bigger_repo() {
+    let (dir, _) = repo();
+    std::fs::create_dir_all(dir.path().join("frontend/src")).unwrap();
+    std::fs::create_dir_all(dir.path().join("backend")).unwrap();
+    std::fs::write(dir.path().join("frontend/src/x.ts"), "1\n").unwrap();
+    std::fs::write(dir.path().join("backend/y.rs"), "1\n").unwrap();
+    sh(dir.path(), &["add", "-A"]);
+    sh(dir.path(), &["commit", "-q", "-m", "init"]);
+    std::fs::write(dir.path().join("frontend/src/x.ts"), "2\n").unwrap();
+    std::fs::write(dir.path().join("frontend/new.ts"), "n\n").unwrap();
+    std::fs::write(dir.path().join("backend/y.rs"), "2\n").unwrap();
+
+    let r = Repo::new(Location::Local, dir.path().join("frontend").to_string_lossy());
+    let st = status(&r).unwrap();
+    let paths = |c: &[Change]| c.iter().map(|c| c.path.clone()).collect::<Vec<_>>();
+    assert_eq!(paths(&st.unstaged), ["src/x.ts"]);
+    assert_eq!(paths(&st.untracked), ["new.ts"]);
+    assert_eq!((st.unstaged[0].added, st.unstaged[0].removed), (1, 1));
+    assert!(diff(&r, "src/x.ts", false, false).unwrap().contains("+2"));
+    stage(&r, &["src/x.ts".into()]).unwrap();
+    assert_eq!(paths(&status(&r).unwrap().staged), ["src/x.ts"]);
+    commit(&r, "frontend", false, true).unwrap();
+    let st = status(&r).unwrap();
+    assert!(st.unstaged.is_empty() && st.untracked.is_empty());
+    // The other folder's change wasn't swept into the commit.
+    let top = Repo::new(Location::Local, dir.path().to_string_lossy());
+    assert_eq!(paths(&status(&top).unwrap().unstaged), ["backend/y.rs"]);
+}
+
+#[test]
+fn commit_message_diffs_skip_generated_files_and_cap_each_file() {
+    let diff = format!(
+        "diff --git a/Cargo.lock b/Cargo.lock\n@@ -1 +1 @@\n-{}\n+{}\ndiff --git a/src/a.rs b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/big.txt b/big.txt\n@@ -1 +1 @@\n+{}\n",
+        "x".repeat(50_000),
+        "y".repeat(50_000),
+        "é".repeat(10_000)
+    );
+    let out = trim_diff_for_message(&diff, 1000);
+    assert!(out.contains("diff --git a/Cargo.lock b/Cargo.lock\n(generated file changed; not shown)"));
+    assert!(!out.contains("xxxx"));
+    assert!(out.contains("diff --git a/src/a.rs b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n"), "{out}");
+    assert!(out.contains("(rest of this file's changes cut)"));
+    assert!(out.len() < 2_000, "{}", out.len());
+}
