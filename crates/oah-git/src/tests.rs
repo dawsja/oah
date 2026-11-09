@@ -290,10 +290,12 @@ fn commit_message_diffs_skip_generated_files_and_cap_each_file() {
 #[test]
 fn search_hits_keep_odd_file_names() {
     let (dir, r) = repo();
-    std::fs::write(dir.path().join("café: notes.txt"), "hello there\n").unwrap();
+    // A colon can't be in a Windows file name (it names a stream there).
+    let name = if cfg!(windows) { "café notes.txt" } else { "café: notes.txt" };
+    std::fs::write(dir.path().join(name), "hello there\n").unwrap();
     let hits = grep(&r, "hello", 10).unwrap();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].path, "café: notes.txt");
+    assert_eq!(hits[0].path, name);
     assert_eq!((hits[0].line, hits[0].text.as_str()), (1, "hello there"));
 }
 
