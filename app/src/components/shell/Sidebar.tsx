@@ -23,6 +23,23 @@ import { UpdateButton } from "./Updates"
 import { useGit } from "@/store/git"
 
 /** Projects, each with its worktrees and their chats; Settings at the bottom. */
+/** A clickable row reached and used by keyboard too: Tab to it, Enter or Space to open it
+ *  (Shift+F10 or the menu key opens a chat's menu). */
+function rowKeys(activate: () => void) {
+  return {
+    role: "button",
+    tabIndex: 0,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return
+      e.preventDefault()
+      activate()
+    },
+  } as const
+}
+
+/** The focus outline rows show (the theme's ring is too faint to find a row by). */
+const ROW_FOCUS = "outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
+
 export function Sidebar() {
   useEffect(() => watchWsl(), [])
   const settings = useApp((s) => s.settings)
@@ -145,7 +162,12 @@ function ProjectGroup({ project }: { project: Project }) {
 
   return (
     <div className="mt-px">
-      <div className={cn("mx-1 rounded-md group flex h-8 cursor-pointer items-center gap-1.5 pr-1 pl-2 text-[12.5px] hover:bg-accent", active && "row-active")} onClick={() => (newChat(project.id, null), setOpen(true))}>
+      <div
+        className={cn("mx-1 rounded-md group flex h-8 cursor-pointer items-center gap-1.5 pr-1 pl-2 text-[12.5px] hover:bg-accent", ROW_FOCUS, active && "row-active")}
+        aria-label={`New chat in ${project.name}`}
+        {...rowKeys(() => (newChat(project.id, null), setOpen(true)))}
+        onClick={() => (newChat(project.id, null), setOpen(true))}
+      >
         <button
           className="grid size-4 place-items-center text-muted-foreground"
           aria-label={open ? "Collapse" : "Expand"}
@@ -160,7 +182,7 @@ function ProjectGroup({ project }: { project: Project }) {
         <span className="truncate font-medium">{project.name}</span>
         {remote ? <span className="truncate text-[11px] text-faint">{locationLabel(project.location)}</span> : null}
         {stopped && !selected ? <span className="rounded-full shrink-0 border px-1.5 text-[10px] text-faint">stopped</span> : null}
-        <div className="ml-auto flex opacity-0 group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
+        <div className="ml-auto flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 has-[[data-state=open]]:opacity-100">
           <Tip content="New chat" side="top">
             <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="New chat" onClick={(e) => (e.stopPropagation(), newChat(project.id, null))}>
               <Plus className="size-3.5" />
@@ -248,9 +270,15 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
 
   return (
     <>
-      <div className={cn("mx-1 rounded-md group/wt flex h-7 cursor-pointer items-center gap-1.5 pr-1 pl-6 text-[12.5px] hover:bg-accent", active && "row-active")} onClick={() => newChat(project.id, cwd)}>
+      <div
+        className={cn("mx-1 rounded-md group/wt flex h-7 cursor-pointer items-center gap-1.5 pr-1 pl-6 text-[12.5px] hover:bg-accent", ROW_FOCUS, active && "row-active")}
+        aria-label={`New chat in ${tree?.branch ?? "the main checkout"}`}
+        {...rowKeys(() => newChat(project.id, cwd))}
+        onClick={() => newChat(project.id, cwd)}
+      >
         <button
           className="grid size-4 place-items-center text-faint"
+          aria-label={open ? "Collapse" : "Expand"}
           onClick={(e) => {
             e.stopPropagation()
             setOpen(!open)
@@ -261,7 +289,7 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
         <GitBranch className={cn("size-3.5 shrink-0", "text-muted-foreground")} />
         <span className="truncate font-mono text-[12px]">{tree?.branch ?? "main checkout"}</span>
         {main ? <span className="rounded-full border px-1.5 text-[10px] text-faint">main</span> : null}
-        <div className="ml-auto flex opacity-0 group-hover/wt:opacity-100 has-[[data-state=open]]:opacity-100">
+        <div className="ml-auto flex opacity-0 group-hover/wt:opacity-100 group-focus-within/wt:opacity-100 has-[[data-state=open]]:opacity-100">
           <Tip content="New chat here" side="top">
             <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-background hover:text-foreground" aria-label="New chat here" onClick={(e) => (e.stopPropagation(), newChat(project.id, cwd))}>
               <Plus className="size-3.5" />
@@ -313,9 +341,15 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
         <div
           className={cn(
             "mx-1 rounded-md flex h-7 cursor-pointer items-center gap-2 pr-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground",
+            ROW_FOCUS,
             active && "row-active"
           )}
           style={{ paddingLeft: indent }}
+          aria-current={active ? "page" : undefined}
+          {...rowKeys(() => {
+            useApp.getState().selectProject(meta.projectId)
+            void useChats.getState().open(meta.id)
+          })}
           onClick={() => {
             useApp.getState().selectProject(meta.projectId)
             useChats.getState().open(meta.id)

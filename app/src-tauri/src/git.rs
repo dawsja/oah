@@ -146,6 +146,7 @@ pub async fn git_suggest_message(app: AppHandle, project_id: String, cwd: Option
             AgentKind::Claude,
             AgentKind::Codex,
             AgentKind::Opencode,
+            AgentKind::Opencode2,
             AgentKind::Antigravity,
             AgentKind::Grok,
         ]) {
@@ -161,8 +162,9 @@ pub async fn git_suggest_message(app: AppHandle, project_id: String, cwd: Option
             if r.location == Location::Local && oah_agents::probe::resolve(kind, &binary).is_none() {
                 continue;
             }
-            let cheap = oah_agents::oneshot::cheapest(kind, &binary, &r.location, &r.path);
-            match oah_agents::oneshot::ask(kind, &binary, &r.location, &r.path, &cheap, &question) {
+            let env = crate::secrets::resolve(&crate::secrets::scope(kind), &provider.env);
+            let cheap = oah_agents::oneshot::cheapest(kind, &binary, &r.location, &r.path, &env);
+            match oah_agents::oneshot::ask(kind, &binary, &r.location, &r.path, &env, &cheap, &question) {
                 Ok(reply) => {
                     let msg = oah_agents::oneshot::clean_message(&reply);
                     if !msg.is_empty() {

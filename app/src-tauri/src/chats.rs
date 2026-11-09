@@ -586,7 +586,13 @@ impl Chats {
     pub fn set_permission(&self, app: &AppHandle, chat_id: &str, mode: PermissionMode, announce: bool) -> Result<(), String> {
         self.permission(chat_id, Some(mode));
         if let Some(d) = self.driver(chat_id) {
-            d.lock().unwrap().set_permission(mode)?;
+            let mut d = d.lock().unwrap();
+            if d.takes_permission(mode) {
+                d.set_permission(mode)?;
+            } else {
+                // Restarted (resuming) with it before the next message.
+                self.restart.lock().unwrap().insert(chat_id.to_string());
+            }
         }
         if announce {
             let event = ChatEvent::PermissionChanged { mode };

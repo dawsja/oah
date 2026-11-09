@@ -73,7 +73,49 @@ pub fn command(spec: &Spec) -> Result<Command, String> {
     };
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     no_window(&mut cmd);
+    // Its own process group, so [`stop_tree`] can end what it starts too (an agent's shell
+    // commands, dev servers, MCP servers), not just the program itself.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     Ok(cmd)
+}
+
+/// Ends `child` and what it started on this computer: its process group on Unix (see
+/// [`command`]), its process tree on Windows. A program that exits by itself once its stdin is
+/// closed (close it first) gets `grace` to do so, and to finish writing its session.
+pub fn stop_tree(child: &mut std::process::Child, grace: std::time::Duration) {
+    let until = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < until {
+        match child.try_wait() {
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            _ => break,
+        }
+    }
+    #[cfg(unix)]
+    {
+        // The group outlives its leader while anything in it runs.
+        let group = child.id() as i32;
+        if group > 0 {
+            // SAFETY: a plain signal to a process group oah created.
+            unsafe {
+                libc::kill(-group, libc::SIGKILL);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        if matches!(child.try_wait(), Ok(None)) {
+            let mut kill = Command::new("taskkill");
+            kill.args(["/T", "/F", "/PID", &child.id().to_string()]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+            no_window(&mut kill);
+            let _ = kill.status();
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// The remote shell line for ssh: a login shell (`sh -lc`, so tools installed for the user are
@@ -256,8 +298,8 @@ pub fn run(spec: &Spec, input: Option<&[u8]>, limit: std::time::Duration) -> Res
         match child.try_wait() {
             Ok(Some(s)) => break s,
             Ok(None) if start.elapsed() > limit => {
-                let _ = child.kill();
-                let _ = child.wait();
+                // A hook it started (a pre-commit, a test runner) goes with it.
+                stop_tree(&mut child, std::time::Duration::ZERO);
                 return Err(format!("{} didn't finish in {}s", spec.program, limit.as_secs()));
             }
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(15)),
@@ -267,4 +309,39 @@ pub fn run(spec: &Spec, input: Option<&[u8]>, limit: std::time::Duration) -> Res
     let stdout = String::from_utf8_lossy(&t_out.join().unwrap_or_default()).into_owned();
     let stderr = String::from_utf8_lossy(&t_err.join().unwrap_or_default()).into_owned();
     Ok(Output { code: status.code(), stdout, stderr })
+}
+
+#[cfg(all(test, unix))]
+mod stop_tests {
+    use super::*;
+
+    /// What a program started in the background goes when it's stopped.
+    #[test]
+    fn stopping_ends_what_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let script = format!("sleep 60 & echo $! > '{}'; wait", pidfile.display());
+        let spec = Spec {
+            location: &Location::Local,
+            cwd: dir.path().to_str().unwrap(),
+            program: "sh",
+            args: vec!["-c".into(), script],
+            env: &[],
+        };
+        let mut child = command(&spec).unwrap().spawn().unwrap();
+        let mut pid = String::new();
+        for _ in 0..100 {
+            pid = std::fs::read_to_string(&pidfile).unwrap_or_default().trim().to_string();
+            if !pid.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let pid: i32 = pid.parse().expect("the background pid");
+        stop_tree(&mut child, std::time::Duration::ZERO);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        // SAFETY: signal 0 only checks that the process exists.
+        let alive = unsafe { libc::kill(pid, 0) } == 0;
+        assert!(!alive, "the background sleep was left running");
+    }
 }

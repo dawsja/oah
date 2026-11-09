@@ -104,6 +104,20 @@ function NewChat({ project }: { project: Project }) {
   const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
   const send = (text: string, images: { mime: string; data: string; name?: string }[] = []) =>
     useChats.getState().send(null, text, { agent, model: model ?? undefined, effort: effort || undefined, permission, cwd: draftCwd ?? undefined, images })
+  // On this computer, whether the chosen agent's CLI is there at all: said before the first
+  // message fails, with the way to install it.
+  const [installed, setInstalled] = useState<boolean | null>(null)
+  const binary = settings.providers[agent].binary
+  useEffect(() => {
+    setInstalled(null)
+    if (project.location.kind !== "local") return
+    let current = true
+    ipc.providerProbe(agent, binary).then(
+      (p) => current && setInstalled(p.found),
+      () => undefined,
+    )
+    return () => void (current = false)
+  }, [agent, binary, project.location.kind])
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
@@ -125,6 +139,15 @@ function NewChat({ project }: { project: Project }) {
                   </span>
                 ) : null}
               </p>
+              {installed === false ? (
+                <p className="mt-1.5 text-[12.5px] text-warn" role="status">
+                  {AGENT_LABEL[agent]} isn't installed on this computer.{" "}
+                  <button className="underline underline-offset-2 hover:text-foreground" onClick={() => useApp.getState().openSettings("providers")}>
+                    Set it up in Providers
+                  </button>
+                  {agentChoices(settings).length > 1 ? " or pick another agent below." : "."}
+                </p>
+              ) : null}
             </div>
           </div>
           <Composer

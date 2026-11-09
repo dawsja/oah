@@ -203,10 +203,11 @@ pub fn parse_log(out: &str) -> Vec<Commit> {
 }
 
 /// `git grep -n` lines: `path:line:text`.
+/// `git grep -n -z` output: `path\0line\0text` per line.
 pub fn parse_grep(out: &str, limit: usize) -> Vec<crate::GrepHit> {
     out.lines()
         .filter_map(|l| {
-            let mut p = l.splitn(3, ':');
+            let mut p = l.splitn(3, '\0');
             let path = p.next()?;
             let line = p.next()?.parse().ok()?;
             let text = p.next().unwrap_or("");

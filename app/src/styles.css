@@ -42,7 +42,7 @@
   --destructive: #dc2626;
   --border: #e1e4e9;
   --input: #d2d6dd;
-  --ring: #bfc4cd; /* focus: a soft gray, not gold */
+  --ring: #7c828f; /* focus: a gray, not gold; 3:1 or more on every surface */
 
   --sidebar: #eef0f3;
   --sidebar-foreground: #16181d;
@@ -54,7 +54,7 @@
   --sidebar-ring: #bfc4cd;
 
   --oah-deep: #eef0f3;
-  --oah-faint: #979dab;
+  --oah-faint: #6f7585; /* 4:1 or more on every light surface */
   --oah-brand: #16181d;
   --oah-gold: #f5b800;
   --oah-cyan: #1d4ed8;
@@ -92,7 +92,7 @@
   --destructive: #f87171;
   --border: rgb(255 255 255 / 8%);
   --input: rgb(255 255 255 / 12%);
-  --ring: rgb(255 255 255 / 22%); /* focus: a soft gray, not gold */
+  --ring: rgb(255 255 255 / 45%); /* focus: a gray, not gold; 3:1 or more on every surface */
 
   --sidebar: #080808;
   --sidebar-foreground: #ededed;
@@ -104,7 +104,7 @@
   --sidebar-ring: rgb(255 255 255 / 22%);
 
   --oah-deep: #080808;
-  --oah-faint: #6b6b6b;
+  --oah-faint: #858585; /* 4.9:1 or more on every dark surface */
   --oah-brand: #ededed;
   --oah-gold: #f5b800;
   --oah-cyan: #60a5fa;
@@ -186,7 +186,7 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
   }
   html, body, #root {
     @apply h-full overflow-clip;
@@ -278,4 +278,14 @@
     linear-gradient(-45deg, transparent 75%, var(--muted) 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Less movement for people who ask their system for it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

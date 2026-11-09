@@ -62,6 +62,11 @@ pub trait Driver: Send {
     fn set_permission(&mut self, _mode: PermissionMode) -> DriverResult<()> {
         Ok(())
     }
+    /// Whether the running CLI can switch to `mode` (else it's restarted, resuming its session,
+    /// before the next message, as for [`Driver::set_effort`]).
+    fn takes_permission(&self, _mode: PermissionMode) -> bool {
+        true
+    }
     /// Answers a [`crate::event::QuestionRequest`]: answers by question id.
     fn answer_question(&mut self, _request_id: &str, _answers: std::collections::BTreeMap<String, Vec<String>>) -> DriverResult<()> {
         Err("this agent doesn't ask questions".into())

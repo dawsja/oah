@@ -24,6 +24,8 @@ type Props = {
   onSend: (text: string, images: Image[], how: "queue" | "now") => void | Promise<boolean | void>
   onStop?: () => void
   models: ModelOption[]
+  /** The model list couldn't be had (the desktop or its agent didn't answer). */
+  modelsFailed?: boolean
   model: string
   effort: string
   onModel?: (model: string, effort: string) => void
@@ -291,7 +293,11 @@ export function MobileComposer(p: Props) {
             <SheetTitle>Model</SheetTitle>
           </SheetHeader>
           <div className="px-4 pb-2">
-            {p.models.length === 0 ? <div className="py-2 text-[13px] text-muted-foreground">Loading models…</div> : null}
+            {p.models.length === 0 ? (
+              <div className="py-2 text-[13px] text-muted-foreground">
+                {p.modelsFailed ? "The agent didn't list its models. The chat uses its default; close and reopen this to try again." : "Loading models…"}
+              </div>
+            ) : null}
             <div className="divide-y rounded-lg border">
               {p.models.map((m) => (
                 <button

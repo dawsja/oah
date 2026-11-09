@@ -730,9 +730,10 @@ impl Driver for AcpDriver {
 
     fn stop(&mut self) {
         self.rpc.stdin.lock().unwrap().take();
+        // Stdin closed: it may exit by itself (saving its session); then it and everything it
+        // started (commands, servers) end.
         if let Some(mut c) = self.child.lock().unwrap().take() {
-            let _ = c.kill();
-            let _ = c.wait();
+            oah_transport::stop_tree(&mut c, std::time::Duration::from_millis(500));
         }
     }
 }

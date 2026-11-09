@@ -180,7 +180,7 @@ export function ChatsScreen() {
   const projects = useMobile((s) => s.projects)
   const metas = useMobile((s) => s.metas)
   const waiting = useMobile((s) => s.waiting)
-  const loadedOnce = useMobile((s) => s.projects.length > 0 || s.metas.length > 0)
+  const loadedOnce = useMobile((s) => s.listed || s.projects.length > 0 || s.metas.length > 0)
   const [menu, setMenu] = useState<ChatMeta | null>(null)
 
   // Projects with something waiting for you first, then recent ones; in each, the chats that

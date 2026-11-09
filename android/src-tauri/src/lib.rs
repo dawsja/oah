@@ -195,6 +195,18 @@ fn connect(app: tauri::AppHandle, state: State<AppState>, id: String, on_event: 
                 addresses.retain(|a| *a != last);
                 addresses.insert(0, last);
             }
+            // None of its addresses has answered for a while (a new Wi-Fi address, another
+            // port): look for it nearby too. It's safe to try whoever answers; only the desktop
+            // with this key can finish the handshake.
+            if attempt >= 2 {
+                if let Ok(found) = oah_remote::discovery::discover().await {
+                    for f in found {
+                        if !addresses.contains(&f.address) {
+                            addresses.push(f.address);
+                        }
+                    }
+                }
+            }
             let events = on_event.clone();
             let why = match Client::connect(&addresses, &identity, &key, move |push| {
                 let _ = events.send(json!({ "kind": "push", "push": push }));
@@ -206,6 +218,19 @@ fn connect(app: tauri::AppHandle, state: State<AppState>, id: String, on_event: 
                     let session = Arc::new(session);
                     remember_address(&app, &desktop.id, &session.address);
                     *c.lock().unwrap() = Some(session.clone());
+                    // Where the desktop is now, for next time.
+                    {
+                        let (app, id, session) = (app.clone(), desktop.id.clone(), session.clone());
+                        tauri::async_runtime::spawn(async move {
+                            if let Ok(hello) = session.call("hello", Value::Null).await {
+                                let now: Vec<String> = hello["addresses"]
+                                    .as_array()
+                                    .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                                    .unwrap_or_default();
+                                learn_addresses(&app, &id, &now);
+                            }
+                        });
+                    }
                     let _ = on_event.send(
                         json!({ "kind": "state", "state": "connected", "address": session.address, "desktopName": session.desktop_name }),
                     );
@@ -238,11 +263,40 @@ fn remember_address(app: &tauri::AppHandle, id: &str, address: &str) {
     let changed = {
         let mut s = state.saved.lock().unwrap();
         match s.desktops.iter_mut().find(|d| d.id == id) {
-            Some(d) if d.last_address.as_deref() != Some(address) => {
+            Some(d) if d.last_address.as_deref() != Some(address) || !d.addresses.iter().any(|a| a == address) => {
                 d.last_address = Some(address.to_string());
+                if !d.addresses.iter().any(|a| a == address) {
+                    d.addresses.insert(0, address.to_string());
+                }
                 true
             }
             _ => false,
+        }
+    };
+    if changed {
+        state.save();
+    }
+}
+
+/// The desktop's addresses now (from its `hello`) go first in the list; old ones stay behind
+/// them (a VPN address can be the one that works away from home), up to a few.
+fn learn_addresses(app: &tauri::AppHandle, id: &str, now: &[String]) {
+    if now.is_empty() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let changed = {
+        let mut s = state.saved.lock().unwrap();
+        match s.desktops.iter_mut().find(|d| d.id == id) {
+            Some(d) => {
+                let mut next: Vec<String> = now.to_vec();
+                next.extend(d.addresses.iter().filter(|a| !now.contains(a)).cloned());
+                next.truncate(8);
+                let changed = next != d.addresses;
+                d.addresses = next;
+                changed
+            }
+            None => false,
         }
     };
     if changed {

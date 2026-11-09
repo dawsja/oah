@@ -11,7 +11,8 @@ export type LinkState = "idle" | "connecting" | "connected" | "offline" | "revok
 export type LinkEvent =
   | { kind: "state"; state: Exclude<LinkState, "idle">; error?: string; address?: string; desktopName?: string }
   | { kind: "push"; push: Push }
-export type Push = { push: "chat"; chatId: string; event: ChatEvent } | { push: "chats" } | { push: "resync" }
+/** `seq`: the event's number in its chat (absent from desktops before it was sent). */
+export type Push = { push: "chat"; chatId: string; seq?: number; event: ChatEvent } | { push: "chats" } | { push: "resync" }
 
 /** What a chat waits for from you. */
 export type Waiting = "approval" | "question" | "plan"

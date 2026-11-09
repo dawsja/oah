@@ -65,7 +65,8 @@ impl Host for AppHost {
     fn check_agent(&self, kind: AgentKind, location: &Location) -> AgentCheck {
         let s = self.settings();
         let binary = s.providers.get(kind).binary_on(location);
-        let acct = account::account(kind, &binary, location);
+        let env = crate::secrets::resolve(&crate::secrets::scope(kind), &s.providers.get(kind).env);
+        let acct = account::account(kind, &binary, location, &env);
         // `probe` looks on this computer only; elsewhere, a sign-in answer means it's there.
         let (installed, version, perr) = match location {
             Location::Local => {
@@ -96,6 +97,10 @@ impl Host for AppHost {
 
     fn running(&self) -> Vec<String> {
         self.state().chats.running()
+    }
+
+    fn busy(&self, chat_id: &str) -> bool {
+        self.state().chats.busy().iter().any(|c| c == chat_id)
     }
 
     fn create(&self, chat: NewChat) -> HostResult<ChatMeta> {

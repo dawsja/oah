@@ -95,6 +95,8 @@ pub const HOST_METHODS: &[&str] = &[
     "provider.catalog",
 ];
 
-pub fn chat_push(chat_id: &str, event: &Value) -> Value {
-    serde_json::json!({ "push": "chat", "chatId": chat_id, "event": event })
+/// One of a chat's events, with its number (as in the `chat.open` snapshot's `seq`), so the phone
+/// can line live events up with a snapshot that arrives by another way.
+pub fn chat_push(chat_id: &str, seq: u64, event: &Value) -> Value {
+    serde_json::json!({ "push": "chat", "chatId": chat_id, "seq": seq, "event": event })
 }

@@ -57,7 +57,14 @@ pub fn parse_worktrees(out: &str) -> Vec<Worktree> {
 }
 
 pub fn worktrees(repo: &Repo) -> Result<Vec<Worktree>, String> {
-    Ok(parse_worktrees(&repo.git(&["worktree", "list", "--porcelain", "-z"])?))
+    match repo.git(&["worktree", "list", "--porcelain", "-z"]) {
+        Ok(out) => Ok(parse_worktrees(&out)),
+        // `-z` is git 2.36+ (Ubuntu 22.04 has 2.34): the same, a line per field.
+        Err(e) if e.contains("unknown switch") || e.contains("usage: git worktree") => {
+            Ok(parse_worktrees(&repo.git(&["worktree", "list", "--porcelain"])?.replace('\n', "\0")))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// A branch name made safe for a folder: `feat/new thing` → `feat-new-thing`.

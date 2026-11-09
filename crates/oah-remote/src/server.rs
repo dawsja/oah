@@ -68,6 +68,11 @@ pub trait Host: Send + Sync + 'static {
     fn identity(&self) -> Identity;
     /// What the phone shows for this desktop.
     fn desktop_name(&self) -> String;
+    /// Where phones can reach this desktop now (`ip:port`): the phone keeps its list current
+    /// with these, so a new Wi-Fi address doesn't strand it.
+    fn addresses(&self) -> Vec<String> {
+        Vec::new()
+    }
     /// The id of the paired device with this key, if there is one.
     fn device(&self, public_key: &[u8; 32]) -> Option<String>;
     /// Saves a newly paired device; returns its id.
@@ -267,18 +272,29 @@ async fn pair(inner: &Arc<Inner>, ws: &mut Ws, spake_phone: Vec<u8>) {
             .await;
     };
     let (state, spake_desktop) = pairing::start(&code);
-    if wire::send(ws, wire::PAIR, &spake_desktop).await.is_err() {
-        return;
+    // Every way a counted try can end without the right code is reported, so the desktop's
+    // dialog shows the tries left (and closes the code) instead of carrying on unaware.
+    let mut key = None;
+    let mut hello = None;
+    if wire::send(ws, wire::PAIR, &spake_desktop).await.is_ok() {
+        key = pairing::finish(state, &spake_phone).ok();
+        if let Some(k) = &key {
+            if let Ok((wire::PAIR, sealed)) = wire::recv(ws).await {
+                hello = pairing::open(k, Dir::Phone, &sealed).and_then(|b| serde_json::from_slice::<PhoneHello>(&b).ok());
+            }
+        }
     }
-    let Ok(key) = pairing::finish(state, &spake_phone) else { return wire::fail(ws, "The pairing message didn't read.").await };
-    let Ok((wire::PAIR, sealed)) = wire::recv(ws).await else { return };
-    let hello = pairing::open(&key, Dir::Phone, &sealed).and_then(|b| serde_json::from_slice::<PhoneHello>(&b).ok());
-    let Some(hello) = hello else {
+    let (Some(key), Some(hello)) = (key, hello) else {
         let left = {
             let mut p = inner.pairing.lock().unwrap();
-            let left = p.as_ref().filter(|s| s.code == code).map(|s| pairing::MAX_ATTEMPTS.saturating_sub(s.attempts)).unwrap_or(0);
-            if left == 0 {
+            // A try at a code that has since been replaced says nothing about the new one.
+            let ours = p.as_ref().is_some_and(|s| s.code == code);
+            let left = p.as_ref().filter(|_| ours).map(|s| pairing::MAX_ATTEMPTS.saturating_sub(s.attempts)).unwrap_or(0);
+            if ours && left == 0 {
                 *p = None;
+            }
+            if !ours {
+                return;
             }
             left
         };
@@ -344,6 +360,22 @@ async fn session(inner: Arc<Inner>, mut ws: Ws, msg1: Vec<u8>, pending: Pending)
     }
     let Ok(transport) = Transport::new(hs) else { return };
     let transport = Arc::new(transport);
+    // Only the phone can open what comes next: its first message proves it holds its key. Until
+    // then this isn't a session (a recorded first handshake message, replayed, gets this far),
+    // so it isn't counted, shown as connected, or sent anything.
+    let proof = tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Binary(b))) => return Some(b),
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return None,
+                Some(Ok(_)) => continue,
+            }
+        }
+    })
+    .await;
+    let Ok(Some(proof)) = proof else { return };
+    let Some((&wire::DATA, body)) = proof.split_first() else { return };
+    let Ok(first) = transport.open(body) else { return };
     drop(pending);
 
     let conn_id = inner.next_conn.fetch_add(1, Ordering::SeqCst);
@@ -390,7 +422,7 @@ async fn session(inner: Arc<Inner>, mut ws: Ws, msg1: Vec<u8>, pending: Pending)
                             None => sub.held.push((seq, event)),
                             Some(s) if seq > s => {
                                 sub.seq = Some(seq);
-                                let _ = out.send(proto::chat_push(&chat_id, &event).to_string().into_bytes());
+                                let _ = out.send(proto::chat_push(&chat_id, seq, &event).to_string().into_bytes());
                             }
                             Some(_) => {}
                         }
@@ -409,6 +441,12 @@ async fn session(inner: Arc<Inner>, mut ws: Ws, msg1: Vec<u8>, pending: Pending)
         })
     };
 
+    if let Some(whole) = first {
+        match serde_json::from_slice::<Request>(&whole) {
+            Ok(req) => handle(&inner, &device_id, req, &out, &subs),
+            Err(_) => kick.notify_one(),
+        }
+    }
     loop {
         let frame = tokio::select! {
             _ = kick.notified() => break,
@@ -453,9 +491,16 @@ fn handle(
 ) {
     let Request { id, method, params } = req;
     match method.as_str() {
-        proto::HELLO => {
-            respond(out, id, Ok(json!({ "desktopName": inner.host.desktop_name(), "protocol": crate::PROTOCOL, "deviceId": device_id })))
-        }
+        proto::HELLO => respond(
+            out,
+            id,
+            Ok(json!({
+                "desktopName": inner.host.desktop_name(),
+                "protocol": crate::PROTOCOL,
+                "deviceId": device_id,
+                "addresses": inner.host.addresses(),
+            })),
+        ),
         proto::CHAT_OPEN => {
             let chat = match chat_id(&params) {
                 Ok(c) => c,
@@ -477,7 +522,7 @@ fn handle(
                             for (s, e) in std::mem::take(&mut sub.held) {
                                 if s > last {
                                     last = s;
-                                    let _ = out.send(proto::chat_push(&chat, &e).to_string().into_bytes());
+                                    let _ = out.send(proto::chat_push(&chat, s, &e).to_string().into_bytes());
                                 }
                             }
                             sub.seq = Some(last);

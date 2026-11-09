@@ -20,11 +20,13 @@ const NONE: never[] = []
 /** Models for a chat: what its agent said, else the agent's catalog (loaded when asked). */
 function useModels(agent: AgentInfo | undefined, projectId: string | null, live: ModelOption[]) {
   const [catalog, setCatalog] = useState<ModelOption[]>([])
+  const [failed, setFailed] = useState(false)
   const load = () => {
     if (!agent || live.length) return
-    void useMobile.getState().catalog(agent, projectId).then((c) => c && setCatalog(c.models))
+    setFailed(false)
+    void useMobile.getState().catalog(agent, projectId).then((c) => (c ? setCatalog(c.models) : setFailed(true)))
   }
-  return { models: live.length ? live : catalog, load }
+  return { models: live.length ? live : catalog, load, failed: !live.length && failed }
 }
 
 export function ChatScreen({ chatId }: { chatId: string }) {
@@ -46,7 +48,7 @@ export function ChatScreen({ chatId }: { chatId: string }) {
 
   const agent = agents.find((a) => a.kind === meta?.agent)
   const t = transcript ?? emptyTranscript()
-  const { models, load } = useModels(agent, meta?.projectId ?? null, t.models)
+  const { models, load, failed: modelsFailed } = useModels(agent, meta?.projectId ?? null, t.models)
   const source = useMemo<ImageSource>(
     () => ({ key: `phone:${desktopId}:${chatId}`, chatImage: (file) => api.image(chatId, file), readImage: (path) => api.readImage(chatId, path) }),
     [desktopId, chatId],
@@ -107,6 +109,7 @@ export function ChatScreen({ chatId }: { chatId: string }) {
         }}
         onStop={() => void st.interrupt(chatId)}
         models={models}
+        modelsFailed={modelsFailed}
         model={model}
         effort={meta?.effort ?? ""}
         onModel={(m, e) => void st.setModel(chatId, m, e)}
@@ -131,7 +134,7 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
   const [pick, setPick] = useState<string | null>(null)
   const agent = agents.find((a) => a.kind === pick) ?? agents.find((a) => a.kind === preferred) ?? agents[0]
   const [model, setModel] = useState("")
-  const { models, load } = useModels(agent, projectId, NONE)
+  const { models, load, failed: modelsFailed } = useModels(agent, projectId, NONE)
   const [sending, setSending] = useState(false)
 
   return (
@@ -170,6 +173,7 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
           return !!id
         }}
         models={models}
+        modelsFailed={modelsFailed}
         model={model || agent?.defaultModel || ""}
         effort=""
         onModel={(m) => setModel(m)}

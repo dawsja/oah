@@ -285,3 +285,25 @@ fn commit_message_diffs_skip_generated_files_and_cap_each_file() {
     assert!(out.contains("(rest of this file's changes cut)"));
     assert!(out.len() < 2_000, "{}", out.len());
 }
+
+/// Search hits in a file whose name git would quote (non-ASCII, a colon) open that file.
+#[test]
+fn search_hits_keep_odd_file_names() {
+    let (dir, r) = repo();
+    std::fs::write(dir.path().join("café: notes.txt"), "hello there\n").unwrap();
+    let hits = grep(&r, "hello", 10).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "café: notes.txt");
+    assert_eq!((hits[0].line, hits[0].text.as_str()), (1, "hello there"));
+}
+
+/// Git before 2.36 lists worktrees a field per line; the same parser reads it.
+#[test]
+fn worktrees_from_older_git() {
+    let old = "worktree /code/app\nHEAD 0123456789abcdef\nbranch refs/heads/main\n\nworktree /code/app-wt/feat\nHEAD fedcba9876543210\nbranch refs/heads/feat\n\n";
+    let list = worktree::parse_worktrees(&old.replace('\n', "\0"));
+    assert_eq!(list.len(), 2);
+    assert!(list[0].main && !list[1].main);
+    assert_eq!(list[1].branch.as_deref(), Some("feat"));
+    assert_eq!(list[1].path, "/code/app-wt/feat");
+}

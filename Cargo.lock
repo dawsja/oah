@@ -2955,6 +2955,7 @@ dependencies = [
 name = "oah-transport"
 version = "0.3.10"
 dependencies = [
+ "libc",
  "oah-core",
  "portable-pty",
  "serde",

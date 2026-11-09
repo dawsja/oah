@@ -30,7 +30,7 @@ pub struct Cheap {
 static PICKED: Mutex<Vec<(AgentKind, Location, Cheap)>> = Mutex::new(Vec::new());
 
 /// The cheapest model `kind` offers on `location`.
-pub fn cheapest(kind: AgentKind, binary: &str, location: &Location, cwd: &str) -> Cheap {
+pub fn cheapest(kind: AgentKind, binary: &str, location: &Location, cwd: &str, env: &[EnvVar]) -> Cheap {
     if let Some((_, _, c)) = PICKED.lock().unwrap().iter().find(|(k, l, _)| *k == kind && l == location) {
         return c.clone();
     }
@@ -41,16 +41,17 @@ pub fn cheapest(kind: AgentKind, binary: &str, location: &Location, cwd: &str) -
         AgentKind::Claude => (Cheap { model: Some("haiku".into()), label: "Haiku".into(), ..Default::default() }, true),
         AgentKind::Codex => {
             let prog = program(kind, binary);
-            match crate::account::codex_once(&prog, location, "model/list", serde_json::json!({"limit": 100, "includeHidden": false})) {
+            match crate::account::codex_once(&prog, location, env, "model/list", serde_json::json!({"limit": 100, "includeHidden": false}))
+            {
                 Ok(v) => (pick_codex(&crate::codex::parse_models(&v)), true),
                 Err(_) => (pick_codex(&[]), false),
             }
         }
-        AgentKind::Opencode | AgentKind::Opencode2 => match crate::acp::opencode_models(binary, location, cwd, &[]) {
+        AgentKind::Opencode | AgentKind::Opencode2 => match crate::acp::opencode_models(binary, location, cwd, env) {
             Ok(m) => (pick_opencode(&m), true),
             Err(_) => (pick_opencode(&[]), false),
         },
-        AgentKind::Antigravity => match crate::antigravity::models(binary, location, cwd, &[]) {
+        AgentKind::Antigravity => match crate::antigravity::models(binary, location, cwd, env) {
             Ok(m) => (
                 crate::antigravity::pick_cheap(&m)
                     .map(|(model, effort, label)| Cheap { model: Some(model), effort, label })
@@ -59,7 +60,7 @@ pub fn cheapest(kind: AgentKind, binary: &str, location: &Location, cwd: &str) -
             ),
             Err(_) => (fallback(), false),
         },
-        AgentKind::Grok => match crate::grok::models(binary, location, &[]) {
+        AgentKind::Grok => match crate::grok::models(binary, location, env) {
             Ok(m) => (
                 crate::grok::pick_cheap(&m)
                     .map(|(model, effort, label)| Cheap { model: Some(model), effort, label })
@@ -105,7 +106,15 @@ fn program(kind: AgentKind, binary: &str) -> String {
 }
 
 /// Asks `question` (on stdin) and returns the answer.
-pub fn ask(kind: AgentKind, binary: &str, location: &Location, cwd: &str, cheap: &Cheap, question: &str) -> DriverResult<String> {
+pub fn ask(
+    kind: AgentKind,
+    binary: &str,
+    location: &Location,
+    cwd: &str,
+    env: &[EnvVar],
+    cheap: &Cheap,
+    question: &str,
+) -> DriverResult<String> {
     if kind == AgentKind::Grok {
         let opts = crate::driver::StartOptions {
             kind,
@@ -116,7 +125,7 @@ pub fn ask(kind: AgentKind, binary: &str, location: &Location, cwd: &str, cheap:
             effort: cheap.effort.clone(),
             permission: oah_core::settings::PermissionMode::Ask,
             resume: None,
-            env: vec![],
+            env: env.to_vec(),
         };
         return crate::acp::ask_once(opts, question, Duration::from_secs(180));
     }
@@ -140,14 +149,15 @@ pub fn ask(kind: AgentKind, binary: &str, location: &Location, cwd: &str, cheap:
         args.push("-".into());
     }
     // OpenCode answers read-only, like the others: no edits, commands or fetches, never shared.
-    let env: Vec<EnvVar> = if kind.is_opencode() {
-        [("OPENCODE_PERMISSION", r#"{"edit":"deny","bash":"deny","webfetch":"deny"}"#), ("OPENCODE_DISABLE_SHARE", "1")]
-            .map(|(k, v)| EnvVar { key: k.into(), value: v.into(), in_keychain: false })
-            .to_vec()
-    } else {
-        vec![]
-    };
-    let mut env = env;
+    // The provider's own environment (its account, config folder, key) first.
+    let mut env: Vec<EnvVar> = env.to_vec();
+    if kind.is_opencode() {
+        env.retain(|v| v.key != "OPENCODE_PERMISSION" && v.key != "OPENCODE_DISABLE_SHARE");
+        env.extend(
+            [("OPENCODE_PERMISSION", r#"{"edit":"deny","bash":"deny","webfetch":"deny"}"#), ("OPENCODE_DISABLE_SHARE", "1")]
+                .map(|(k, v)| EnvVar { key: k.into(), value: v.into(), in_keychain: false }),
+        );
+    }
     // Antigravity reads the question as stream-json and answers in it.
     let input = if kind == AgentKind::Antigravity {
         crate::antigravity::acp_env(&mut env);

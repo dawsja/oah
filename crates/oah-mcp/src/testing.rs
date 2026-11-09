@@ -89,6 +89,9 @@ impl Host for Fake {
         });
         Ok(())
     }
+    fn busy(&self, _: &str) -> bool {
+        false
+    }
     fn interrupt(&self, _: &str) -> HostResult<()> {
         Ok(())
     }

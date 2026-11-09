@@ -67,20 +67,21 @@ fn program(kind: AgentKind, binary: &str) -> String {
     }
 }
 
-/// Sign-in state from the CLI itself.
-pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
+/// Sign-in state from the CLI itself, with the provider's environment (a config folder or key
+/// set in Settings → Providers decides which account it is).
+pub fn account(kind: AgentKind, binary: &str, location: &Location, env: &[EnvVar]) -> Account {
     let prog = program(kind, binary);
     let args: Vec<String> = match kind {
         AgentKind::Claude => vec!["auth".into(), "status".into(), "--json".into()],
         AgentKind::Codex => vec!["login".into(), "status".into()],
         AgentKind::Opencode | AgentKind::Opencode2 => vec!["auth".into(), "list".into()],
         // `agy` has no status command: its token store says who.
-        AgentKind::Antigravity => return crate::antigravity::account(location, &[]),
+        AgentKind::Antigravity => return crate::antigravity::account(location, env),
         // Nor `grok`: its `auth.json` says who.
-        AgentKind::Grok => return crate::grok::account(location, &[]),
+        AgentKind::Grok => return crate::grok::account(location, env),
     };
     let cwd = if matches!(location, Location::Local) { oah_core::paths::home_dir().to_string_lossy().into_owned() } else { "~".into() };
-    let out = match oah_transport::run(&Spec { location, cwd: &cwd, program: &prog, args, env: &[] }, None, Duration::from_secs(20)) {
+    let out = match oah_transport::run(&Spec { location, cwd: &cwd, program: &prog, args, env }, None, Duration::from_secs(20)) {
         Ok(o) => o,
         Err(e) => return Account { error: Some(e), ..Default::default() },
     };
@@ -93,7 +94,7 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
             let mut a = parse_codex_status(&format!("{}\n{}", out.stdout, out.stderr));
             // `login status` only says "ChatGPT"; the app-server knows which account.
             if a.signed_in && a.label.as_deref() == Some("ChatGPT") {
-                if let Ok(v) = codex_once(&prog, location, "account/read", json!({})) {
+                if let Ok(v) = codex_once(&prog, location, env, "account/read", json!({})) {
                     apply_codex_account(&mut a, &v);
                 }
             }
@@ -481,17 +482,17 @@ fn opencode_go_key(location: &Location, env: &[EnvVar]) -> Option<String> {
 
 // ---- Codex -----------------------------------------------------------------------------------
 
-pub fn codex_limits(binary: &str, location: &Location) -> Limits {
-    match codex_once(&program(AgentKind::Codex, binary), location, "account/rateLimits/read", Value::Null) {
+pub fn codex_limits(binary: &str, location: &Location, env: &[EnvVar]) -> Limits {
+    match codex_once(&program(AgentKind::Codex, binary), location, env, "account/rateLimits/read", Value::Null) {
         Ok(v) => Limits { windows: parse_codex_limits(&v), error: None, extra: vec![], missing: false },
         Err(e) => Limits { windows: vec![], error: Some(e), extra: vec![], missing: false },
     }
 }
 
 /// One request to a short-lived `codex app-server` (where `location` says).
-pub fn codex_once(prog: &str, location: &Location, method: &str, params: Value) -> Result<Value, String> {
+pub fn codex_once(prog: &str, location: &Location, env: &[EnvVar], method: &str, params: Value) -> Result<Value, String> {
     let home = if matches!(location, Location::Local) { oah_core::paths::home_dir().to_string_lossy().into_owned() } else { "~".into() };
-    let mut child = oah_transport::command(&Spec { location, cwd: &home, program: prog, args: vec!["app-server".into()], env: &[] })?
+    let mut child = oah_transport::command(&Spec { location, cwd: &home, program: prog, args: vec!["app-server".into()], env })?
         .spawn()
         .map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
@@ -524,8 +525,7 @@ pub fn codex_once(prog: &str, location: &Location, method: &str, params: Value) 
             }
         }
     })();
-    let _ = child.kill();
-    let _ = child.wait();
+    oah_transport::stop_tree(&mut child, Duration::ZERO);
     result
 }
 

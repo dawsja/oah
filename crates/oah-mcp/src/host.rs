@@ -65,6 +65,9 @@ pub trait Host: Send + Sync + 'static {
     fn chats(&self) -> Vec<ChatMeta>;
     /// Chats whose agent CLI is running.
     fn running(&self) -> Vec<String>;
+    /// The chat's agent still has work: a turn running, or a message queued behind one (which
+    /// the events alone can't show between one turn's end and the next one's start).
+    fn busy(&self, chat_id: &str) -> bool;
     fn create(&self, chat: NewChat) -> HostResult<ChatMeta>;
     /// Sends a message, starting the chat's agent if it isn't running; returns once it's sent.
     fn send(&self, chat_id: &str, prompt: Prompt, permission: Option<PermissionMode>) -> HostResult<()>;

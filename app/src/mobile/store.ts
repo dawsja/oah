@@ -18,6 +18,8 @@ type Store = {
   linkError: string | null
   desktopName: string
   projects: Project[]
+  /** The desktop has answered with its list at least once (it may have no projects). */
+  listed: boolean
   agents: AgentInfo[]
   defaultAgent: AgentKind
   metas: ChatMeta[]
@@ -75,6 +77,7 @@ export const useMobile = create<Store>((set, get) => ({
   linkError: null,
   desktopName: "",
   projects: [],
+  listed: false,
   agents: [],
   defaultAgent: "claude",
   metas: [],
@@ -117,7 +120,7 @@ export const useMobile = create<Store>((set, get) => ({
     localStorage.setItem(LAST, id)
     const d = get().desktops.find((x) => x.id === id)
     // The last list seen from this desktop shows (read-only) until it answers.
-    set({ desktopId: id, link: "connecting", linkError: null, desktopName: d?.name ?? "", transcripts: {}, running: [], busy: [], waiting: {}, ...cached(id) })
+    set({ desktopId: id, link: "connecting", linkError: null, desktopName: d?.name ?? "", transcripts: {}, running: [], busy: [], waiting: {}, listed: false, ...cached(id) })
     await native.connect(id, onLink).catch((e) => set({ link: "offline", linkError: String(e) }))
   },
 
@@ -133,7 +136,7 @@ export const useMobile = create<Store>((set, get) => ({
       agents: agents.agents,
       defaultAgent: agents.defaultAgent,
     }
-    set({ ...next, running: chats.running, busy: chats.busy, waiting: chats.waiting ?? {} })
+    set({ ...next, running: chats.running, busy: chats.busy, waiting: chats.waiting ?? {}, listed: true })
     const id = get().desktopId
     if (id) cache(id, next)
   },
@@ -143,13 +146,21 @@ export const useMobile = create<Store>((set, get) => ({
     if (prev && prev !== chatId) void api.close(prev).catch(() => {})
     set({ chatId })
     if (get().link !== "connected") return
+    // The snapshot (an answer) and live events (pushes) arrive by different ways, in either
+    // order: events wait until it's in, and the ones it already has are dropped.
+    loading.set(chatId, [])
     try {
       const snap = await api.open(chatId)
+      const held = loading.get(chatId) ?? []
+      loading.delete(chatId)
       if (get().chatId !== chatId) return
-      const t = replay(snap.events, snap.busy, snap.live)
-      // Events that came in while it loaded were held by the desktop and follow this answer.
+      snapshotSeq.set(chatId, snap.seq)
+      const t = held.filter(([seq]) => seq === undefined || seq > snap.seq).reduce((t, [, e]) => reduce(t, e), replay(snap.events, snap.busy, snap.live))
       set((s) => ({ transcripts: { ...s.transcripts, [chatId]: t } }))
+      // A turn that ended while the chat was closed sends what was queued for it.
+      if (!t.running && get().queued[chatId]?.length) void get().sendQueued(chatId)
     } catch (e) {
+      loading.delete(chatId)
       fail(e)
     }
   },
@@ -312,15 +323,25 @@ function onPush(p: Push) {
     if (s.chatId) void s.open(s.chatId)
     return
   }
-  if (p.push === "chat") push(p.chatId, p.event)
+  if (p.push === "chat") push(p.chatId, p.event, p.seq)
 }
 
+/** Chats whose snapshot is loading, and the events (with their numbers) that came meanwhile. */
+const loading = new Map<string, [number | undefined, ChatEvent][]>()
+/** Per chat, the last event number its snapshot had. */
+const snapshotSeq = new Map<string, number>()
+
 /** Batches events per animation frame so streaming text doesn't re-render per token. */
-let queue: [string, ChatEvent][] = []
+let queue: [string, ChatEvent, number | undefined][] = []
 let scheduled = false
-function push(chatId: string, event: ChatEvent) {
+function push(chatId: string, event: ChatEvent, seq?: number) {
   if (event.type === "permissionChanged") useMobile.setState((s) => ({ permission: { ...s.permission, [chatId]: event.mode } }))
-  queue.push([chatId, event])
+  const held = loading.get(chatId)
+  if (held) {
+    held.push([seq, event])
+    return
+  }
+  queue.push([chatId, event, seq])
   if (scheduled) return
   scheduled = true
   requestAnimationFrame(() => {
@@ -329,7 +350,10 @@ function push(chatId: string, event: ChatEvent) {
     queue = []
     useMobile.setState((s) => {
       const transcripts = { ...s.transcripts }
-      for (const [id, e] of batch) if (transcripts[id]) transcripts[id] = reduce(transcripts[id], e)
+      for (const [id, e, seq] of batch) {
+        if (!transcripts[id] || (seq !== undefined && seq <= (snapshotSeq.get(id) ?? 0))) continue
+        transcripts[id] = reduce(transcripts[id], e)
+      }
       return { transcripts }
     })
     // A turn that ended by itself sends the next queued message; one that was stopped holds them.

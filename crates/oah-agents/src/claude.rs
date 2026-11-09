@@ -27,6 +27,9 @@ pub struct ClaudeDriver {
     state: Arc<Mutex<State>>,
     sink: Sink,
     turn: u32,
+    /// Started able to switch to Full access (Claude Code only allows that when it's launched
+    /// with `--allow-dangerously-skip-permissions`).
+    full_access: bool,
 }
 
 /// What the reader thread and the driver share.
@@ -163,7 +166,7 @@ impl ClaudeDriver {
             });
         }
 
-        let d = ClaudeDriver { stdin, child, state, sink, turn: 0 };
+        let d = ClaudeDriver { stdin, child, state, sink, turn: 0, full_access: opts.permission == PermissionMode::FullAccess };
         d.write(&json!({"type": "control_request", "request_id": "oah-init", "request": {"subtype": "initialize", "hooks": null}}))?;
         d.write(&json!({"type": "control_request", "request_id": "oah-models", "request": {"subtype": "list_models"}}))?;
         Ok(d)
@@ -246,6 +249,10 @@ impl Driver for ClaudeDriver {
         self.write(&json!({"type": "control_request", "request_id": format!("oah-model-{}", self.turn), "request": {"subtype": "set_model", "model": m}}))
     }
 
+    fn takes_permission(&self, mode: PermissionMode) -> bool {
+        mode != PermissionMode::FullAccess || self.full_access
+    }
+
     fn set_permission(&mut self, mode: PermissionMode) -> DriverResult<()> {
         if mode != PermissionMode::Plan {
             self.state.lock().unwrap().after_plan = mode;
@@ -284,9 +291,10 @@ impl Driver for ClaudeDriver {
 
     fn stop(&mut self) {
         self.stdin.lock().unwrap().take();
+        // Stdin closed: it may exit by itself (saving its session); then it and everything it
+        // started (commands, servers) end.
         if let Some(mut c) = self.child.lock().unwrap().take() {
-            let _ = c.kill();
-            let _ = c.wait();
+            oah_transport::stop_tree(&mut c, std::time::Duration::from_millis(500));
         }
     }
 }
@@ -348,6 +356,17 @@ impl Translator {
             "assistant" => self.assistant(v),
             "user" => self.tool_results(v),
             "control_request" => self.control_request(v),
+            // A control request oah sent was refused (a model it doesn't know, a mode it can't
+            // switch to): say so rather than look like it worked.
+            "control_response"
+                if v["response"]["subtype"] == "error"
+                    && v["response"]["request_id"]
+                        .as_str()
+                        .is_some_and(|id| ["oah-model-", "oah-mode-", "oah-effort-", "oah-stop-"].iter().any(|p| id.starts_with(p))) =>
+            {
+                let what = v["response"]["error"].as_str().unwrap_or("Claude Code refused a setting change");
+                self.emit(ChatEvent::Notice { level: NoticeLevel::Warn, text: what.to_string() });
+            }
             "control_response" if v["response"]["request_id"] == "oah-init" => {
                 self.state.lock().unwrap().version = v["response"]["response"]["claude_code_version"].as_str().map(String::from);
                 let commands = parse_commands(&v["response"]["response"]);
@@ -885,11 +904,15 @@ pub fn parse_commands(r: &Value) -> Vec<SlashCommand> {
 
 /// Claude Code's models and slash commands, from a short-lived `claude -p` (for a chat that
 /// hasn't started).
-pub fn catalog(binary: &str, location: &oah_core::settings::Location, cwd: &str) -> DriverResult<(Vec<ModelOption>, Vec<SlashCommand>)> {
+pub fn catalog(
+    binary: &str,
+    location: &oah_core::settings::Location,
+    cwd: &str,
+    env: &[oah_core::settings::EnvVar],
+) -> DriverResult<(Vec<ModelOption>, Vec<SlashCommand>)> {
     let program = if binary.trim().is_empty() { AgentKind::Claude.default_binary().to_string() } else { binary.to_string() };
     let args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"].map(String::from).to_vec();
-    let mut child =
-        oah_transport::command(&Spec { location, cwd, program: &program, args, env: &[] })?.spawn().map_err(|e| e.to_string())?;
+    let mut child = oah_transport::command(&Spec { location, cwd, program: &program, args, env })?.spawn().map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let (tx, rx) = std::sync::mpsc::channel();
@@ -1043,6 +1066,16 @@ mod tests {
         }
         let v = out.lock().unwrap().clone();
         v
+    }
+
+    /// A setting the user changed that Claude Code refused shows as a notice; a refused probe
+    /// of oah's own (the context meter, after every turn) stays quiet.
+    #[test]
+    fn refused_setting_changes_are_said() {
+        let err = |id: &str| json!({"type": "control_response", "response": {"subtype": "error", "request_id": id, "error": "Cannot set permission mode to bypassPermissions"}});
+        let out = run(&[err("oah-mode-3"), err("oah-ctx-3")]);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(matches!(&out[0], ChatEvent::Notice { text, .. } if text.contains("bypassPermissions")));
     }
 
     #[test]

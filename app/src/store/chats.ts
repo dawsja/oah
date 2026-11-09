@@ -158,7 +158,16 @@ export const useChats = create<ChatsStore>((set, get) => ({
       const project = useApp.getState().settings?.projects.find((p) => p.id === (meta?.projectId ?? useApp.getState().projectId))
       const where = project?.location.kind === "wsl" ? project.location : null
       const canSignIn = login && project?.location.kind !== "ssh"
-      toast.error(msg, canSignIn ? { action: { label: "Sign in", onClick: () => void ipc.providerLogin(login, where).catch((err) => toast.error(String(err))) } } : undefined)
+      // Not installed: the install command is in Settings → Providers.
+      const missing = msg.includes("isn't installed")
+      toast.error(
+        msg,
+        canSignIn
+          ? { action: { label: "Sign in", onClick: () => void ipc.providerLogin(login, where).catch((err) => toast.error(String(err))) } }
+          : missing
+            ? { action: { label: "Providers", onClick: () => useApp.getState().openSettings("providers") } }
+            : undefined,
+      )
       if (id && !chatId && app.projectId) {
         // Its first message never went: no empty chat is left, and the message is back in the
         // box it was typed in.

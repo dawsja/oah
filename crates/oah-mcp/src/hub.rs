@@ -113,6 +113,8 @@ impl Status {
                     self.tools.clear();
                     self.files.clear();
                     self.last_error = None;
+                    // The last turn's usage isn't this one's.
+                    self.last_turn = None;
                 }
                 self.busy = true;
             }
@@ -176,6 +178,19 @@ impl Status {
 }
 
 impl Status {
+    /// The agent's answer: its last message this turn, at most `max` bytes (the end is kept).
+    pub fn answer(&self, max: usize) -> String {
+        let mut s = self.texts.iter().rev().map(|t| t.1.trim()).find(|t| !t.is_empty()).unwrap_or("").to_string();
+        if s.len() > max {
+            let mut cut = s.len() - max;
+            while !s.is_char_boundary(cut) {
+                cut += 1;
+            }
+            s.replace_range(..cut, "…");
+        }
+        s
+    }
+
     /// What the agent said this turn, paragraphs in order; a long reply keeps its end.
     pub fn reply(&self) -> String {
         let mut s = self.texts.iter().map(|t| t.1.trim()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n\n");

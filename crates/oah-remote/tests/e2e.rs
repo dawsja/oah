@@ -251,3 +251,37 @@ async fn nearby_request_needs_local_approval_and_code_and_is_rate_limited() {
     client::pair(&addr, &code, "Pixel", &Identity::generate()).await.unwrap();
     assert_eq!(host.devices.lock().unwrap().len(), 1);
 }
+
+/// Someone who recorded a paired phone's first handshake message can replay it and get the
+/// desktop's answer, but can't open or send anything: that's not a session, and the phone
+/// isn't shown as connected.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_replayed_handshake_is_not_a_session() {
+    use futures_util::SinkExt;
+    use oah_remote::wire;
+    let (host, server, addr) = start().await;
+    let phone = Identity::generate();
+    let code = server.open_pairing().code;
+    let p = client::pair(&addr, &code, "Pixel", &phone).await.unwrap();
+
+    // The replayed message is a real one; whoever replays it doesn't have the phone's key, so
+    // what they send next can't be opened.
+    let url = format!("ws://{}{}", addr[0], oah_remote::PATH);
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    let mut hs = wire::initiator(&phone, &p.desktop_key).unwrap();
+    let msg1 = wire::hs_write(&mut hs, json!({ "protocol": oah_remote::PROTOCOL }).to_string().as_bytes()).unwrap();
+    wire::send(&mut ws, wire::HANDSHAKE, &msg1).await.unwrap();
+    let (kind, _msg2) = wire::recv(&mut ws).await.unwrap();
+    assert_eq!(kind, wire::HANDSHAKE);
+    let mut garbage = vec![wire::DATA];
+    garbage.extend_from_slice(&[7u8; 64]);
+    ws.send(tokio_tungstenite::tungstenite::Message::Binary(garbage.into())).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(server.connected().is_empty(), "{:?}", server.connected());
+    assert!(!host.events.lock().unwrap().iter().any(|e| matches!(e, Event::Connected { .. })));
+
+    // The phone itself, with its key, connects.
+    let c = Client::connect(&addr, &phone, &p.desktop_key, |_| {}).await.unwrap();
+    c.call("hello", Value::Null).await.unwrap();
+    wait_for(|| server.connected() == ["dev1"]).await;
+}

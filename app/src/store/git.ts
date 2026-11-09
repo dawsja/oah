@@ -30,6 +30,29 @@ type GitStore = {
 
 export const key = (s: Scope) => `${s.projectId}|${s.cwd ?? ""}`
 
+const inflight = new Set<string>()
+const again = new Set<string>()
+
+/** One timer per folder, however many panels show its status. */
+const pollers = new Map<string, { users: number; timer: ReturnType<typeof setInterval> }>()
+
+function watch(scope: Scope, every: number): () => void {
+  const k = key(scope)
+  const p = pollers.get(k)
+  if (p) p.users++
+  else {
+    const refresh = () => document.visibilityState === "visible" && void useGit.getState().refresh(scope)
+    pollers.set(k, { users: 1, timer: setInterval(refresh, every) })
+  }
+  return () => {
+    const p = pollers.get(k)
+    if (p && --p.users === 0) {
+      clearInterval(p.timer)
+      pollers.delete(k)
+    }
+  }
+}
+
 export const useGit = create<GitStore>((set, get) => ({
   status: {},
   errors: {},
@@ -43,11 +66,24 @@ export const useGit = create<GitStore>((set, get) => ({
   },
 
   async refresh(scope) {
+    const k = key(scope)
+    // One `git status` per folder at a time (three processes, or ssh connections); asks that
+    // come meanwhile get one more run after it, not one each.
+    if (inflight.has(k)) {
+      again.add(k)
+      return
+    }
+    inflight.add(k)
     try {
       const st = await git.status(scope)
-      set((s) => ({ status: { ...s.status, [key(scope)]: st }, errors: { ...s.errors, [key(scope)]: null } }))
+      // Unchanged (most polls): nothing re-renders.
+      const same = JSON.stringify(get().status[k]) === JSON.stringify(st)
+      if (!same || get().errors[k]) set((s) => ({ status: same ? s.status : { ...s.status, [k]: st }, errors: { ...s.errors, [k]: null } }))
     } catch (e) {
-      set((s) => ({ errors: { ...s.errors, [key(scope)]: String(e) } }))
+      set((s) => ({ errors: { ...s.errors, [k]: String(e) } }))
+    } finally {
+      inflight.delete(k)
+      if (again.delete(k)) void get().refresh(scope)
     }
   },
 
@@ -101,11 +137,13 @@ export function useStatus(scope: Scope | null) {
   const turns = useChats((s) => Object.values(s.transcripts).filter((t) => !t.running).length)
   useEffect(() => {
     if (!scope) return
-    const refresh = () => document.visibilityState === "visible" && useGit.getState().refresh(scope)
-    refresh()
-    const t = setInterval(refresh, remote ? 15_000 : 4_000)
-    return () => clearInterval(t)
+    return watch(scope, remote ? 15_000 : 4_000)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [k, remote, turns])
+  }, [k, remote])
+  // Now, and after each turn (the agent may have changed files); shared by every panel.
+  useEffect(() => {
+    if (scope && document.visibilityState === "visible") void useGit.getState().refresh(scope)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [k, turns])
   return { status: status ?? null, error: error ?? null, loading: status === undefined && !error }
 }

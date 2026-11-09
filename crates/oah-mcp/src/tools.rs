@@ -19,6 +19,14 @@ use crate::transcript::{self, cut};
 const CATALOG_TTL: Duration = Duration::from_secs(300);
 /// The longest a call waits for a turn.
 const MAX_WAIT: u64 = 1800;
+/// The most of the agent's answer a report carries (its end is kept).
+const MAX_ANSWER: usize = 8_000;
+/// Tool lines a report lists (the count says how many ran).
+const LAST_TOOLS: usize = 8;
+/// Files listed per group in get_changes.
+const MAX_FILES: usize = 100;
+/// A page of get_diff.
+const DIFF_PAGE: usize = 20_000;
 /// Progress is reported at least this often while waiting.
 const TICK: Duration = Duration::from_secs(10);
 
@@ -41,129 +49,155 @@ pub type Progress<'a> = &'a mut dyn FnMut(String);
 pub type ToolResult = Result<String, String>;
 
 // ---- Schemas ---------------------------------------------------------------------------------
+//
+// Every client sends this list to its model on every turn, so each thing is said once: what a
+// session id is (in the server's instructions), what the permission modes mean (on
+// create_session), and so on.
 
-const PERMISSION: &str = "How much the agent may do without asking: `ask` (asks before edits and commands), `acceptEdits` (edits go through, commands ask), `plan` (read only, proposes a plan to approve), `fullAccess` (never asks; only if oah allows it in Settings → MCP).";
+const PERMISSION: &str = "`ask` (asks before edits and commands), `acceptEdits` (edits go through, commands ask), `plan` (read only, proposes a plan), `fullAccess` (never asks; only if oah allows it). Default: the session's own, else the agent's.";
+const MODES: [&str; 4] = ["ask", "acceptEdits", "plan", "fullAccess"];
 
 fn tool(name: &str, title: &str, description: &str, props: Value, required: &[&str], read_only: bool, destructive: bool) -> Value {
+    let mut schema = json!({ "type": "object", "properties": props });
+    if !required.is_empty() {
+        schema["required"] = json!(required);
+    }
     json!({
         "name": name,
         "title": title,
         "description": description,
-        "inputSchema": { "type": "object", "properties": props, "required": required, "additionalProperties": false },
-        "annotations": { "title": title, "readOnlyHint": read_only, "destructiveHint": destructive, "openWorldHint": false },
+        "inputSchema": schema,
+        "annotations": { "readOnlyHint": read_only, "destructiveHint": destructive, "openWorldHint": false },
     })
 }
 
+fn string() -> Value {
+    json!({"type": "string"})
+}
+
 fn session_id() -> Value {
-    json!({"type": "string", "description": "The session id (from create_session or list_sessions)."})
+    string()
+}
+
+fn mode(described: bool) -> Value {
+    if described {
+        json!({"type": "string", "enum": MODES, "description": PERMISSION})
+    } else {
+        json!({"type": "string", "enum": MODES, "description": "As in create_session."})
+    }
 }
 
 fn place() -> (Value, Value) {
     (
-        json!({"type": "string", "description": "A worktree of the project by branch name (see list_worktrees)."}),
-        json!({"type": "string", "description": "A folder inside the project (a worktree path). Default: the project folder."}),
+        json!({"type": "string", "description": "Run in this branch's worktree (list_worktrees)."}),
+        json!({"type": "string", "description": "A folder in the project or a worktree. Default: the project folder."}),
     )
 }
 
 pub fn list(settings: &Settings) -> Vec<Value> {
     let (worktree, cwd) = place();
-    let wait = json!({"type": "boolean", "description": "Wait for the turn to finish or to need you (an approval or a question) before returning. Default true."});
-    let timeout = json!({"type": "integer", "minimum": 1, "maximum": MAX_WAIT, "description": "Longest wait, in seconds (default 300). On timeout the session keeps running: call wait_for_session."});
-    let agent = json!({"type": "string", "enum": ["claude", "codex", "opencode", "opencode2", "antigravity", "grok"], "description": "The agent CLI: Claude Code, Codex, OpenCode (`opencode`), OpenCode 2 (`opencode2`), Antigravity (`antigravity`, Google's `agy`) or Grok Build (`grok`, xAI's). Default: the project's, else oah's default."});
+    let agents: Vec<Value> = AgentKind::ALL.iter().map(|k| json!(k)).collect();
+    let agent = json!({"type": "string", "enum": agents, "description": "Default: the project's, else oah's (list_agents)."});
+    let wait = json!({"type": "boolean", "description": "Wait until the turn finishes or needs an answer. Default true."});
+    let timeout = |default: u64| json!({"type": "integer", "minimum": 1, "maximum": MAX_WAIT, "description": format!("Seconds, default {default}. The session keeps running after.")});
     let mut tools = vec![
-        tool("list_projects", "List projects", "The projects open in oah (on this computer, in WSL or over SSH). Sessions run in one of them.", json!({}), &[], true, false),
-        tool("list_worktrees", "List worktrees", "A project's git worktrees (one branch checked out per folder). A session can run in one so several work on the repo at once.",
-            json!({"project_id": {"type": "string"}}), &["project_id"], true, false),
-        tool("list_agents", "List agents", "The agent CLIs oah can run, whether each is turned on, installed and signed in where the project runs, and the default.",
-            json!({"project_id": {"type": "string", "description": "Check where this project runs (default: this computer)."}}), &[], true, false),
-        tool("list_models", "List models and efforts", "The models an agent offers and each one's reasoning effort levels (low … max), plus its slash commands. Pass session_id for what a running session's agent reports.",
+        tool("list_projects", "List projects", "Projects open in oah (this computer, WSL or SSH).", json!({}), &[], true, false),
+        tool("list_worktrees", "List worktrees", "A project's git worktrees; a session can run in one, so several work on the repo at once.",
+            json!({"project_id": string()}), &["project_id"], true, false),
+        tool("list_agents", "List agents", "Agent CLIs oah can run: on, installed and signed in where the project runs, and the default.",
+            json!({"project_id": {"type": "string", "description": "Check there. Default: this computer."}}), &[], true, false),
+        tool("list_models", "List models and efforts", "An agent's models and each one's effort levels.",
             json!({
                 "agent": agent.clone(),
-                "project_id": {"type": "string", "description": "Ask the CLI where this project runs."},
-                "session_id": {"type": "string", "description": "Instead: the models a started session's agent reported."},
+                "project_id": string(),
+                "session_id": {"type": "string", "description": "Instead: what this session's agent reports."},
+                "commands": {"type": "boolean", "description": "Also its slash commands. Default false."},
             }), &[], true, false),
-        tool("list_sessions", "List sessions", "oah's chats (sessions), newest first, with their state: `running`, `needsApproval`, `needsQuestion` or `idle`.",
+        tool("list_sessions", "List sessions", "Chats, newest first, with their state.",
             json!({
-                "project_id": {"type": "string"},
-                "active_only": {"type": "boolean", "description": "Only sessions whose agent is running now."},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "Default 30."},
+                "project_id": string(),
+                "active_only": {"type": "boolean", "description": "Only sessions whose agent runs now."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "Default 15."},
             }), &[], true, false),
-        tool("create_session", "Create a session", "Starts a new chat with a coding agent in a project. It shows in oah's sidebar, live. With `prompt` it starts working right away (and by default waits like send_message).",
+        tool("create_session", "Create a session", "A new chat with an agent in a project, shown live in oah. With `prompt` it starts working (and waits, like send_message).",
             json!({
-                "project_id": {"type": "string"},
+                "project_id": string(),
                 "agent": agent,
-                "model": {"type": "string", "description": "A model id from list_models. Default: the agent's."},
-                "effort": {"type": "string", "description": "A reasoning effort the model offers (list_models). Default: the model's."},
-                "permission": {"type": "string", "enum": ["ask", "acceptEdits", "plan", "fullAccess"], "description": PERMISSION},
-                "worktree": {"type": "string", "description": "Run in this branch's worktree; a new branch gets a new worktree."},
+                "model": {"type": "string", "description": "From list_models. Default: the agent's."},
+                "effort": {"type": "string", "description": "One the model offers (list_models)."},
+                "permission": mode(true),
+                "worktree": {"type": "string", "description": "Run in this branch's worktree; a new branch gets one."},
                 "cwd": cwd.clone(),
-                "title": {"type": "string", "description": "Default: from the first message."},
-                "prompt": {"type": "string", "description": "The first message."},
+                "title": string(),
+                "prompt": string(),
                 "wait": wait.clone(),
-                "timeout_s": timeout.clone(),
+                "timeout_s": timeout(300),
             }), &["project_id"], false, false),
-        tool("send_message", "Send a message", "Sends a message to a session (starting its agent if needed). Sent while a turn runs, Claude and Codex take it into the turn and other agents run it next. Returns what the agent said, the tools it ran and files it changed, or what it's waiting for.",
+        tool("send_message", "Send a message", "Sends a message, starting the agent if needed. During a turn, Claude and Codex take it in; others run it next. Returns a report: the agent's answer, tools run, files changed, or what it waits for.",
             json!({
                 "session_id": session_id(),
-                "text": {"type": "string"},
-                "images": {"type": "array", "items": {"type": "object", "properties": {"mime": {"type": "string"}, "data": {"type": "string", "description": "Base64."}}, "required": ["mime", "data"]}},
-                "permission": {"type": "string", "enum": ["ask", "acceptEdits", "plan", "fullAccess"], "description": PERMISSION},
+                "text": string(),
+                "images": {"type": "array", "items": {"type": "object", "properties": {"mime": string(), "data": {"type": "string", "description": "Base64."}}, "required": ["mime", "data"]}},
+                "permission": mode(false),
                 "wait": wait,
-                "timeout_s": timeout,
+                "timeout_s": timeout(300),
             }), &["session_id", "text"], false, false),
-        tool("wait_for_session", "Wait for a session", "Waits until a session's turn finishes (`idle`), needs you (`attention`: an approval or a question, or finished), or anything happens (`change`). Returns the same report as send_message.",
+        tool("wait_for_session", "Wait for a session", "Waits until the turn finishes (`idle`), needs an answer or finishes (`attention`), or anything happens (`change`); returns a report.",
             json!({
                 "session_id": session_id(),
                 "until": {"type": "string", "enum": ["attention", "idle", "change"], "description": "Default attention."},
-                "timeout_s": {"type": "integer", "minimum": 1, "maximum": MAX_WAIT, "description": "Default 120."},
+                "timeout_s": timeout(120),
             }), &["session_id"], true, false),
-        tool("get_session", "Get a session", "A session's settings and state now: what's waiting for an answer (with the full plan or command), the todo list, context use, and the reply so far.",
+        tool("get_session", "Get a session", "Settings and state now: what waits for an answer, the todo list, context use, the answer so far.",
             json!({"session_id": session_id()}), &["session_id"], true, false),
-        tool("get_transcript", "Read a session's transcript", "The conversation as Markdown: messages, replies, one line per tool, approvals and answers.",
+        tool("get_transcript", "Read a session's transcript", "The conversation as Markdown, one line per tool.",
             json!({
                 "session_id": session_id(),
-                "last_turns": {"type": "integer", "minimum": 0, "description": "Only the last this many turns; 0 is all. Default 3."},
-                "tool_output": {"type": "boolean", "description": "Include tools' output (otherwise only failures'). Default false."},
+                "last_turns": {"type": "integer", "minimum": 0, "description": "0 is all. Default 3."},
+                "tool_output": {"type": "boolean", "description": "Every tool's output, not just failures'."},
+                "max_chars": {"type": "integer", "minimum": 1000, "description": "Default 12000; the oldest part is cut."},
             }), &["session_id"], true, false),
-        tool("read_events", "Read a session's events", "The session's raw event log (oah's ChatEvent JSON) from a cursor, for exact detail. Use the returned `next` as `after` to continue.",
+        tool("read_events", "Read a session's events", "The raw event log (oah's ChatEvent JSON) from a cursor; `next` continues.",
             json!({
                 "session_id": session_id(),
-                "after": {"type": "integer", "minimum": 0, "description": "Skip this many events. Default 0."},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "description": "Default 50."},
+                "after": {"type": "integer", "minimum": 0, "description": "Skip this many. Default 0."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "description": "Default 20."},
+                "all": {"type": "boolean", "description": "Also model lists, command lists, context and reasoning. Default false."},
             }), &["session_id"], true, false),
-        tool("interrupt_session", "Stop a turn", "Stops what the session's agent is doing. The session stays; send another message to go on.",
+        tool("interrupt_session", "Stop a turn", "Stops the agent's turn; the session stays.",
             json!({"session_id": session_id()}), &["session_id"], false, false),
-        tool("answer_approval", "Answer an approval", "Answers what the agent asked permission for (a command, an edit, or a plan: allow approves the plan, deny keeps it planning). Whoever answers first, here or in oah, wins.",
+        tool("answer_approval", "Answer an approval", "Answers a pending approval (a command, an edit, or a plan: allow approves it, deny keeps planning). First answer, here or in oah, wins.",
             json!({
                 "session_id": session_id(),
-                "request_id": {"type": "string", "description": "From the report's pending approvals."},
-                "decision": {"type": "string", "enum": ["allow", "allowAlways", "deny"], "description": "allowAlways: this and the same kind for the rest of the session (when offered)."},
+                "request_id": string(),
+                "decision": {"type": "string", "enum": ["allow", "allowAlways", "deny"], "description": "allowAlways: this kind, for the rest of the session (when offered)."},
             }), &["session_id", "request_id", "decision"], false, false),
-        tool("answer_question", "Answer a question", "Answers questions the agent asked: option labels (several when multi-select), or typed text when allowed. An empty list skips a question.",
+        tool("answer_question", "Answer a question", "Answers the agent's questions: option labels, or typed text where allowed; an empty list skips one.",
             json!({
                 "session_id": session_id(),
-                "request_id": {"type": "string"},
-                "answers": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}, "description": "Question id → answers."},
+                "request_id": string(),
+                "answers": {"type": "object", "additionalProperties": {"type": "array", "items": string()}, "description": "Question id → answers."},
             }), &["session_id", "request_id", "answers"], false, false),
-        tool("set_session_options", "Change model, effort or permissions", "Switches a session's model, reasoning effort or permission mode, from the next message on (or now, where the agent can).",
-            json!({
-                "session_id": session_id(),
-                "model": {"type": "string"},
-                "effort": {"type": "string"},
-                "permission": {"type": "string", "enum": ["ask", "acceptEdits", "plan", "fullAccess"], "description": PERMISSION},
-            }), &["session_id"], false, false),
-        tool("compact_session", "Compact a session", "Summarizes the session's conversation to free context (the agent's /compact).",
-            json!({"session_id": session_id(), "instructions": {"type": "string", "description": "What the summary should keep."}}), &["session_id"], false, false),
-        tool("clear_session", "Clear a session's context", "The agent starts fresh from the next message (the transcript stays).",
+        tool("set_session_options", "Change model, effort or permissions", "From the next message on (now, where the agent can).",
+            json!({"session_id": session_id(), "model": string(), "effort": string(), "permission": mode(false)}), &["session_id"], false, false),
+        tool("compact_session", "Compact a session", "The agent's /compact: summarizes the conversation to free context.",
+            json!({"session_id": session_id(), "instructions": {"type": "string", "description": "What to keep."}}), &["session_id"], false, false),
+        tool("clear_session", "Clear a session's context", "The agent starts fresh from the next message; the transcript stays.",
             json!({"session_id": session_id()}), &["session_id"], false, true),
         tool("rename_session", "Rename a session", "Sets the title oah shows.",
-            json!({"session_id": session_id(), "title": {"type": "string"}}), &["session_id", "title"], false, false),
-        tool("close_session", "Close a session's agent", "Ends the session's agent CLI (it resumes the conversation on the next message). Use when done with a session.",
+            json!({"session_id": session_id(), "title": string()}), &["session_id", "title"], false, false),
+        tool("close_session", "Close a session's agent", "Ends its agent CLI (the next message resumes it). Use when done.",
             json!({"session_id": session_id()}), &["session_id"], false, false),
-        tool("get_changes", "Uncommitted changes", "git status where the project (or a worktree) is: branch, and files staged, changed, untracked and conflicted with line counts.",
-            json!({"project_id": {"type": "string"}, "worktree": worktree.clone(), "cwd": cwd.clone()}), &["project_id"], true, false),
-        tool("get_diff", "Diff of a file", "The uncommitted changes to one file, as a unified diff.",
-            json!({"project_id": {"type": "string"}, "path": {"type": "string", "description": "Relative to the folder."}, "worktree": worktree, "cwd": cwd}), &["project_id", "path"], true, false),
+        tool("get_changes", "Uncommitted changes", "git status where the project or a worktree is: branch, and files with line counts.",
+            json!({"project_id": string(), "worktree": worktree.clone(), "cwd": cwd.clone()}), &["project_id"], true, false),
+        tool("get_diff", "Diff of a file", "One file's uncommitted changes as a unified diff, in pages.",
+            json!({
+                "project_id": string(),
+                "path": {"type": "string", "description": "From the folder."},
+                "offset": {"type": "integer", "minimum": 0, "description": "Start here (a page's `next`). Default 0."},
+                "worktree": worktree,
+                "cwd": cwd,
+            }), &["project_id", "path"], true, false),
     ];
     if settings.mcp.allow_delete {
         tools.push(tool(
@@ -281,10 +315,12 @@ pub fn call(ctx: &Ctx, name: &str, a: Value, progress: Progress) -> ToolResult {
                 last_turns: Option<usize>,
                 #[serde(default)]
                 tool_output: bool,
+                max_chars: Option<usize>,
             }
             let a: A = args(a)?;
             meta(ctx, &a.session_id)?;
             let events = ctx.host.events(&a.session_id)?;
+            let max = a.max_chars.unwrap_or(12_000).max(1000);
             let mut md = transcript::render(
                 &events,
                 &transcript::Options { last_turns: a.last_turns.unwrap_or(3), tool_output: a.tool_output, request_ids: true },
@@ -296,12 +332,13 @@ pub fn call(ctx: &Ctx, name: &str, a: Value, progress: Progress) -> ToolResult {
                     md.push_str(&format!(": {t}"));
                 }
                 md.push_str(")_");
-                let reply = status.reply();
+                // Its newest words, which aren't in the log yet.
+                let reply = status.answer(4000);
                 if !reply.is_empty() {
-                    md.push_str(&format!("\n\nSo far this turn:\n{}", cut(&reply, 4000)));
+                    md.push_str(&format!("\n\nSo far this turn:\n{reply}"));
                 }
             }
-            Ok(md)
+            Ok(keep_end(&md, max, "(earlier turns cut: pass last_turns or a larger max_chars)"))
         }
         "read_events" => {
             #[derive(Deserialize)]
@@ -309,13 +346,29 @@ pub fn call(ctx: &Ctx, name: &str, a: Value, progress: Progress) -> ToolResult {
                 session_id: String,
                 after: Option<usize>,
                 limit: Option<usize>,
+                #[serde(default)]
+                all: bool,
             }
             let a: A = args(a)?;
             meta(ctx, &a.session_id)?;
             let events = ctx.host.events(&a.session_id)?;
             let after = a.after.unwrap_or(0).min(events.len());
-            let page: Vec<Value> = events[after..].iter().take(a.limit.unwrap_or(50).clamp(1, 500)).cloned().map(shrink).collect();
-            let next = after + page.len();
+            let limit = a.limit.unwrap_or(20).clamp(1, 500);
+            // Lists and meters that replace each other say little and cost a lot.
+            let noise = |e: &Value| {
+                matches!(e["type"].as_str(), Some("models" | "commands" | "context" | "reasoning" | "reasoningDelta" | "tasks"))
+            };
+            let mut next = after;
+            let mut page = Vec::new();
+            for e in &events[after..] {
+                if page.len() == limit {
+                    break;
+                }
+                next += 1;
+                if a.all || !noise(e) {
+                    page.push(shrink(e.clone()));
+                }
+            }
             Ok(to_text(&json!({"events": page, "next": next, "total": events.len()})))
         }
         "interrupt_session" => {
@@ -419,20 +472,35 @@ pub fn call(ctx: &Ctx, name: &str, a: Value, progress: Progress) -> ToolResult {
             }
             let a: A = args(a)?;
             let cwd = folder(ctx, &a.project_id, a.worktree.as_deref(), a.cwd, false)?;
-            Ok(to_text(&ctx.host.git_status(&a.project_id, cwd.as_deref())?))
+            let mut st = ctx.host.git_status(&a.project_id, cwd.as_deref())?;
+            // A repo with no .gitignore can list thousands of untracked files.
+            for group in ["staged", "unstaged", "untracked", "conflicted"] {
+                if let Some(list) = st.get_mut(group).and_then(Value::as_array_mut) {
+                    if list.len() > MAX_FILES {
+                        let more = list.len() - MAX_FILES;
+                        list.truncate(MAX_FILES);
+                        st[format!("{group}More")] = json!(more);
+                    }
+                }
+            }
+            Ok(to_text(&st))
         }
         "get_diff" => {
             #[derive(Deserialize)]
             struct A {
                 project_id: String,
                 path: String,
+                offset: Option<usize>,
                 worktree: Option<String>,
                 cwd: Option<String>,
             }
             let a: A = args(a)?;
             let cwd = folder(ctx, &a.project_id, a.worktree.as_deref(), a.cwd, false)?;
             let d = ctx.host.git_diff(&a.project_id, cwd.as_deref(), &a.path)?;
-            Ok(if d.trim().is_empty() { "No uncommitted changes to that file.".into() } else { cut(&d, 60_000) })
+            if d.trim().is_empty() {
+                return Ok("No uncommitted changes to that file.".into());
+            }
+            Ok(page(&d, a.offset.unwrap_or(0), DIFF_PAGE))
         }
         _ => Err(format!("no tool named {name}")),
     }
@@ -580,15 +648,26 @@ fn list_models(ctx: &Ctx, a: Value) -> ToolResult {
         agent: Option<AgentKind>,
         project_id: Option<String>,
         session_id: Option<String>,
+        #[serde(default)]
+        commands: bool,
     }
     let a: A = args(a)?;
+    let with_commands = a.commands;
+    let shape = move |mut v: Value| {
+        if !with_commands {
+            if let Some(o) = v.as_object_mut() {
+                o.remove("commands");
+            }
+        }
+        to_text(&v)
+    };
     if let Some(id) = a.session_id {
         let m = meta(ctx, &id)?;
         let s = ctx.hub.status(&id);
         if !s.models.is_empty() {
             return Ok(to_text(&json!({"agent": m.agent, "current": s.model, "models": s.models})));
         }
-        return list_models(ctx, json!({"agent": m.agent, "project_id": m.project_id}));
+        return list_models(ctx, json!({"agent": m.agent, "project_id": m.project_id, "commands": with_commands}));
     }
     let settings = ctx.host.settings();
     let kind = a.agent.unwrap_or_else(|| {
@@ -601,7 +680,7 @@ fn list_models(ctx: &Ctx, a: Value) -> ToolResult {
     let key = format!("{kind:?}|{}", a.project_id.as_deref().unwrap_or(""));
     if let Some((at, v)) = ctx.catalogs.lock().unwrap().get(&key) {
         if at.elapsed() < CATALOG_TTL {
-            return Ok(to_text(v));
+            return Ok(shape(v.clone()));
         }
     }
     let (models, commands) = ctx.host.catalog(kind, a.project_id.as_deref())?;
@@ -611,7 +690,7 @@ fn list_models(ctx: &Ctx, a: Value) -> ToolResult {
         "commands": commands.iter().map(|c| json!({"name": c.name, "description": c.description, "hint": c.hint})).collect::<Vec<_>>(),
     });
     ctx.catalogs.lock().unwrap().insert(key, (Instant::now(), v.clone()));
-    Ok(to_text(&v))
+    Ok(shape(v))
 }
 
 fn list_sessions(ctx: &Ctx, a: Value) -> ToolResult {
@@ -630,10 +709,18 @@ fn list_sessions(ctx: &Ctx, a: Value) -> ToolResult {
         .into_iter()
         .filter(|c| a.project_id.as_ref().is_none_or(|p| &c.project_id == p))
         .filter(|c| !a.active_only || running.contains(&c.id))
-        .take(a.limit.unwrap_or(30).clamp(1, 200))
+        .take(a.limit.unwrap_or(15).clamp(1, 200))
         .map(|c| {
             let state = if running.contains(&c.id) { ctx.hub.status(&c.id).state() } else { "idle" };
-            session_json(&c, state)
+            // Enough to pick one; get_session has the rest.
+            let mut v = json!({"sessionId": c.id, "title": c.title, "state": state, "agent": c.agent});
+            if !c.model.is_empty() {
+                v["model"] = json!(c.model);
+            }
+            if a.project_id.is_none() {
+                v["projectId"] = json!(c.project_id);
+            }
+            v
         })
         .collect();
     Ok(to_text(&json!(list)))
@@ -716,10 +803,20 @@ fn send(
 fn wait(ctx: &Ctx, id: &str, until: Until, timeout_s: u64, progress: Progress) -> (Status, bool) {
     let timeout = Duration::from_secs(timeout_s.clamp(1, MAX_WAIT));
     let started = Instant::now();
-    ctx.hub.wait(id, until, timeout, TICK, |s| {
-        let what = s.current_tool.clone().unwrap_or_else(|| s.state().to_string());
-        progress(format!("{what} ({}s)", started.elapsed().as_secs()));
-    })
+    loop {
+        let left = timeout.saturating_sub(started.elapsed());
+        let (status, timed_out) = ctx.hub.wait(id, until, left.max(Duration::from_millis(1)), TICK, |s| {
+            let what = s.current_tool.clone().unwrap_or_else(|| s.state().to_string());
+            progress(format!("{what} ({}s)", started.elapsed().as_secs()));
+        });
+        // One turn ended but the agent has a queued message (this caller's, maybe) about to
+        // start: that's not idle yet. A short pause lets its turn begin, then wait again.
+        let settled = timed_out || until == Until::Change || status.busy || status.needs_attention() || !ctx.host.busy(id);
+        if settled || started.elapsed() >= timeout {
+            return (status, timed_out);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// What happened in the session's turn and what it waits for, with a hint of what to do next.
@@ -729,12 +826,18 @@ fn report(ctx: &Ctx, id: &str, s: &Status, timed_out: bool) -> Value {
     if timed_out {
         r["timedOut"] = json!(true);
     }
-    let reply = s.reply();
+    // The agent's answer is its last message; what it said between tools is in the transcript.
+    let reply = s.answer(MAX_ANSWER);
     if !reply.is_empty() {
         r["reply"] = json!(reply);
     }
+    let earlier = s.texts.iter().filter(|t| !t.1.trim().is_empty()).count().saturating_sub(1);
+    if earlier > 0 {
+        r["earlierMessages"] = json!(earlier);
+    }
     if !s.tools.is_empty() {
-        r["tools"] = json!(s.tools);
+        r["toolsRun"] = json!(s.tools.len());
+        r["lastTools"] = json!(s.tools[s.tools.len().saturating_sub(LAST_TOOLS)..]);
     }
     if !s.files.is_empty() {
         r["filesChanged"] = json!(s.files.iter().map(|f| json!({"path": f.0, "added": f.1, "removed": f.2})).collect::<Vec<_>>());
@@ -767,20 +870,51 @@ fn report(ctx: &Ctx, id: &str, s: &Status, timed_out: bool) -> Value {
     if let Some(e) = &s.last_error {
         r["error"] = json!(e);
     }
-    r["next"] = json!(match state {
-        "needsApproval" => "answer_approval with a requestId",
-        "needsQuestion" => "answer_question with the requestId and answers by question id",
-        "running" => "wait_for_session, send_message to steer, or interrupt_session",
-        _ => "send_message to go on, get_changes to see what changed, or close_session when done",
-    });
+    // Only what isn't obvious from `state` (the server's instructions cover the rest).
+    match state {
+        "needsApproval" => r["next"] = json!("answer_approval with a requestId"),
+        "needsQuestion" => r["next"] = json!("answer_question with the requestId and answers by question id"),
+        _ => {}
+    }
     r
+}
+
+/// `text` from byte `offset`, about `size` bytes ending at a line break, with where to go on.
+fn page(text: &str, offset: usize, size: usize) -> String {
+    let mut start = offset.min(text.len());
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    let rest = &text[start..];
+    if rest.len() <= size {
+        return if start == 0 { rest.to_string() } else { format!("{rest}\n(end of diff)") };
+    }
+    let mut end = size;
+    while !rest.is_char_boundary(end) {
+        end -= 1;
+    }
+    let end = rest[..end].rfind('\n').map(|i| i + 1).filter(|&i| i > 0).unwrap_or(end);
+    format!("{}\n(more: offset {} of {} bytes)", &rest[..end], start + end, text.len())
+}
+
+/// The end of `text`, at most `max` bytes from a line break, with `note` where the start was.
+fn keep_end(text: &str, max: usize, note: &str) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let mut start = text.len() - max;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    let start = text[start..].find('\n').map(|i| start + i + 1).unwrap_or(start);
+    format!("{note}\n\n{}", &text[start..])
 }
 
 /// Long tool output and file contents cut down, so a page of events stays readable.
 fn shrink(mut v: Value) -> Value {
     fn walk(v: &mut Value, depth: usize) {
         match v {
-            Value::String(s) if s.len() > 4000 => *s = cut(s, 4000),
+            Value::String(s) if s.len() > 1000 => *s = cut(s, 1000),
             Value::Array(a) if depth < 6 => a.iter_mut().for_each(|x| walk(x, depth + 1)),
             Value::Object(o) if depth < 6 => o.values_mut().for_each(|x| walk(x, depth + 1)),
             _ => {}
@@ -788,4 +922,41 @@ fn shrink(mut v: Value) -> Value {
     }
     walk(&mut v, 0);
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every client sends the tool list to its model on every turn.
+    #[test]
+    fn the_tool_list_stays_small() {
+        let mut s = Settings::default();
+        s.mcp.allow_delete = true;
+        let seen: Vec<Value> =
+            list(&s).iter().map(|t| json!({"name": t["name"], "description": t["description"], "inputSchema": t["inputSchema"]})).collect();
+        let size = serde_json::to_string(&seen).unwrap().len();
+        eprintln!("tools/list as the model sees it: {size} bytes");
+        assert!(size < 9_500, "{size} bytes (it was 12.6 KB before it was trimmed)");
+    }
+
+    #[test]
+    fn diffs_come_in_pages_that_end_at_a_line() {
+        let diff: String = (0..2000).map(|i| format!("+line {i} é\n")).collect();
+        let first = page(&diff, 0, 1000);
+        let (body, more) = first.rsplit_once("\n(more: offset ").unwrap();
+        assert!(body.ends_with('\n') && body.len() <= 1000);
+        let next: usize = more.split(' ').next().unwrap().parse().unwrap();
+        assert!(page(&diff, next, 1000).starts_with("+line "));
+        assert!(page(&diff, diff.len() - 5, 1000).ends_with("(end of diff)"));
+        assert_eq!(page("small\n", 0, 1000), "small\n");
+    }
+
+    #[test]
+    fn long_transcripts_keep_their_end() {
+        let md: String = (0..1000).map(|i| format!("line {i}\n")).collect();
+        let kept = keep_end(&md, 200, "(cut)");
+        assert!(kept.starts_with("(cut)\n\nline ") && kept.ends_with("line 999\n"), "{kept}");
+        assert!(kept.len() < 220);
+    }
 }

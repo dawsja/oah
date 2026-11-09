@@ -201,6 +201,14 @@ impl Host for AppHost {
         self.name.clone()
     }
 
+    fn addresses(&self) -> Vec<String> {
+        let port = self.app.state::<AppState>().remote.server.lock().unwrap().as_ref().map(|s| s.local_addr().port());
+        match port {
+            Some(port) => addresses().into_iter().map(|a| format!("{}:{port}", a.ip)).collect(),
+            None => Vec::new(),
+        }
+    }
+
     fn device(&self, public_key: &[u8; 32]) -> Option<String> {
         let key = oah_remote::b64(public_key);
         let state = self.app.state::<AppState>();

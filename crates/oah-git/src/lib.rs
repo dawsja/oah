@@ -330,7 +330,14 @@ pub fn commit_diff(repo: &Repo, hash: &str, path: &str) -> Result<String, String
 
 /// Every file in the repo the user would see: tracked plus untracked-but-not-ignored.
 pub fn files(repo: &Repo, limit: usize) -> Result<Vec<String>, String> {
-    let out = repo.git(&["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"])?;
+    let out = match repo.git(&["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"]) {
+        Ok(out) => out,
+        // `--deduplicate` is git 2.31+; the list is deduplicated below anyway.
+        Err(e) if e.contains("unknown option") || e.contains("usage: git ls-files") => {
+            repo.git(&["ls-files", "-z", "--cached", "--others", "--exclude-standard"])?
+        }
+        Err(e) => return Err(e),
+    };
     let mut files: Vec<String> = out.split('\0').filter(|f| !f.is_empty()).map(String::from).take(limit).collect();
     files.sort_by_key(|f| f.to_lowercase());
     files.dedup();
@@ -351,7 +358,8 @@ pub fn grep(repo: &Repo, pattern: &str, limit: usize) -> Result<Vec<GrepHit>, St
         return Ok(vec![]);
     }
     // Paths from the project folder, which is where they're opened from.
-    let mut args = vec!["grep", "-n", "-I", "--no-color", "--untracked", "-F"];
+    // `-z`: names as they are (not quoted, so `café.txt` and `a:b.txt` open), split by NULs.
+    let mut args = vec!["grep", "-n", "-z", "-I", "--no-color", "--untracked", "-F"];
     if !pattern.chars().any(char::is_uppercase) {
         args.push("-i");
     }
@@ -374,21 +382,25 @@ pub fn read_file(repo: &Repo, path: &str, max: usize) -> Result<String, String> 
     }
     match &repo.location {
         Location::Local => {
+            use std::io::Read;
             let full = std::path::Path::new(&repo.path).join(path);
-            let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
+            // Only as much as is shown: a multi-gigabyte log isn't read whole to show 512 KB.
+            let mut bytes = Vec::new();
+            std::fs::File::open(&full).and_then(|f| f.take(max as u64).read_to_end(&mut bytes)).map_err(|e| e.to_string())?;
             if bytes.iter().take(8000).any(|b| *b == 0) {
                 return Err("binary file".into());
             }
-            let n = bytes.len().min(max);
-            Ok(String::from_utf8_lossy(&bytes[..n]).into_owned())
+            Ok(String::from_utf8_lossy(&bytes).into_owned())
         }
         Location::Ssh { .. } | Location::Wsl { .. } => {
             let out = repo.exec("head", &["-c", &max.to_string(), "--", path], None, QUICK)?;
-            if out.ok() {
-                Ok(out.stdout)
-            } else {
-                Err(git_error(&out))
+            if !out.ok() {
+                return Err(git_error(&out));
             }
+            if out.stdout.chars().take(8000).any(|c| c == '\0') {
+                return Err("binary file".into());
+            }
+            Ok(out.stdout)
         }
     }
 }

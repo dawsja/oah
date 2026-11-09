@@ -223,8 +223,15 @@ async fn provider_probe(kind: AgentKind, binary: String) -> Probe {
 #[tauri::command]
 async fn provider_account(state: State<'_, AppState>, kind: AgentKind, location: Option<Location>) -> CmdResult<Account> {
     let location = location.unwrap_or_default();
-    let binary = state.settings.lock().unwrap().providers.get(kind).binary_on(&location);
-    tauri::async_runtime::spawn_blocking(move || account::account(kind, &binary, &location)).await.map_err(err)
+    let provider = state.settings.lock().unwrap().providers.get(kind).clone();
+    let binary = provider.binary_on(&location);
+    tauri::async_runtime::spawn_blocking(move || {
+        // Its own environment: a config folder or key set in Providers decides the account.
+        let env = secrets::resolve(&secrets::scope(kind), &provider.env);
+        account::account(kind, &binary, &location, &env)
+    })
+    .await
+    .map_err(err)
 }
 
 /// The agent's plan limits for the sign-in on this computer, or in a WSL distro (which is never
@@ -256,7 +263,7 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: 
         let env = secrets::resolve(&secrets::scope(kind), &provider.env);
         match kind {
             AgentKind::Claude => account::claude_limits(&location, &env),
-            AgentKind::Codex => account::codex_limits(&binary, &location),
+            AgentKind::Codex => account::codex_limits(&binary, &location, &env),
             AgentKind::Opencode | AgentKind::Opencode2 => account::opencode_go_limits(&location, &env),
             AgentKind::Antigravity => oah_agents::antigravity::limits(&binary, &location, &env),
             AgentKind::Grok => oah_agents::grok::limits(&binary, &location, &env),
@@ -286,13 +293,17 @@ pub(crate) fn catalog(s: &Settings, kind: AgentKind, project_id: Option<&str>) -
     let location = p.as_ref().map(|p| p.location.clone()).unwrap_or(Location::Local);
     let cwd = p.map(|p| p.path).unwrap_or_else(|| paths::home_dir().to_string_lossy().into_owned());
     let binary = s.providers.get(kind).binary_on(&location);
+    let env = secrets::resolve(&secrets::scope(kind), &s.providers.get(kind).env);
     match kind {
-        AgentKind::Claude => oah_agents::claude::catalog(&binary, &location, &cwd).map(|(models, commands)| Catalog { models, commands }),
+        AgentKind::Claude => {
+            oah_agents::claude::catalog(&binary, &location, &cwd, &env).map(|(models, commands)| Catalog { models, commands })
+        }
         AgentKind::Codex => {
             let prog = if binary.trim().is_empty() { "codex".to_string() } else { binary };
-            let models = account::codex_once(&prog, &location, "model/list", serde_json::json!({"limit": 100, "includeHidden": false}))
-                .map(|v| oah_agents::codex::parse_models(&v))?;
-            let commands = account::codex_once(&prog, &location, "skills/list", serde_json::json!({"cwds": [cwd]}))
+            let models =
+                account::codex_once(&prog, &location, &env, "model/list", serde_json::json!({"limit": 100, "includeHidden": false}))
+                    .map(|v| oah_agents::codex::parse_models(&v))?;
+            let commands = account::codex_once(&prog, &location, &env, "skills/list", serde_json::json!({"cwds": [cwd]}))
                 .map(|v| oah_agents::codex::parse_skills(&v))
                 .unwrap_or_default();
             Ok(Catalog { models, commands })
