@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react"
+import { Component, createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { ChevronLeft, ChevronRight, Copy, Download, Maximize2, Minimize2, X } from "lucide-react"
 import { create } from "zustand"
 import { toast } from "sonner"
@@ -93,7 +93,32 @@ export function openImages(images: ShownImage[], index = 0) {
   if (images.length) useLightbox.setState({ images, index })
 }
 
+/** The viewer, closed with a message if showing an image fails, instead of taking the whole
+ *  window down with it. */
 export function ImageLightbox() {
+  return (
+    <LightboxBoundary>
+      <Lightbox />
+    </LightboxBoundary>
+  )
+}
+
+class LightboxBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  componentDidCatch(error: unknown) {
+    useLightbox.setState({ images: [], index: 0 })
+    toast.error(`Couldn't show the image: ${error instanceof Error ? error.message : String(error)}`)
+    this.setState({ failed: false })
+  }
+  render() {
+    return this.state.failed ? null : this.props.children
+  }
+}
+
+function Lightbox() {
   const { images, index } = useLightbox()
   const close = () => useLightbox.setState({ images: [], index: 0 })
   const go = (d: number) => useLightbox.setState({ index: (index + d + images.length) % images.length })
