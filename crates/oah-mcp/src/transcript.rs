@@ -10,6 +10,9 @@ pub struct Options {
     pub last_turns: usize,
     /// Tool output in full (cut at a few thousand characters) instead of only for failures.
     pub tool_output: bool,
+    /// The ids of approvals and questions, which an agent needs to answer them; a person
+    /// pasting the chat somewhere doesn't.
+    pub request_ids: bool,
 }
 
 /// `events` are the chat's logged events (`events.jsonl` lines); lines this build can't read
@@ -23,6 +26,7 @@ pub fn render(events: &[serde_json::Value], opts: &Options) -> String {
         n if starts.len() > n => starts[starts.len() - n],
         _ => 0,
     };
+    let id = |request_id: &str| if opts.request_ids { format!(" (request `{request_id}`)") } else { String::new() };
     let mut out = String::new();
     if from > 0 {
         let _ = writeln!(out, "_({} earlier turns not shown)_\n", starts.iter().filter(|&&s| s < from).count());
@@ -52,12 +56,12 @@ pub fn render(events: &[serde_json::Value], opts: &Options) -> String {
                 let output = output.trim();
                 if !output.is_empty() && (opts.tool_output || !ok) {
                     let max = if opts.tool_output { 4000 } else { 600 };
-                    let _ = writeln!(out, "  ```\n{}\n  ```", cut(output, max));
+                    out.push_str(&fenced(&cut(output, max), "  "));
                 }
             }
             ChatEvent::Approval { request } => {
                 let detail = request.detail.as_deref().map(|d| format!(": `{}`", one_line(d, 200))).unwrap_or_default();
-                let _ = writeln!(out, "- ⏸ asked: {}{detail} (request `{}`)", request.title, request.request_id);
+                let _ = writeln!(out, "- ⏸ asked: {}{detail}{}", request.title, id(&request.request_id));
             }
             ChatEvent::ApprovalResolved { decision, .. } => {
                 let d = match decision {
@@ -70,7 +74,7 @@ pub fn render(events: &[serde_json::Value], opts: &Options) -> String {
             ChatEvent::Question { request } => {
                 for q in &request.questions {
                     let opts: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
-                    let _ = writeln!(out, "- ? asked: {} [{}] (request `{}`)", q.question, opts.join(" / "), request.request_id);
+                    let _ = writeln!(out, "- ? asked: {} [{}]{}", q.question, opts.join(" / "), id(&request.request_id));
                 }
             }
             ChatEvent::QuestionResolved { answers, .. } => {
@@ -125,6 +129,28 @@ pub fn render(events: &[serde_json::Value], opts: &Options) -> String {
     }
 }
 
+/// `text` as a code block indented by `indent` (so it stays inside a list item), fenced with
+/// more backticks than any run inside it.
+fn fenced(text: &str, indent: &str) -> String {
+    let mut longest = 0;
+    let mut run = 0;
+    for c in text.chars() {
+        run = if c == '`' { run + 1 } else { 0 };
+        longest = longest.max(run);
+    }
+    let fence = "`".repeat((longest + 1).max(3));
+    let mut out = format!("{indent}{fence}\n");
+    for line in text.lines() {
+        if line.is_empty() {
+            out.push('\n');
+        } else {
+            let _ = writeln!(out, "{indent}{line}");
+        }
+    }
+    let _ = writeln!(out, "{indent}{fence}");
+    out
+}
+
 pub(crate) fn one_line(s: &str, max: usize) -> String {
     cut(&s.split_whitespace().collect::<Vec<_>>().join(" "), max)
 }
@@ -165,11 +191,11 @@ mod tests {
 
     #[test]
     fn renders_the_last_turn() {
-        let md = render(&log(), &Options { last_turns: 1, tool_output: false });
+        let md = render(&log(), &Options { last_turns: 1, tool_output: false, request_ids: true });
         assert!(md.starts_with("_(1 earlier turns not shown)_"));
         assert!(!md.contains("first"));
         assert!(md.contains("## User\nrun the tests"));
-        assert!(md.contains("- ✗ Bash: cargo test\n  ```\n1 failed\n  ```"));
+        assert!(md.contains("- ✗ Bash: cargo test\n  ```\n  1 failed\n  ```"));
         assert!(md.contains("- ⏸ asked: Edit src/a.rs (request `r`)\n  → allowed"));
         assert!(md.contains("Fixed it."));
         assert!(md.ends_with("_— turn ended: 2.5s, $0.020_"));
@@ -177,9 +203,22 @@ mod tests {
 
     #[test]
     fn renders_everything() {
-        let md = render(&log(), &Options { last_turns: 0, tool_output: true });
+        let md = render(&log(), &Options { last_turns: 0, tool_output: true, request_ids: true });
         assert!(md.contains("first") && md.contains("Hi.") && md.contains("Fixed it."));
-        assert_eq!(render(&[], &Options { last_turns: 0, tool_output: false }), "_(nothing yet)_");
+        assert_eq!(render(&[], &Options { last_turns: 0, tool_output: false, request_ids: false }), "_(nothing yet)_");
+    }
+
+    #[test]
+    fn leaves_out_request_ids_for_people() {
+        let md = render(&log(), &Options { last_turns: 0, tool_output: false, request_ids: false });
+        assert!(md.contains("- ⏸ asked: Edit src/a.rs\n  → allowed"));
+        assert!(!md.contains("request `"));
+    }
+
+    #[test]
+    fn fences_output_with_backticks_in_it() {
+        assert_eq!(fenced("a\n```\nb", "  "), "  ````\n  a\n  ```\n  b\n  ````\n");
+        assert_eq!(fenced("x\n\ny", ""), "```\nx\n\ny\n```\n");
     }
 
     #[test]

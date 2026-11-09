@@ -283,6 +283,18 @@ fn chat_running(state: State<AppState>) -> Vec<String> {
     state.chats.running()
 }
 
+/// The chat as Markdown for people (an issue, a PR description): its title, what was asked and
+/// answered, one line per tool, failures' output.
+#[tauri::command]
+fn chat_markdown(state: State<AppState>, chat_id: String) -> CmdResult<String> {
+    let meta = state.chats.store.get(&chat_id).map_err(err)?;
+    let snapshot = state.chats.snapshot(&chat_id)?;
+    let opts = oah_mcp::transcript::Options { last_turns: 0, tool_output: false, request_ids: false };
+    let body = oah_mcp::transcript::render(&snapshot.events, &opts);
+    let title = if meta.title.trim().is_empty() { "Chat" } else { meta.title.trim() };
+    Ok(format!("# {title}\n\n{body}\n"))
+}
+
 /// A new, empty chat in `project_id` (its agent starts with the first message).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -502,6 +514,7 @@ pub fn run() {
             provider_catalog,
             chat_list,
             chat_running,
+            chat_markdown,
             chat_create,
             chat_events,
             chat_snapshot,

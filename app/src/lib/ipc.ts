@@ -30,6 +30,8 @@ export const ipc = {
 
   chatList: () => call<ChatMeta[]>("chat_list"),
   chatRunning: () => call<string[]>("chat_running"),
+  /** The chat as Markdown, for an issue or a PR description. */
+  chatMarkdown: (chatId: string) => call<string>("chat_markdown", { chatId }),
   chatCreate: (projectId: string, agent: AgentKind | null, acpAgent: string | null, model: string | null, effort: string | null, cwd: string | null) =>
     call<ChatMeta>("chat_create", { projectId, agent, acpAgent, model, effort, cwd }),
   providerCatalog: (kind: AgentKind, projectId: string | null) => call<Catalog>("provider_catalog", { kind, projectId }),

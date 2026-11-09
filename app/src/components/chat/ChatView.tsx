@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Check, ChevronDown, ChevronRight, Circle, CornerDownRight, FolderPlus, Image as ImageIcon, LoaderCircle, MoreHorizontal, Pause, Pencil, Server, Trash2, X } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Circle, CornerDownRight, FileText, FolderPlus, Image as ImageIcon, LoaderCircle, MoreHorizontal, Pause, Pencil, Server, Trash2, X } from "lucide-react"
 import { AgentGlyph, Mark } from "@/components/icons"
 import { promptText } from "@/components/Prompt"
 import { Button } from "@/components/ui/button"
@@ -13,7 +13,7 @@ import { ipc, type Catalog } from "@/lib/ipc"
 import { locationLabel, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
-import { useChats, type Queued } from "@/store/chats"
+import { copyChatMarkdown, useChats, type Queued } from "@/store/chats"
 import { draftKey } from "@/store/drafts"
 import { useGit, useScope } from "@/store/git"
 import { useStartOpenDistro } from "@/store/wsl"
@@ -233,6 +233,9 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
             }}
           >
             Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void copyChatMarkdown(meta.id)}>
+            <FileText /> Copy as Markdown
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => copyText(meta.agentSessionId ?? "")} disabled={!meta.agentSessionId}>
             Copy the agent's session id

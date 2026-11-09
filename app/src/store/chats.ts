@@ -220,6 +220,18 @@ export const useChats = create<ChatsStore>((set, get) => ({
   },
 }))
 
+/** Copies the chat as Markdown (to paste into an issue or a PR description). */
+export async function copyChatMarkdown(chatId: string) {
+  try {
+    const md = await ipc.chatMarkdown(chatId)
+    const { writeText } = await import("@tauri-apps/plugin-clipboard-manager")
+    await writeText(md)
+    toast.success("Copied the chat as Markdown")
+  } catch (e) {
+    toast.error(`Couldn't copy the chat: ${e}`)
+  }
+}
+
 /** How an open chat sends: its agent, and the permission chosen for it (else the agent's default). */
 function sendOpts(chatId: string, images: Image[]) {
   const meta = useChats.getState().metas.find((m) => m.id === chatId)

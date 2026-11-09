@@ -282,8 +282,10 @@ pub fn call(ctx: &Ctx, name: &str, a: Value, progress: Progress) -> ToolResult {
             let a: A = args(a)?;
             meta(ctx, &a.session_id)?;
             let events = ctx.host.events(&a.session_id)?;
-            let mut md =
-                transcript::render(&events, &transcript::Options { last_turns: a.last_turns.unwrap_or(3), tool_output: a.tool_output });
+            let mut md = transcript::render(
+                &events,
+                &transcript::Options { last_turns: a.last_turns.unwrap_or(3), tool_output: a.tool_output, request_ids: true },
+            );
             let status = ctx.hub.status(&a.session_id);
             if status.busy && is_live(ctx, &a.session_id) {
                 md.push_str("\n\n_(still running");

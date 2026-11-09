@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Copy, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, LoaderCircle, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Settings, SquarePen, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Copy, FileText, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, LoaderCircle, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Settings, SquarePen, Trash2 } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { confirmAction, promptText } from "@/components/Prompt"
 import { Tip } from "@/components/Tip"
@@ -16,7 +16,7 @@ import type { Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { useApp } from "@/store/app"
-import { useChats } from "@/store/chats"
+import { copyChatMarkdown, useChats } from "@/store/chats"
 import { useGit } from "@/store/git"
 
 /** Projects, each with its worktrees and their chats; Settings at the bottom. */
@@ -324,6 +324,9 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
         </ContextMenuItem>
         <ContextMenuItem onSelect={rename}>
           <Pencil /> Rename…
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void copyChatMarkdown(meta.id)}>
+          <FileText /> Copy as Markdown
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onSelect={() => useChats.getState().remove(meta.id)}>
