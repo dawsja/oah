@@ -7,6 +7,7 @@
 //! - Codex limits: `account/read` and `account/rateLimits/read` from a short-lived
 //!   `codex app-server`.
 //! - Antigravity: see [`crate::antigravity`].
+//! - Grok Build: see [`crate::grok`].
 
 use std::io::{BufRead, BufReader, Write};
 use std::time::Duration;
@@ -75,6 +76,8 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
         AgentKind::Opencode | AgentKind::Opencode2 => vec!["auth".into(), "list".into()],
         // `agy` has no status command: its token store says who.
         AgentKind::Antigravity => return crate::antigravity::account(location, &[]),
+        // Nor `grok`: its `auth.json` says who.
+        AgentKind::Grok => return crate::grok::account(location, &[]),
     };
     let cwd = if matches!(location, Location::Local) { oah_core::paths::home_dir().to_string_lossy().into_owned() } else { "~".into() };
     let out = match oah_transport::run(&Spec { location, cwd: &cwd, program: &prog, args, env: &[] }, None, Duration::from_secs(20)) {
@@ -97,7 +100,7 @@ pub fn account(kind: AgentKind, binary: &str, location: &Location) -> Account {
             a
         }
         AgentKind::Opencode | AgentKind::Opencode2 => parse_opencode_auth(&format!("{}\n{}", out.stdout, out.stderr)),
-        AgentKind::Antigravity => unreachable!("answered above"),
+        AgentKind::Antigravity | AgentKind::Grok => unreachable!("answered above"),
     }
 }
 
@@ -550,6 +553,7 @@ pub fn open_login(kind: AgentKind, binary: &str, location: &Location) -> Result<
         AgentKind::Codex => format!("{prog} login"),
         AgentKind::Opencode | AgentKind::Opencode2 => format!("{prog} auth login"),
         AgentKind::Antigravity => crate::antigravity::login_line(&prog),
+        AgentKind::Grok => crate::grok::login_line(&prog, location),
     };
     match location {
         Location::Local => {}

@@ -1,5 +1,5 @@
 //! MCP over HTTP: the Streamable HTTP transport (MCP 2025-03-26 and later), for this computer
-//! only, beside the local socket that `oah mcp` (stdio) uses.
+//! and your private network, beside the local socket that `oah mcp` (stdio) uses.
 //!
 //! `POST /mcp` takes one JSON-RPC message (or a batch). A request's reply comes back as JSON;
 //! a tool call (which can wait minutes on a chat) comes back as an event stream instead: its
@@ -7,8 +7,9 @@
 //! 202. `DELETE /mcp` ends a session. There's no `GET` stream (oah sends nothing unasked): 405.
 //!
 //! Who gets in, checked in this order:
-//! - It listens on 127.0.0.1 only, and the `Host` must be 127.0.0.1, localhost or [::1] at its
-//!   port, so a web page can't reach it through a rebound DNS name.
+//! - It listens on 0.0.0.0 for loopback and private-network peers only, and the `Host` must be
+//!   `localhost` or a loopback/private IP at its port, so a web page can't reach it through a
+//!   rebound DNS name.
 //! - No browsers: anything with an `Origin` or `Sec-Fetch-*` header is refused (MCP clients
 //!   don't send them), the body must be `application/json`, and there are no CORS headers.
 //! - `Authorization: Bearer <token>`: a 256-bit random token (Settings → MCP), compared in
@@ -22,7 +23,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
@@ -185,11 +186,22 @@ impl Drop for Server {
     }
 }
 
-/// Listens on 127.0.0.1:`port` (0: any free port) until the [`Server`] is dropped.
+/// Loopback, private LAN (RFC 1918), link-local or VPN/Tailscale (CGNAT 100.64.0.0/10, IPv6 ULA).
+fn private_or_loopback(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local() || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
+        }
+        IpAddr::V6(v6) => v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00 || (v6.segments()[0] & 0xffc0) == 0xfe80,
+    }
+}
+
+/// Listens on 0.0.0.0:`port` (0: any free port) for loopback and private-network peers until
+/// the [`Server`] is dropped.
 pub fn start(port: u16, ctx: Arc<Ctx>, state: Arc<HttpState>) -> io::Result<Server> {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
+    let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))?;
     listener.set_nonblocking(true)?;
-    let addr = listener.local_addr()?;
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, listener.local_addr()?.port()));
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
     let thread = thread::Builder::new().name("oah-mcp-http".into()).spawn(move || {
@@ -198,7 +210,7 @@ pub fn start(port: u16, ctx: Arc<Ctx>, state: Arc<HttpState>) -> io::Result<Serv
                 Ok((conn, peer)) => {
                     // On Windows an accepted socket inherits the listener's non-blocking mode;
                     // a connection waiting for its next request must block.
-                    if !peer.ip().is_loopback() || conn.set_nonblocking(false).is_err() {
+                    if !private_or_loopback(peer.ip()) || conn.set_nonblocking(false).is_err() {
                         continue;
                     }
                     let (ctx, state) = (ctx.clone(), state.clone());
@@ -394,10 +406,19 @@ fn connection(mut stream: TcpStream, port: u16, ctx: &Arc<Ctx>, state: &Arc<Http
     }
 }
 
-/// The `Host` header names this server on this computer.
+/// The `Host` header names this server by `localhost` or a loopback/private IP (never a DNS name).
 fn local_host(host: Option<&str>, port: u16) -> bool {
-    let Some(h) = host.map(|h| h.to_ascii_lowercase()) else { return false };
-    ["127.0.0.1", "localhost", "[::1]"].iter().any(|name| h == format!("{name}:{port}") || (port == 80 && h == *name))
+    let Some(h) = host.map(|h| h.trim().to_ascii_lowercase()) else { return false };
+    let name = match h.strip_suffix(&format!(":{port}")) {
+        Some(n) => n,
+        None if port == 80 => h.as_str(),
+        None => return false,
+    };
+    if name == "localhost" {
+        return true;
+    }
+    let raw = name.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(name);
+    raw.parse::<IpAddr>().is_ok_and(private_or_loopback)
 }
 
 /// Answers one request. Ok(true): the connection can take another.
@@ -694,11 +715,15 @@ mod tests {
         let body = rpc(1, "initialize", json!({}));
         assert_eq!(send(&s, "POST", PATH, &[("Origin", "https://evil.example")], &body).status, 403);
         assert_eq!(send(&s, "POST", PATH, &[("Sec-Fetch-Site", "cross-site")], &body).status, 403);
-        // A rebound DNS name reaching 127.0.0.1.
+        // A rebound DNS name or public IP.
         assert_eq!(send(&s, "POST", PATH, &[("Host", "evil.example:80")], &body).status, 403);
         assert_eq!(send(&s, "POST", PATH, &[("Host", "")], &body).status, 403);
         let port = s.addr().port().to_string();
+        assert_eq!(send(&s, "POST", PATH, &[("Host", &format!("evil.example:{port}"))], &body).status, 403);
+        assert_eq!(send(&s, "POST", PATH, &[("Host", &format!("8.8.8.8:{port}"))], &body).status, 403);
         assert_eq!(send(&s, "POST", PATH, &[("Host", &format!("localhost:{port}"))], &body).status, 200);
+        assert_eq!(send(&s, "POST", PATH, &[("Host", &format!("192.168.1.20:{port}"))], &body).status, 200);
+        assert_eq!(send(&s, "POST", PATH, &[("Host", &format!("100.100.1.2:{port}"))], &body).status, 200);
         assert_eq!(send(&s, "POST", "/other", &[], &body).status, 404);
         assert_eq!(send(&s, "POST", PATH, &[("Content-Type", "text/plain")], &body).status, 415);
     }

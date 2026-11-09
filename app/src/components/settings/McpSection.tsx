@@ -25,6 +25,7 @@ export function snippets(exe: string, windows: boolean): Snippet[] {
     { id: "claude", label: "Claude Code", hint: "Run in a terminal.", text: `claude mcp add oah -- ${quoted} mcp` },
     { id: "codex", label: "Codex", hint: "Add to ~/.codex/config.toml.", text: `[mcp_servers.oah]\ncommand = '${exe}'\nargs = ["mcp"]` },
     { id: "antigravity", label: "Antigravity", hint: "Run in a terminal.", text: `agy mcp add oah -- ${quoted} mcp` },
+    { id: "grok", label: "Grok Build", hint: "Run in a terminal.", text: `grok mcp add oah -- ${quoted} mcp` },
     { id: "json", label: "Other clients", hint: "The usual mcpServers JSON.", text: JSON.stringify({ mcpServers: { oah: { command: exe, args: ["mcp"] } } }, null, 2) },
   ]
   if (windows) {
@@ -42,6 +43,7 @@ export function httpSnippets(url: string, token: string): Snippet[] {
     { id: "codex", label: "Codex", hint: "Add to ~/.codex/config.toml.", text: `[mcp_servers.oah]\nurl = "${url}"\nhttp_headers = { Authorization = "${auth}" }` },
     { id: "opencode", label: "OpenCode", hint: "Add to opencode.json.", text: JSON.stringify({ mcp: { oah: { type: "remote", url, headers: { Authorization: auth } } } }, null, 2) },
     { id: "antigravity", label: "Antigravity", hint: "Run in a terminal.", text: `agy mcp add --header "Authorization: ${auth}" oah ${url}` },
+    { id: "grok", label: "Grok Build", hint: "Run in a terminal.", text: `grok mcp add --header "Authorization: ${auth}" oah ${url}` },
     { id: "json", label: "Other clients", hint: "The usual mcpServers JSON.", text: JSON.stringify({ mcpServers: { oah: { type: "http", url, headers: { Authorization: auth } } } }, null, 2) },
   ]
 }
@@ -58,6 +60,7 @@ export function McpSection() {
   const [status, setStatus] = useState<McpStatus | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [transport, setTransport] = useState<"stdio" | "http">(mcp.http ? "http" : "stdio")
+  const [pickedUrl, setPickedUrl] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
@@ -76,15 +79,16 @@ export function McpSection() {
 
   const clients = status?.clients ?? 0
   const http = status?.http
-  const url = http?.url ?? `http://127.0.0.1:${mcp.httpPort}/mcp`
+  const urls = http?.urls?.length ? http.urls : [http?.url ?? `http://127.0.0.1:${mcp.httpPort}/mcp`]
+  const url = pickedUrl && urls.includes(pickedUrl) ? pickedUrl : urls[0]
   const shown = transport === "http" && mcp.http ? (token ? httpSnippets(url, token) : []) : status ? snippets(status.exe, platform === "windows") : []
   return (
     <Section
       title="MCP"
-      description="Let another agent (Claude Code, Codex, OpenCode, Antigravity, any MCP client) list your projects, start chats, send messages, answer approvals and pick models. Its chats show in the sidebar as they run, and you can answer or type in them too."
+      description="Let another agent (Claude Code, Codex, OpenCode, Antigravity, Grok Build, any MCP client) list your projects, start chats, send messages, answer approvals and pick models. Its chats show in the sidebar as they run, and you can answer or type in them too."
     >
       <Group title="Server">
-        <Row label="Allow MCP clients" description="Off: oah refuses every client. On: clients on this computer connect by running `oah mcp`, or over HTTP when that's on.">
+        <Row label="Allow MCP clients" description="Off: oah refuses every client. On: clients connect by running `oah mcp`, or over HTTP when that's on.">
           <Switch checked={mcp.enabled} onCheckedChange={(v) => update((s) => void (s.mcp.enabled = v))} />
         </Row>
         <Row
@@ -111,14 +115,23 @@ export function McpSection() {
           title="Connect a client"
           aside={
             mcp.http ? (
-              <Segmented
-                value={transport}
-                options={[
-                  { value: "stdio", label: "oah mcp" },
-                  { value: "http", label: "HTTP" },
-                ]}
-                onChange={setTransport}
-              />
+              <div className="flex items-center gap-2">
+                {transport === "http" && urls.length > 1 ? (
+                  <Segmented
+                    value={url}
+                    options={urls.map((u) => ({ value: u, label: new URL(u).hostname }))}
+                    onChange={setPickedUrl}
+                  />
+                ) : null}
+                <Segmented
+                  value={transport}
+                  options={[
+                    { value: "stdio", label: "oah mcp" },
+                    { value: "http", label: "HTTP" },
+                  ]}
+                  onChange={setTransport}
+                />
+              </div>
             ) : null
           }
         >
@@ -150,11 +163,12 @@ function HttpGroup({ status, token, onToken }: { status: McpStatus | null; token
     if (n !== mcp.httpPort) update((s) => void (s.mcp.httpPort = n))
   }
   const state = !mcp.http ? "off" : !mcp.enabled ? "waiting" : http?.url ? "on" : http?.error ? "error" : "starting"
+  const urls = http?.urls?.length ? http.urls : [http?.url ?? `http://127.0.0.1:${mcp.httpPort}/mcp`]
   return (
     <Group title="HTTP">
       <Row
         label="Serve over HTTP"
-        description="Clients on this computer connect to a URL with a token instead of running `oah mcp`. Nothing outside this computer can reach it."
+        description="Clients on this computer or your private network connect to a URL with a token instead of running `oah mcp`."
       >
         <Switch checked={mcp.http} onCheckedChange={(v) => update((s) => void (s.mcp.http = v))} />
       </Row>
@@ -175,9 +189,9 @@ function HttpGroup({ status, token, onToken }: { status: McpStatus | null; token
                       : "Starting…"}
               </span>
             }
-            description={state === "error" ? <span className="text-red">{http!.error}</span> : <span className="font-mono text-[11px] break-all">{http?.url ?? `http://127.0.0.1:${mcp.httpPort}/mcp`}</span>}
+            description={state === "error" ? <span className="text-red">{http!.error}</span> : <span className="font-mono text-[11px] break-all">{urls.join(" · ")}</span>}
           />
-          <Row label="Port" description="On 127.0.0.1 only.">
+          <Row label="Port" description="On 127.0.0.1 and this computer's private network addresses.">
             <Input
               type="number"
               min={1024}

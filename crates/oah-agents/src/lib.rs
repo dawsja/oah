@@ -7,6 +7,7 @@ pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod driver;
+pub mod grok;
 pub mod event;
 pub mod jsonrpc;
 pub mod mock;

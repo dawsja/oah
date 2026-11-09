@@ -13,8 +13,8 @@ const CHECK: &str = r#"
 printf 'home\t%s\n' "$HOME"
 printf 'os\t%s\n' "$(uname -sm 2>/dev/null)"
 set -f; lin=; oifs=$IFS; IFS=:; for d in $PATH; do case $d in /mnt/[a-z]|/mnt/[a-z]/*) ;; *) lin=${lin:+$lin:}$d;; esac; done; IFS=$oifs; set +f
-for t in git gh claude codex opencode opencode2 agy; do
-  p=$(PATH="$lin:$HOME/.local/bin:$HOME/.opencode/bin" command -v "$t" 2>/dev/null) || p=
+for t in git gh claude codex opencode opencode2 agy grok; do
+  p=$(PATH="$lin:$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.grok/bin" command -v "$t" 2>/dev/null) || p=
   v=
   [ -n "$p" ] && v=$("$p" --version 2>/dev/null | head -n 1)
   w=
@@ -28,7 +28,7 @@ done
 /// ssh's or wsl.exe's own).
 const INSTALLED: &str = r#"
 set -f; lin=; oifs=$IFS; IFS=:; for d in $PATH; do case $d in /mnt/[a-z]|/mnt/[a-z]/*) ;; *) lin=${lin:+$lin:}$d;; esac; done; IFS=$oifs; set +f
-PATH="$lin:$HOME/.local/bin:$HOME/.opencode/bin" command -v "$1" || echo "oah:missing"
+PATH="$lin:$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.grok/bin" command -v "$1" || echo "oah:missing"
 "#;
 
 const LIST_DIR: &str = r#"
@@ -62,6 +62,8 @@ pub struct HostCheck {
     pub opencode2: Tool,
     /// Antigravity's `agy`.
     pub antigravity: Tool,
+    /// Grok Build's `grok`.
+    pub grok: Tool,
 }
 
 fn sh(location: &Location, script: &str, args: &[&str], limit: Duration) -> Result<crate::Output, String> {
@@ -120,6 +122,7 @@ pub fn parse_check(out: &str) -> HostCheck {
             "opencode" => c.opencode = tool(),
             "opencode2" => c.opencode2 = tool(),
             "agy" => c.antigravity = tool(),
+            "grok" => c.grok = tool(),
             _ => {}
         }
     }

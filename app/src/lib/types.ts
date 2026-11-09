@@ -1,19 +1,33 @@
 // Mirrors crates/oah-core/src/settings.rs (serde camelCase).
 
 /** `opencode2`: OpenCode 2 by its installer's `opencode2` command (the same CLI and accounts).
- *  `antigravity`: Google Antigravity's CLI, `agy`. */
-export type AgentKind = "claude" | "codex" | "opencode" | "opencode2" | "antigravity"
+ *  `antigravity`: Google Antigravity's CLI, `agy`. `grok`: xAI's Grok Build CLI, `grok`. */
+export type AgentKind = "claude" | "codex" | "opencode" | "opencode2" | "antigravity" | "grok"
 /** The agents oah drives. */
-export const AGENTS: AgentKind[] = ["claude", "codex", "opencode", "opencode2", "antigravity"]
-export const AGENT_LABEL: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode", opencode2: "OpenCode 2", antigravity: "Antigravity" }
+export const AGENTS: AgentKind[] = ["claude", "codex", "opencode", "opencode2", "antigravity", "grok"]
+export const AGENT_LABEL: Record<AgentKind, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+  opencode2: "OpenCode 2",
+  antigravity: "Antigravity",
+  grok: "Grok Build",
+}
 /** OpenCode by either command: driven the same way. */
 export const isOpencode = (k: AgentKind | undefined) => k === "opencode" || k === "opencode2"
-/** Driven over ACP (OpenCode, Antigravity): one prompt at a time. */
-export const isAcp = (k: AgentKind | undefined) => isOpencode(k) || k === "antigravity"
+/** Driven over ACP (OpenCode, Antigravity, Grok): one prompt at a time. */
+export const isAcp = (k: AgentKind | undefined) => isOpencode(k) || k === "antigravity" || k === "grok"
 /** Agents whose plan limits oah can read (OpenCode 2's are OpenCode's: one Go account). */
-export const LIMIT_AGENTS: AgentKind[] = ["claude", "codex", "opencode", "antigravity"]
+export const LIMIT_AGENTS: AgentKind[] = ["claude", "codex", "opencode", "antigravity", "grok"]
 /** Whose limits they are (OpenCode's are its Go plan's). */
-export const LIMIT_LABEL: Record<AgentKind, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode Go", opencode2: "OpenCode Go", antigravity: "Antigravity" }
+export const LIMIT_LABEL: Record<AgentKind, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  opencode: "OpenCode Go",
+  opencode2: "OpenCode Go",
+  antigravity: "Antigravity",
+  grok: "Grok",
+}
 
 export type PermissionMode = "ask" | "acceptEdits" | "plan" | "fullAccess"
 export const PERMISSION_LABEL: Record<PermissionMode, string> = {
@@ -34,7 +48,7 @@ export type Provider = {
   env: EnvVar[]
 }
 
-export type Providers = { claude: Provider; codex: Provider; opencode: Provider; opencode2: Provider; antigravity: Provider; defaultAgent: AgentKind }
+export type Providers = { claude: Provider; codex: Provider; opencode: Provider; opencode2: Provider; antigravity: Provider; grok: Provider; defaultAgent: AgentKind }
 
 export type Voice = { enabled: boolean; microphone: string; holdKey: string; silenceStopSecs: number }
 
@@ -95,15 +109,15 @@ export type Settings = {
   remote: Remote
 }
 
-/** Another agent driving oah's chats over MCP (`oah mcp`, or HTTP on this computer). */
-/** `http`: also serve MCP at `http://127.0.0.1:<httpPort>/mcp` with a bearer token. */
+/** Another agent driving oah's chats over MCP (`oah mcp`, or HTTP on this computer and private networks). */
+/** `http`: also serve MCP at `http://<ip>:<httpPort>/mcp` with a bearer token. */
 export type Mcp = { enabled: boolean; allowFullAccess: boolean; allowDelete: boolean; http: boolean; httpPort: number }
 
 /** Where MCP listens, and who's connected. */
 /** Something that happened over MCP's HTTP (`connected`, `closed`, `call`, `refused`). */
 export type McpActivity = { at: number; kind: "connected" | "closed" | "call" | "refused"; detail: string; count: number }
-/** MCP over HTTP: `url` while listening, else `error` (or off). `tokenKept`: the keychain keeps the token. */
-export type McpHttpStatus = { url: string | null; error: string | null; sessions: number; tokenKept: boolean; activity: McpActivity[] }
+/** MCP over HTTP: `url` / `urls` while listening, else `error` (or off). `tokenKept`: the keychain keeps the token. */
+export type McpHttpStatus = { url: string | null; urls: string[]; error: string | null; sessions: number; tokenKept: boolean; activity: McpActivity[] }
 export type McpStatus = { socket: string; clients: number; exe: string; http: McpHttpStatus }
 
 export type AppInfo = { version: string; platform: "windows" | "linux" | "macos" | "web"; dataDir: string; home: string; bundle: string | null }
@@ -123,4 +137,4 @@ export type Limits = { windows: LimitWindow[]; error: string | null; extra: Limi
 
 /** `windows`: not installed there, but a Windows copy is on WSL's PATH (where). */
 export type Tool = { path: string | null; version: string | null; windows: string | null }
-export type HostCheck = { ok: boolean; error: string | null; home: string | null; os: string | null; git: Tool; gh: Tool; claude: Tool; codex: Tool; opencode: Tool; opencode2: Tool; antigravity: Tool }
+export type HostCheck = { ok: boolean; error: string | null; home: string | null; os: string | null; git: Tool; gh: Tool; claude: Tool; codex: Tool; opencode: Tool; opencode2: Tool; antigravity: Tool; grok: Tool }

@@ -1,6 +1,6 @@
 [package]
 name = "oah-agents"
-description = "oah: drives agent CLIs (Claude Code, Codex, OpenCode, Antigravity) and turns their output into chat events"
+description = "oah: drives agent CLIs (Claude Code, Codex, OpenCode, Antigravity, Grok Build) and turns their output into chat events"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

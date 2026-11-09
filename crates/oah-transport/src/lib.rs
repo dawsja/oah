@@ -26,9 +26,10 @@ pub struct Spec<'a> {
 }
 
 /// Per-user folders installers put CLIs in without always getting them onto PATH for every
-/// shell (Claude Code's native installer; OpenCode's, which adds it in `.bashrc` only). A
+/// shell (Claude Code's native installer; OpenCode's, which adds it in `.bashrc` only; Grok
+/// Build's, whose PATH change a running oah on Windows doesn't see). A
 /// program by name not on PATH is looked for there too; PATH still wins.
-pub const USER_BIN_DIRS: [&str; 2] = [".local/bin", ".opencode/bin"];
+pub const USER_BIN_DIRS: [&str; 3] = [".local/bin", ".opencode/bin", ".grok/bin"];
 
 /// A program on this computer: on PATH (so `claude` finds `claude.exe` or `claude.cmd`), else
 /// in one of the [`USER_BIN_DIRS`].
@@ -160,7 +161,7 @@ mod tests {
         let script = remote_script(&spec, false);
         assert_eq!(
             script,
-            "cd \"$HOME\"/'code/my app' || exit 1\noah_prog=$(PATH=\"$PATH:$HOME/.local/bin:$HOME/.opencode/bin\" command -v 'claude') || oah_prog='claude'\nexec env 'API_KEY=a'\\''b' \"$oah_prog\" '-p' 'it'\\''s'"
+            "cd \"$HOME\"/'code/my app' || exit 1\noah_prog=$(PATH=\"$PATH:$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.grok/bin\" command -v 'claude') || oah_prog='claude'\nexec env 'API_KEY=a'\\''b' \"$oah_prog\" '-p' 'it'\\''s'"
         );
         assert_eq!(remote_line(&spec), format!("sh -lc {}", sh_quote(&script)));
     }

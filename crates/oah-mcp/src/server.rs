@@ -14,7 +14,7 @@ use crate::tools::{self, Ctx};
 /// Protocol versions this server speaks, newest first.
 pub(crate) const VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "oah runs coding agents (Claude Code, Codex, OpenCode, Antigravity) in the user's projects; each chat is a session, shown live in oah's window. \
+const INSTRUCTIONS: &str = "oah runs coding agents (Claude Code, Codex, OpenCode, Antigravity, Grok Build) in the user's projects; each chat is a session, shown live in oah's window. \
 Typical flow: list_projects → (list_agents / list_models for models and efforts) → create_session with a prompt → read the report it returns. \
 A report's `state` says what's next: `needsApproval` (answer_approval), `needsQuestion` (answer_question), `running` (wait_for_session), `idle` (send_message to go on). \
 get_changes and get_diff show what a session changed; close_session when done. The user may answer or type in oah too.";

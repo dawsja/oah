@@ -31,9 +31,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 ## Agent marks
 
 oah shows each agent next to its name with the agent's own mark: the Claude mark (Anthropic),
-the OpenAI mark for Codex (OpenAI), the OpenCode mark (from opencode.ai's favicon), and the
+the OpenAI mark for Codex (OpenAI), the OpenCode mark (from opencode.ai's favicon), the
 Antigravity mark (Google; its outline from antigravity.google's favicon, coloured as one
-gradient). These marks are trademarks of their owners, used only to identify their products; they aren't
+gradient), and the Grok mark for Grok Build (xAI; the path as LobeHub's icon set draws it). These marks are trademarks of their owners, used only to identify their products; they aren't
 covered by oah's MIT license.
 
 ## WSL logo

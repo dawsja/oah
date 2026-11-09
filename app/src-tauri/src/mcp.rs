@@ -237,7 +237,7 @@ pub fn apply_http(mcp: &oah_core::settings::Mcp) {
     let state = http_state(&mut h);
     match oah_mcp::http::start(port, ctx, state) {
         Ok(server) => h.server = Some(server),
-        Err(e) => h.error = Some(format!("couldn't listen on 127.0.0.1:{port}: {e}")),
+        Err(e) => h.error = Some(format!("couldn't listen on port {port}: {e}")),
     }
 }
 
@@ -265,6 +265,8 @@ pub fn mcp_token_regenerate() -> String {
 pub struct HttpStatus {
     /// `http://127.0.0.1:<port>/mcp` while listening.
     url: Option<String>,
+    /// `http://<ip>:<port>/mcp` for 127.0.0.1 and each private/VPN address on this computer.
+    urls: Vec<String>,
     error: Option<String>,
     /// Sessions used in the last hour.
     sessions: usize,
@@ -275,8 +277,18 @@ pub struct HttpStatus {
 
 fn http_status() -> HttpStatus {
     let h = HTTP.lock().unwrap();
+    let port = h.server.as_ref().map(|s| s.addr().port());
+    let url = port.map(|p| format!("http://127.0.0.1:{p}{}", oah_mcp::http::PATH));
+    let urls = match port {
+        Some(p) => std::iter::once("127.0.0.1".to_string())
+            .chain(crate::remote::addresses().into_iter().map(|a| a.ip))
+            .map(|ip| format!("http://{ip}:{p}{}", oah_mcp::http::PATH))
+            .collect(),
+        None => Vec::new(),
+    };
     HttpStatus {
-        url: h.server.as_ref().map(|s| format!("http://127.0.0.1:{}{}", s.addr().port(), oah_mcp::http::PATH)),
+        url,
+        urls,
         error: h.error.clone(),
         sessions: h.state.as_ref().map(|s| s.sessions()).unwrap_or(0),
         token_kept: h.kept,

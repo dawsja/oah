@@ -1,13 +1,14 @@
-//! OpenCode and Antigravity over the Agent Client Protocol (ACP, v1): `opencode acp` or
-//! `agy acp`, JSON-RPC 2.0 on stdio.
+//! OpenCode, Antigravity and Grok Build over the Agent Client Protocol (ACP, v1): `opencode acp`,
+//! `agy acp` or `grok agent stdio`, JSON-RPC 2.0 on stdio.
 //!
 //! We send `initialize`, then `session/new` (or `session/load` / `session/resume` to reopen a
 //! chat), and one `session/prompt` at a time: messages sent while a prompt runs wait their turn.
 //! The agent streams `session/update` notifications (message and thought chunks, tool calls and
 //! their updates, plans, usage, config options) and asks with requests:
 //! `session/request_permission` (answered with one of its options) and `elicitation/create`
-//! (a form, shown as a question card). We advertise no file system or terminal, so `fs/*` and
-//! `terminal/*` requests are refused.
+//! (a form, shown as a question card); Grok also with `_x.ai/ask_user_question` (its question tool)
+//! and `_x.ai/exit_plan_mode` (a finished plan, to approve). We advertise no file system or
+//! terminal, so `fs/*` and `terminal/*` requests are refused.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read};
@@ -59,6 +60,17 @@ struct State {
     /// Antigravity's questions, asked as permission requests whose options are the answers:
     /// our id → (JSON-RPC id, the options).
     choices: HashMap<String, (Value, Vec<Value>)>,
+    /// Grok's questions (`_x.ai/ask_user_question`): our id → (JSON-RPC id, each question's text,
+    /// which its answer goes back under, and whether it takes several).
+    asks: HashMap<String, (Value, Vec<(String, bool)>)>,
+    /// Grok's finished plans waiting for approval (`_x.ai/exit_plan_mode`): our id → JSON-RPC id.
+    plans: HashMap<String, Value>,
+    /// Tool calls shown by their card instead of a row (Grok's question and plan tools).
+    hidden_tools: std::collections::HashSet<String>,
+    /// The mode to go back to when the agent leaves plan mode by itself.
+    after_plan: PermissionMode,
+    /// Each model's context window, when the agent lists them (Grok).
+    windows: HashMap<String, u64>,
     /// The config option that picks the model (`session/set_config_option`), or none when the
     /// agent uses `session/set_model`.
     model_option: Option<String>,
@@ -86,7 +98,7 @@ struct State {
     kind: Option<AgentKind>,
     /// Each model's efforts as first listed (Antigravity's per-effort model ids), kept for the
     /// model lists that come later without them.
-    known_efforts: HashMap<String, Vec<String>>,
+    known_efforts: HashMap<String, (Vec<String>, Option<String>)>,
     /// Set when the process starts; part of every turn id.
     nonce: String,
     permission: PermissionMode,
@@ -119,7 +131,7 @@ impl AcpDriver {
             "" => kind.default_binary().to_string(),
             b => b.to_string(),
         };
-        let args = vec!["acp".to_string()];
+        let args = if kind == AgentKind::Grok { crate::grok::acp_args() } else { vec!["acp".to_string()] };
         let mut env = opts.env.clone();
         if kind.is_opencode() {
             // OpenCode 1.x can't answer its question tool over ACP; 2.x uses form elicitation.
@@ -137,6 +149,9 @@ impl AcpDriver {
         if kind == AgentKind::Antigravity {
             crate::antigravity::acp_env(&mut env);
         }
+        if kind == AgentKind::Grok {
+            crate::grok::acp_env(&mut env);
+        }
         let mut cmd = oah_transport::command(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &env })?;
         let mut child = cmd.spawn().map_err(|e| format!("couldn't start {program}: {e}"))?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
@@ -147,7 +162,15 @@ impl AcpDriver {
             "{:x}",
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0) % 0xffffff
         );
-        let state = Arc::new(Mutex::new(State { alive: true, permission: opts.permission, nonce, kind: Some(kind), ..Default::default() }));
+        let after_plan = if opts.permission == PermissionMode::Plan { PermissionMode::Ask } else { opts.permission };
+        let state = Arc::new(Mutex::new(State {
+            alive: true,
+            permission: opts.permission,
+            after_plan,
+            nonce,
+            kind: Some(kind),
+            ..Default::default()
+        }));
 
         let tail = Arc::new(Mutex::new(String::new()));
         {
@@ -208,21 +231,32 @@ impl AcpDriver {
             st.images = caps["promptCapabilities"]["image"].as_bool() == Some(true);
             st.deletable = !caps["sessionCapabilities"]["delete"].is_null();
         }
+        // Grok's sessions ask their questions through `_x.ai/ask_user_question`.
+        let session_params = |id: Option<&str>| {
+            let mut p = json!({"cwd": opts.cwd, "mcpServers": []});
+            if let Some(id) = id {
+                p["sessionId"] = json!(id);
+            }
+            if kind == AgentKind::Grok {
+                p["_meta"] = crate::grok::session_meta();
+            }
+            p
+        };
         // Reopen the chat's session if we can; otherwise start a new one.
         let mut session = None;
         if let Some(id) = &opts.resume {
-            // Antigravity resumes without replaying the conversation; OpenCode's replay carries
-            // the session's cost so far.
-            let resume_first = kind == AgentKind::Antigravity && !caps["sessionCapabilities"]["resume"].is_null();
+            // Antigravity and Grok resume without replaying the conversation; OpenCode's replay
+            // carries the session's cost so far.
+            let resume_first = matches!(kind, AgentKind::Antigravity | AgentKind::Grok) && !caps["sessionCapabilities"]["resume"].is_null();
             let reopen = if resume_first {
-                d.rpc.call("session/resume", json!({"sessionId": id, "cwd": opts.cwd, "mcpServers": []}), Duration::from_secs(120))
+                d.rpc.call("session/resume", session_params(Some(id)), Duration::from_secs(120))
             } else if caps["loadSession"].as_bool() == Some(true) {
                 d.state.lock().unwrap().loading = true;
-                let r = d.rpc.call("session/load", json!({"sessionId": id, "cwd": opts.cwd, "mcpServers": []}), Duration::from_secs(120));
+                let r = d.rpc.call("session/load", session_params(Some(id)), Duration::from_secs(120));
                 d.state.lock().unwrap().loading = false;
                 r
             } else if !caps["sessionCapabilities"]["resume"].is_null() {
-                d.rpc.call("session/resume", json!({"sessionId": id, "cwd": opts.cwd, "mcpServers": []}), Duration::from_secs(120))
+                d.rpc.call("session/resume", session_params(Some(id)), Duration::from_secs(120))
             } else {
                 Err("can't reopen sessions".into())
             };
@@ -237,7 +271,7 @@ impl AcpDriver {
                 }),
             }
         }
-        let new_session = || d.rpc.call("session/new", json!({"cwd": opts.cwd, "mcpServers": []}), Duration::from_secs(120));
+        let new_session = || d.rpc.call("session/new", session_params(None), Duration::from_secs(120));
         let session = match session {
             Some(s) => s,
             // OpenCode's only sign-in is `opencode auth login` in a terminal: `authenticate`
@@ -303,7 +337,10 @@ impl AcpDriver {
         read_effort(&mut st, session);
         add_efforts(&mut models, current.as_deref(), &st.efforts);
         variant_efforts(&mut models, &session["models"]);
-        st.known_efforts = models.iter().filter(|m| !m.efforts.is_empty()).map(|m| (m.id.clone(), m.efforts.clone())).collect();
+        listed_efforts(&mut models, &session["models"]);
+        st.windows.extend(crate::grok::context_windows(&session["models"]));
+        st.known_efforts =
+            models.iter().filter(|m| !m.efforts.is_empty()).map(|m| (m.id.clone(), (m.efforts.clone(), m.default_effort.clone()))).collect();
         if let Some(opts) = session["configOptions"].as_array() {
             if let Some(mode) = opts.iter().find(|o| o["category"] == "mode" || o["id"] == "mode") {
                 st.mode_option = mode["id"].as_str().map(String::from);
@@ -317,6 +354,10 @@ impl AcpDriver {
                 .flatten()
                 .filter_map(|m| m["id"].as_str().map(String::from))
                 .collect();
+        }
+        // Grok lists no modes, but takes `session/set_mode` with these.
+        if st.modes.is_empty() && st.kind == Some(AgentKind::Grok) {
+            st.modes = vec!["default".into(), "plan".into()];
         }
         (models, current)
     }
@@ -332,8 +373,9 @@ impl AcpDriver {
         if current.is_some() {
             st.current_model = current.clone();
         }
-        add_efforts(&mut models, current.as_deref(), &st.efforts);
+        // Efforts as first listed (in order) before the option's.
         known_efforts(&mut models, &st.known_efforts);
+        add_efforts(&mut models, current.as_deref(), &st.efforts);
         drop(st);
         if !models.is_empty() {
             (self.sink)(ChatEvent::Models { models, current });
@@ -349,7 +391,7 @@ impl AcpDriver {
     }
 
     /// oah's permission mode as the agent's own mode, when it has a matching one: OpenCode's
-    /// plan / build, Antigravity's plan / accept-edits / default.
+    /// plan / build, Antigravity's plan / accept-edits / default, Grok's plan / default.
     fn apply_mode(&self, mode: PermissionMode) -> DriverResult<()> {
         let (option, modes, kind) = {
             let s = self.state.lock().unwrap();
@@ -398,21 +440,33 @@ fn run_prompt(rpc: Rpc, state: Arc<Mutex<State>>, sink: Sink, queue: Arc<Mutex<V
     thread::spawn(move || {
         let started = std::time::Instant::now();
         let r = rpc.call("session/prompt", json!({"sessionId": sid, "prompt": blocks}), PROMPT_LIMIT);
-        let (cost, interrupted, compacted) = {
+        let (cost, interrupted, compacted, context) = {
             let mut s = state.lock().unwrap();
             s.busy = false;
             s.turn_id = None;
             s.pending.clear();
             s.questions.clear();
             s.choices.clear();
+            s.asks.clear();
+            s.plans.clear();
             let reason = r.as_ref().ok().and_then(|v| v["stopReason"].as_str()).unwrap_or("");
             // Without a cost from before the turn, its share can't be told: none, not all of it.
             let cost = match (s.cost, s.cost_at_turn) {
                 (Some(now), Some(before)) => Some((now - before).max(0.0)),
                 _ => None,
             };
-            (cost, reason == "cancelled", std::mem::take(&mut s.compacting))
+            // Grok says the turn's own cost (ticks, 10^10 per dollar) and the context it ends with.
+            let meta = r.as_ref().ok().map(|v| &v["_meta"]);
+            let cost = meta.and_then(|m| m["usage"]["costUsdTicks"].as_f64()).map(|t| t / 1e10).or(cost);
+            let context = meta
+                .and_then(|m| m["totalTokens"].as_u64())
+                .filter(|t| *t > 0)
+                .and_then(|used| Some((used, *s.windows.get(s.current_model.as_deref()?)?)));
+            (cost, reason == "cancelled", std::mem::take(&mut s.compacting), context)
         };
+        if let Some((used_tokens, window_tokens)) = context {
+            sink(ChatEvent::Context { used_tokens, window_tokens, parts: vec![] });
+        }
         if compacted && r.is_ok() && !interrupted {
             sink(ChatEvent::Notice { level: NoticeLevel::Info, text: "Context compacted.".into() });
         }
@@ -428,7 +482,7 @@ fn run_prompt(rpc: Rpc, state: Arc<Mutex<State>>, sink: Sink, queue: Arc<Mutex<V
                 }
                 sink(ChatEvent::TurnFinished {
                     turn_id,
-                    usage: usage_of(&v["usage"]),
+                    usage: usage_of(&v["usage"]).or_else(|| usage_of(&v["_meta"]["usage"])),
                     cost_usd: cost.filter(|c| *c > 0.0),
                     duration_ms: Some(started.elapsed().as_millis() as u64),
                     interrupted,
@@ -469,11 +523,12 @@ impl Driver for AcpDriver {
     fn interrupt(&mut self) -> DriverResult<()> {
         let sid = self.session()?;
         // Questions in flight are withdrawn with the turn.
-        let (pending, questions) = {
+        let (pending, questions, asks, plans) = {
             let mut s = self.state.lock().unwrap();
             let mut pending = s.pending.drain().collect::<Vec<_>>();
             pending.extend(s.choices.drain());
-            (pending, s.questions.drain().collect::<Vec<_>>())
+            let asks = s.asks.drain().map(|(_, (id, _))| id).collect::<Vec<_>>();
+            (pending, s.questions.drain().collect::<Vec<_>>(), asks, s.plans.drain().map(|(_, id)| id).collect::<Vec<_>>())
         };
         for (_, (id, _)) in pending {
             let _ = self.rpc.reply(&id, json!({"outcome": {"outcome": "cancelled"}}));
@@ -481,17 +536,38 @@ impl Driver for AcpDriver {
         for (_, (id, _)) in questions {
             let _ = self.rpc.reply(&id, json!({"action": "cancel"}));
         }
+        for id in asks {
+            let _ = self.rpc.reply(&id, json!({"outcome": "cancelled"}));
+        }
+        // The plan stays a plan: Grok keeps planning until the turn stops.
+        for id in plans {
+            let _ = self.rpc.reply(&id, json!({"outcome": "revise"}));
+        }
         self.queue.lock().unwrap().clear();
         self.rpc.notify("session/cancel", Some(json!({"sessionId": sid})))
     }
 
     fn answer(&mut self, request_id: &str, decision: Decision) -> DriverResult<()> {
+        // A finished plan (Grok): approved, Grok leaves plan mode itself and says so; denied, it
+        // keeps planning.
+        let plan = self.state.lock().unwrap().plans.remove(request_id);
+        if let Some(rpc_id) = plan {
+            (self.sink)(ChatEvent::ApprovalResolved { request_id: request_id.into(), decision });
+            let outcome = if decision == Decision::Deny { "revise" } else { "approved" };
+            return self.rpc.reply(&rpc_id, json!({ "outcome": outcome }));
+        }
         let (rpc_id, options) = self.state.lock().unwrap().pending.remove(request_id).ok_or("that question was already answered")?;
         (self.sink)(ChatEvent::ApprovalResolved { request_id: request_id.into(), decision });
         self.rpc.reply(&rpc_id, permission_outcome(&options, decision))
     }
 
     fn answer_question(&mut self, request_id: &str, answers: std::collections::BTreeMap<String, Vec<String>>) -> DriverResult<()> {
+        let ask = self.state.lock().unwrap().asks.remove(request_id);
+        if let Some((rpc_id, asked)) = ask {
+            let reply = ask_reply(&asked, &answers);
+            (self.sink)(ChatEvent::QuestionResolved { request_id: request_id.into(), answers });
+            return self.rpc.reply(&rpc_id, reply);
+        }
         let choice = self.state.lock().unwrap().choices.remove(request_id);
         if let Some((rpc_id, options)) = choice {
             let reply = choice_reply(&options, &answers);
@@ -545,7 +621,7 @@ impl Driver for AcpDriver {
         Ok(true)
     }
 
-    /// `/compact` as OpenCode and Antigravity have it: a turn running their own `compact`
+    /// `/compact` as OpenCode, Antigravity and Grok have it: a turn running their own `compact`
     /// command, which takes no instructions. The summary isn't shown; a note says it's done.
     fn compact(&mut self, instructions: &str) -> DriverResult<bool> {
         if !instructions.trim().is_empty() {
@@ -571,12 +647,24 @@ impl Driver for AcpDriver {
 
     fn idle(&self) -> bool {
         let s = self.state.lock().unwrap();
-        !s.busy && s.pending.is_empty() && s.questions.is_empty() && s.choices.is_empty() && self.queue.lock().unwrap().is_empty()
+        !s.busy
+            && s.pending.is_empty()
+            && s.questions.is_empty()
+            && s.choices.is_empty()
+            && s.asks.is_empty()
+            && s.plans.is_empty()
+            && self.queue.lock().unwrap().is_empty()
     }
 
     fn set_permission(&mut self, mode: PermissionMode) -> DriverResult<()> {
         self.permission = mode;
-        self.state.lock().unwrap().permission = mode;
+        {
+            let mut s = self.state.lock().unwrap();
+            s.permission = mode;
+            if mode != PermissionMode::Plan {
+                s.after_plan = mode;
+            }
+        }
         self.apply_mode(mode)
     }
 
@@ -620,6 +708,8 @@ impl Translator {
             match method {
                 "session/request_permission" => self.permission(id, p),
                 "elicitation/create" => self.elicitation(id, p),
+                "_x.ai/ask_user_question" => self.ask_user(id, p),
+                "_x.ai/exit_plan_mode" => self.exit_plan(id, p),
                 _ => {
                     let _ = self.rpc.reply_error(id, -32601, "oah doesn't offer this");
                 }
@@ -690,19 +780,44 @@ impl Translator {
                 if !models.is_empty() {
                     st.model_option = option;
                     st.current_model = current.clone();
-                    add_efforts(&mut models, current.as_deref(), &st.efforts);
                     known_efforts(&mut models, &st.known_efforts);
+                    add_efforts(&mut models, current.as_deref(), &st.efforts);
                     drop(st);
                     self.emit(ChatEvent::Models { models, current });
                 }
             }
             "available_commands_update" => {
                 let mut commands = acp_commands(&u["availableCommands"]);
-                // Antigravity's `logout` would sign every chat out.
-                if self.state.lock().unwrap().kind == Some(AgentKind::Antigravity) {
-                    commands.retain(|c| c.name != "logout");
+                match self.state.lock().unwrap().kind {
+                    // Antigravity's `logout` would sign every chat out.
+                    Some(AgentKind::Antigravity) => commands.retain(|c| c.name != "logout"),
+                    Some(AgentKind::Grok) => commands.retain(|c| !crate::grok::hidden_command(&c.name)),
+                    _ => {}
                 }
                 self.emit(ChatEvent::Commands { commands })
+            }
+            // The agent went in or out of plan mode by itself (Grok: its plan tool, or an approved
+            // plan): the chat's mode follows. Our own switches find it already there.
+            "current_mode_update" => {
+                let Some(mode) = u["currentModeId"].as_str() else { return };
+                let changed = {
+                    let mut st = self.state.lock().unwrap();
+                    match (mode == "plan", st.permission == PermissionMode::Plan) {
+                        (true, false) => {
+                            st.after_plan = st.permission;
+                            st.permission = PermissionMode::Plan;
+                            Some(PermissionMode::Plan)
+                        }
+                        (false, true) => {
+                            st.permission = st.after_plan;
+                            Some(st.after_plan)
+                        }
+                        _ => None,
+                    }
+                };
+                if let Some(mode) = changed {
+                    self.emit(ChatEvent::PermissionChanged { mode });
+                }
             }
             "notice" => {
                 if let Some(t) = u["message"].as_str().or(u["text"].as_str()) {
@@ -719,6 +834,18 @@ impl Translator {
         if is_question(&id) && self.state.lock().unwrap().kind == Some(AgentKind::Antigravity) {
             return;
         }
+        // Grok names its tools in `_meta` ("x.ai/tool"); its question and plan-approval tools are
+        // shown by their cards. Only the first updates carry the name.
+        let grok_tool = &u["_meta"]["x.ai/tool"];
+        {
+            let mut st = self.state.lock().unwrap();
+            if matches!(grok_tool["name"].as_str(), Some("ask_user_question" | "exit_plan_mode")) {
+                st.hidden_tools.insert(id.clone());
+            }
+            if st.hidden_tools.contains(&id) {
+                return;
+            }
+        }
         let mut st = self.state.lock().unwrap();
         // A text after this tool call is a new stretch.
         if u["sessionUpdate"] == "tool_call" {
@@ -732,11 +859,12 @@ impl Translator {
             input: Value::Null,
             path: None,
         });
-        if let Some(k) = u["kind"].as_str() {
+        if let Some(k) = u["kind"].as_str().or(grok_tool["kind"].as_str().filter(|_| known.is_none())) {
             call.kind = tool_kind(k);
             call.name = k.to_string();
         }
-        if let Some(t) = u["title"].as_str().filter(|t| !t.is_empty()) {
+        // Grok's first title is the tool's own name (`run_terminal_command`): the input says more.
+        if let Some(t) = u["title"].as_str().filter(|t| !t.is_empty() && grok_tool["name"].as_str() != Some(t)) {
             call.title = t.to_string();
         }
         if !u["rawInput"].is_null() {
@@ -836,6 +964,64 @@ impl Translator {
         });
     }
 
+    /// Grok's question tool: each question with its options, answered by the question's text.
+    fn ask_user(&mut self, rpc_id: &Value, p: &Value) {
+        let mut asked = Vec::new();
+        let questions: Vec<Question> = p["questions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter_map(|(i, q)| {
+                let text = q["question"].as_str().filter(|t| !t.is_empty())?.to_string();
+                let multi = q["multiSelect"] == true;
+                asked.push((text.clone(), multi));
+                Some(Question {
+                    id: format!("q{i}"),
+                    header: q["header"].as_str().unwrap_or("").to_string(),
+                    question: text,
+                    options: q["options"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|o| {
+                            let label = o["label"].as_str()?.to_string();
+                            let description = o["description"].as_str().filter(|d| !d.eq_ignore_ascii_case(&label)).unwrap_or("");
+                            Some(QuestionOption { label, description: description.to_string() })
+                        })
+                        .collect(),
+                    multi,
+                    other: true,
+                    secret: false,
+                })
+            })
+            .collect();
+        if questions.is_empty() {
+            let _ = self.rpc.reply(rpc_id, json!({"outcome": "cancelled"}));
+            return;
+        }
+        let request_id = format!("acpq-{rpc_id}");
+        self.state.lock().unwrap().asks.insert(request_id.clone(), (rpc_id.clone(), asked));
+        self.emit(ChatEvent::Question { request: QuestionRequest { request_id, questions } });
+    }
+
+    /// Grok's finished plan, to approve before it leaves plan mode. Always the user's call.
+    fn exit_plan(&mut self, rpc_id: &Value, p: &Value) {
+        let request_id = format!("acp-{rpc_id}");
+        self.state.lock().unwrap().plans.insert(request_id.clone(), rpc_id.clone());
+        self.emit(ChatEvent::Approval {
+            request: ApprovalRequest {
+                request_id,
+                item_id: p["toolCallId"].as_str().map(String::from),
+                kind: ApprovalKind::Plan,
+                title: "Leave plan mode and start on this plan?".into(),
+                detail: p["planContent"].as_str().filter(|t| !t.trim().is_empty()).map(String::from),
+                diff: None,
+                can_remember: false,
+            },
+        });
+    }
+
     fn elicitation(&mut self, rpc_id: &Value, p: &Value) {
         if p["mode"] == "url" {
             if let Some(url) = p["url"].as_str() {
@@ -855,6 +1041,67 @@ impl Translator {
         let request_id = format!("acpq-{rpc_id}");
         self.state.lock().unwrap().questions.insert(request_id.clone(), (rpc_id.clone(), fields));
         self.emit(ChatEvent::Question { request: QuestionRequest { request_id, questions } });
+    }
+}
+
+/// One question in a session of its own, answered as plain text (Grok's one-off answers: the
+/// question can be longer than a command line takes). Whatever the agent asks to run or edit is
+/// refused and its questions are skipped. The session is deleted afterwards.
+pub fn ask_once(opts: StartOptions, question: &str, limit: Duration) -> DriverResult<String> {
+    let kind = opts.kind;
+    let (tx, rx) = std::sync::mpsc::channel::<ChatEvent>();
+    let tx = Mutex::new(tx);
+    let sink: Sink = Arc::new(move |e| {
+        let _ = tx.lock().unwrap().send(e);
+    });
+    let mut d = AcpDriver::start(StartOptions { permission: PermissionMode::Ask, resume: None, ..opts }, sink)?;
+    d.send(Prompt { id: "oneshot".into(), text: question.into(), images: vec![], files: vec![] })?;
+    let started = std::time::Instant::now();
+    // The last message is the answer.
+    let (mut text, mut message) = (String::new(), String::new());
+    let mut error = None;
+    loop {
+        let Some(left) = limit.checked_sub(started.elapsed()) else {
+            error = Some(format!("{} didn't answer in time", d.rpc.name));
+            break;
+        };
+        match rx.recv_timeout(left) {
+            Ok(ChatEvent::TextDelta { item_id, text: t }) => {
+                if item_id != message {
+                    message = item_id;
+                    text.clear();
+                }
+                text.push_str(&t);
+            }
+            Ok(ChatEvent::Approval { request }) => {
+                let _ = d.answer(&request.request_id, Decision::Deny);
+            }
+            Ok(ChatEvent::Question { request }) => {
+                let _ = d.answer_question(&request.request_id, Default::default());
+            }
+            Ok(ChatEvent::Error { message }) => error = Some(message),
+            Ok(ChatEvent::TurnFinished { .. }) | Ok(ChatEvent::Exited { .. }) => break,
+            Ok(_) => {}
+            Err(_) => {
+                error = Some(format!("{} didn't answer in time", d.rpc.name));
+                break;
+            }
+        }
+    }
+    let (sid, deletable) = {
+        let s = d.state.lock().unwrap();
+        (s.session_id.clone(), s.deletable)
+    };
+    if let Some(sid) = sid {
+        let method = if kind == AgentKind::Grok { Some("_x.ai/session/delete") } else { deletable.then_some("session/delete") };
+        if let Some(m) = method {
+            let _ = d.rpc.call(m, json!({"sessionId": sid}), Duration::from_secs(10));
+        }
+    }
+    d.stop();
+    match error {
+        Some(e) if text.trim().is_empty() => Err(e),
+        _ => Ok(text),
     }
 }
 
@@ -917,7 +1164,7 @@ pub fn parse_opencode_models(out: &str) -> Vec<ModelOption> {
 }
 
 /// Effort levels from lowest to highest (unknown ones last).
-fn effort_rank(e: &str) -> usize {
+pub(crate) fn effort_rank(e: &str) -> usize {
     ["none", "minimal", "low", "medium", "high", "xhigh", "max"].iter().position(|x| *x == e).unwrap_or(99)
 }
 
@@ -935,6 +1182,7 @@ const NOT_SIGNED_IN: &str = "OpenCode isn't signed in. Sign in with `opencode au
 fn not_signed_in(kind: AgentKind) -> &'static str {
     match kind {
         AgentKind::Antigravity => crate::antigravity::NOT_SIGNED_IN,
+        AgentKind::Grok => crate::grok::NOT_SIGNED_IN,
         _ => NOT_SIGNED_IN,
     }
 }
@@ -945,15 +1193,16 @@ fn agent_mode(kind: Option<AgentKind>, mode: PermissionMode) -> &'static str {
     match (kind, mode) {
         (_, PermissionMode::Plan) => "plan",
         (Some(AgentKind::Antigravity), PermissionMode::AcceptEdits) => "accept-edits",
-        (Some(AgentKind::Antigravity), _) => "default",
+        (Some(AgentKind::Antigravity | AgentKind::Grok), _) => "default",
         _ => "build",
     }
 }
 
-fn known_efforts(models: &mut [ModelOption], known: &HashMap<String, Vec<String>>) {
+fn known_efforts(models: &mut [ModelOption], known: &HashMap<String, (Vec<String>, Option<String>)>) {
     for m in models.iter_mut().filter(|m| m.efforts.is_empty()) {
-        if let Some(e) = known.get(&m.id) {
+        if let Some((e, default)) = known.get(&m.id) {
             m.efforts = e.clone();
+            m.default_effort = m.default_effort.clone().or(default.clone());
         }
     }
 }
@@ -974,6 +1223,46 @@ fn variant_efforts(models: &mut [ModelOption], listed: &Value) {
             m.efforts = efforts;
         }
     }
+}
+
+/// Models listed with their efforts in `_meta.reasoningEfforts` (Grok's session `models`): each
+/// model gets its own, not just the current one.
+fn listed_efforts(models: &mut [ModelOption], listed: &Value) {
+    let meta = crate::grok::parse_models(listed);
+    for m in models.iter_mut() {
+        if let Some(l) = meta.iter().find(|l| l.id == m.id && !l.efforts.is_empty()) {
+            m.efforts = l.efforts.clone();
+            m.default_effort = l.default_effort.clone();
+        }
+    }
+}
+
+/// Grok's answers: `{outcome: accepted, answers: {<question>: <label or labels>}}`; nothing
+/// answered cancels. A typed answer goes as it was typed.
+fn ask_reply(asked: &[(String, bool)], answers: &std::collections::BTreeMap<String, Vec<String>>) -> Value {
+    let mut out = serde_json::Map::new();
+    for (i, (text, multi)) in asked.iter().enumerate() {
+        let picked: Vec<String> = answers
+            .get(&format!("q{i}"))
+            .into_iter()
+            .flatten()
+            .map(|a| a.trim_end_matches(" (Recommended)").to_string())
+            .filter(|a| !a.trim().is_empty())
+            .collect();
+        match picked.len() {
+            0 => {}
+            1 if !multi => {
+                out.insert(text.clone(), json!(picked[0]));
+            }
+            _ => {
+                out.insert(text.clone(), json!(picked));
+            }
+        }
+    }
+    if out.is_empty() {
+        return json!({"outcome": "cancelled"});
+    }
+    json!({"outcome": "accepted", "answers": out})
 }
 
 /// The models (with every model's efforts) and commands OpenCode offers, for a chat that hasn't
@@ -1070,7 +1359,7 @@ pub fn opencode_commands() -> Vec<SlashCommand> {
 }
 
 /// `availableCommands: [{name, description, input: {hint}}]`.
-fn acp_commands(v: &Value) -> Vec<SlashCommand> {
+pub(crate) fn acp_commands(v: &Value) -> Vec<SlashCommand> {
     v.as_array()
         .into_iter()
         .flatten()
@@ -1090,6 +1379,7 @@ fn tool_kind(k: &str) -> ToolKind {
     match k {
         "read" => ToolKind::Read,
         "edit" | "delete" | "move" => ToolKind::Edit,
+        "write" => ToolKind::Write,
         "search" => ToolKind::Search,
         "execute" => ToolKind::Bash,
         "fetch" => ToolKind::Web,
@@ -1192,7 +1482,7 @@ fn usage_of(u: &Value) -> Option<Usage> {
         input_tokens: n("inputTokens"),
         output_tokens: n("outputTokens"),
         cache_read_tokens: n("cachedReadTokens"),
-        cache_write_tokens: n("cachedWriteTokens"),
+        cache_write_tokens: n("cachedWriteTokens").max(n("cacheCreationTokens")),
     })
 }
 
@@ -2190,6 +2480,186 @@ opencode/big-pickle
         eprintln!("approvals asked: {approvals}");
         d.stop();
     }
+    /// Grok 1.0.77: its question tool, a finished plan, mode changes it makes itself, tool kinds
+    /// from `_meta`, and the commands oah leaves out.
+    #[test]
+    fn grok_questions_plans_and_modes() {
+        let meta = |name: &str, kind: &str| json!({"x.ai/tool": {"version": 1, "name": name, "kind": kind, "namespace": "grok_build"}});
+        let ask_call = upd(json!({"sessionUpdate": "tool_call", "toolCallId": "call-a-0", "title": "ask_user_question", "rawInput": {}, "_meta": meta("ask_user_question", "ask_user")}));
+        let ask_done = upd(json!({"sessionUpdate": "tool_call_update", "toolCallId": "call-a-0", "status": "completed", "content": []}));
+        let ask = json!({"jsonrpc": "2.0", "id": 0, "method": "_x.ai/ask_user_question", "params": {"sessionId": "s", "toolCallId": "call-a-0", "mode": "default",
+            "questions": [{"question": "What is your favorite color?", "options": [{"label": "red", "description": "Red"}, {"label": "blue", "description": "Warm"}], "multiSelect": null},
+                          {"question": "Which sizes?", "options": [{"label": "S"}, {"label": "M"}], "multiSelect": true}]}});
+        let shell = upd(json!({"sessionUpdate": "tool_call", "toolCallId": "call-b-0", "title": "run_terminal_command", "rawInput": {"command": "ls"}, "_meta": meta("run_terminal_command", "execute")}));
+        let into_plan = upd(json!({"sessionUpdate": "current_mode_update", "currentModeId": "plan"}));
+        let plan = json!({"jsonrpc": "2.0", "id": 1, "method": "_x.ai/exit_plan_mode", "params": {"sessionId": "s", "toolCallId": "call-c-2", "planContent": "1. Say done.\n"}});
+        let out_of_plan = upd(json!({"sessionUpdate": "current_mode_update", "currentModeId": "default"}));
+        let cmds = upd(json!({"sessionUpdate": "available_commands_update", "availableCommands": [
+            {"name": "compact", "description": "Compress", "input": null}, {"name": "always-approve", "description": "Toggle", "input": {"hint": "on|off"}}]}));
+        let (ev, state) = run_as(Some(AgentKind::Grok), &[ask_call, ask, ask_done, shell, into_plan, plan, out_of_plan, cmds], PermissionMode::FullAccess);
+
+        // The question: a card per question, no tool row, never answered by the mode.
+        let q = ev.iter().find_map(|e| if let ChatEvent::Question { request } = e { Some(request.clone()) } else { None }).unwrap();
+        assert_eq!(q.questions.len(), 2);
+        assert_eq!((q.questions[0].question.as_str(), q.questions[0].options[0].description.as_str()), ("What is your favorite color?", ""));
+        assert_eq!(q.questions[0].options[1].description, "Warm");
+        assert!(q.questions[1].multi && q.questions[0].other);
+        assert!(state.lock().unwrap().asks.contains_key(&q.request_id));
+        let tools: Vec<&ToolCall> = ev.iter().filter_map(|e| if let ChatEvent::ToolStarted { tool, .. } = e { Some(tool) } else { None }).collect();
+        assert_eq!(tools.len(), 1, "only the shell command has a row");
+        assert_eq!((tools[0].kind, tools[0].title.as_str()), (ToolKind::Bash, "ls"));
+        let answers = [("q0".to_string(), vec!["blue".to_string()]), ("q1".to_string(), vec!["S".into(), "M".into()])].into_iter().collect();
+        let asked = state.lock().unwrap().asks[&q.request_id].1.clone();
+        assert_eq!(
+            ask_reply(&asked, &answers),
+            json!({"outcome": "accepted", "answers": {"What is your favorite color?": "blue", "Which sizes?": ["S", "M"]}})
+        );
+        assert_eq!(ask_reply(&asked, &Default::default()), json!({"outcome": "cancelled"}));
+
+        // Plan mode, by Grok's own doing: the chat follows in, then back to where it was.
+        let modes: Vec<PermissionMode> = ev.iter().filter_map(|e| if let ChatEvent::PermissionChanged { mode } = e { Some(*mode) } else { None }).collect();
+        assert_eq!(modes, [PermissionMode::Plan, PermissionMode::FullAccess]);
+        // The finished plan is the user's to approve, even with full access.
+        let p = ev
+            .iter()
+            .find_map(|e| match e {
+                ChatEvent::Approval { request } if request.kind == ApprovalKind::Plan => Some(request.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(p.detail.as_deref(), Some("1. Say done.\n"));
+        assert!(state.lock().unwrap().plans.contains_key(&p.request_id));
+
+        let cmds = ev.iter().rev().find_map(|e| if let ChatEvent::Commands { commands } = e { Some(commands.clone()) } else { None }).unwrap();
+        assert_eq!(cmds.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["compact"]);
+        assert_eq!(agent_mode(Some(AgentKind::Grok), PermissionMode::Plan), "plan");
+        assert_eq!(agent_mode(Some(AgentKind::Grok), PermissionMode::AcceptEdits), "default");
+    }
+
+    /// Grok's session `models` list every model's efforts in `_meta`; the config option only names them.
+    #[test]
+    fn grok_models_have_their_own_efforts() {
+        let session = json!({
+            "models": {"currentModelId": "grok-4.7", "availableModels": [
+                {"modelId": "grok-4.7", "name": "Grok 4.7", "_meta": {"totalContextTokens": 256000, "reasoningEfforts": [{"id": "high", "value": "high", "default": true}, {"id": "low", "value": "low"}]}},
+                {"modelId": "grok-4.5", "name": "Grok 4.5", "_meta": {"totalContextTokens": 128000, "reasoningEfforts": [{"id": "medium", "value": "medium", "default": true}, {"id": "low", "value": "low"}]}}]},
+            "configOptions": [
+                {"id": "model", "category": "model", "type": "select", "currentValue": "grok-4.7", "options": [{"value": "grok-4.7", "name": "Grok 4.7"}, {"value": "grok-4.5", "name": "Grok 4.5"}]},
+                {"id": "reasoning_effort", "category": "thought_level", "type": "select", "currentValue": "high", "options": [{"value": "high", "name": "High"}, {"value": "low", "name": "Low"}]}]
+        });
+        let sink: Sink = Arc::new(|_| {});
+        let d = AcpDriver {
+            rpc: Rpc::new(None, "Grok"),
+            child: Arc::new(Mutex::new(None)),
+            state: Arc::new(Mutex::new(State { kind: Some(AgentKind::Grok), ..Default::default() })),
+            sink,
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+            permission: PermissionMode::Ask,
+        };
+        let (models, current) = d.read_options(&session);
+        assert_eq!(current.as_deref(), Some("grok-4.7"));
+        assert_eq!(models[1].efforts, ["low", "medium"]);
+        assert_eq!(models[1].default_effort.as_deref(), Some("medium"));
+        let st = d.state.lock().unwrap();
+        assert_eq!(st.modes, ["default", "plan"]);
+        assert_eq!(st.windows.get("grok-4.5"), Some(&128000));
+    }
+
+    /// Against a real `grok` (ignored): OAH_TEST_DIR a folder, OAH_TEST_RESUME a session to reopen.
+    /// Checks the session's models and efforts, switches effort and mode, runs a turn that asks
+    /// to run a command (Ask mode: an approval card), reads its output, cost and context; then a
+    /// one-off answer, whose session is deleted.
+    #[test]
+    #[ignore]
+    fn real_grok() {
+        use crate::driver::{Driver, Prompt};
+        let dir = std::env::var("OAH_TEST_DIR").expect("OAH_TEST_DIR");
+        let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
+        let e = events.clone();
+        let sink: Sink = Arc::new(move |ev| e.lock().unwrap().push(ev));
+        let opts = StartOptions {
+            kind: AgentKind::Grok,
+            cwd: dir.clone(),
+            location: oah_core::settings::Location::Local,
+            binary: String::new(),
+            model: None,
+            effort: Some("low".into()),
+            permission: PermissionMode::Ask,
+            resume: std::env::var("OAH_TEST_RESUME").ok(),
+            env: vec![],
+        };
+        let mut d = AcpDriver::start(opts.clone(), sink).expect("start grok");
+        thread::sleep(Duration::from_millis(800));
+        {
+            let evs = events.lock().unwrap();
+            let models = evs.iter().rev().find_map(|e| if let ChatEvent::Models { models, .. } = e { Some(models.clone()) } else { None }).expect("models");
+            eprintln!("models: {}", models.iter().map(|m| format!("{} {:?}", m.id, m.efforts)).collect::<Vec<_>>().join(", "));
+            assert!(models.iter().all(|m| m.efforts.len() > 1), "efforts for every model");
+            if let Some(c) = evs.iter().rev().find_map(|e| if let ChatEvent::Commands { commands } = e { Some(commands.clone()) } else { None }) {
+                eprintln!("commands: {}", c.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(" "));
+                assert!(!c.iter().any(|c| c.name == "always-approve"));
+            }
+        }
+        {
+            let s = d.state.lock().unwrap();
+            eprintln!("efforts {:?} modes {:?} resumable {}", s.efforts, s.modes, s.resumable);
+            assert!(s.resumable);
+        }
+        d.set_permission(PermissionMode::Plan).expect("plan mode");
+        d.set_permission(PermissionMode::Ask).expect("default mode");
+        let from = events.lock().unwrap().len();
+        d.send(Prompt {
+            id: "p1".into(),
+            text: "Run the shell command `echo oah-grok-check` and tell me exactly what it printed. Nothing else.".into(),
+            images: vec![],
+            files: vec![],
+        })
+        .unwrap();
+        let t0 = std::time::Instant::now();
+        loop {
+            assert!(t0.elapsed() < Duration::from_secs(240), "turn took too long");
+            thread::sleep(Duration::from_millis(200));
+            let evs: Vec<ChatEvent> = events.lock().unwrap()[from..].to_vec();
+            for e in &evs {
+                if let ChatEvent::Approval { request } = e {
+                    if d.state.lock().unwrap().pending.contains_key(&request.request_id) {
+                        eprintln!("  approval: {:?} {} — {:?}", request.kind, request.title, request.detail);
+                        d.answer(&request.request_id, Decision::Allow).unwrap();
+                    }
+                }
+            }
+            if evs.iter().any(|e| matches!(e, ChatEvent::TurnFinished { .. })) {
+                let mut text = String::new();
+                let mut context = false;
+                for e in &evs {
+                    match e {
+                        ChatEvent::TextDelta { text: t, .. } => text.push_str(t),
+                        ChatEvent::ToolStarted { tool, .. } => eprintln!("  tool: {:?} {}", tool.kind, tool.title),
+                        ChatEvent::ToolFinished { ok, output, .. } => eprintln!("  tool done ok={ok} output={output:?}"),
+                        ChatEvent::Context { used_tokens, window_tokens, .. } => {
+                            context = true;
+                            eprintln!("  context {used_tokens}/{window_tokens}")
+                        }
+                        ChatEvent::TurnFinished { usage, cost_usd, interrupted, .. } => {
+                            eprintln!("  finished usage={usage:?} cost={cost_usd:?} interrupted={interrupted}");
+                            assert!(usage.as_ref().is_some_and(|u| u.input_tokens > 0) && cost_usd.is_some());
+                        }
+                        ChatEvent::Error { message } => eprintln!("  error: {message}"),
+                        _ => {}
+                    }
+                }
+                eprintln!("answer: {text}");
+                assert!(text.contains("oah-grok-check"), "the command's output comes back: {text}");
+                assert!(context, "context after the turn");
+                break;
+            }
+        }
+        d.stop();
+        let answer = ask_once(opts, "Reply with just the word: pong", Duration::from_secs(120)).expect("one-off");
+        eprintln!("one-off: {answer}");
+        assert!(answer.to_lowercase().contains("pong"));
+    }
+
     #[test]
     fn refuses_file_system_requests() {
         let (ev, _) = run(

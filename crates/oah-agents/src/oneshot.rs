@@ -5,6 +5,8 @@
 //! - Codex: `codex exec -m <its fast, affordable model> -s read-only --ephemeral` at low effort
 //! - OpenCode: `opencode run -m <a free model>`
 //! - Antigravity: `agy --print= --sandbox --model <Flash> --effort low`, stream-json in and out
+//! - Grok Build: a session over ACP at its lowest effort, deleted after (`grok -p` takes the
+//!   question only as an argument, too short for a diff on Windows)
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -51,6 +53,10 @@ pub fn cheapest(kind: AgentKind, binary: &str, location: &Location, cwd: &str) -
                 None => Cheap { model: None, label: "default model".into(), ..Default::default() },
             }
         }
+        AgentKind::Grok => match crate::grok::models(binary, location, &[]).ok().and_then(|m| crate::grok::pick_cheap(&m)) {
+            Some((model, effort, label)) => Cheap { model: Some(model), effort, label },
+            None => Cheap { model: None, label: "default model".into(), ..Default::default() },
+        },
     };
     PICKED.lock().unwrap().push((kind, location.clone(), c.clone()));
     c
@@ -87,6 +93,20 @@ fn program(kind: AgentKind, binary: &str) -> String {
 
 /// Asks `question` (on stdin) and returns the answer.
 pub fn ask(kind: AgentKind, binary: &str, location: &Location, cwd: &str, cheap: &Cheap, question: &str) -> DriverResult<String> {
+    if kind == AgentKind::Grok {
+        let opts = crate::driver::StartOptions {
+            kind,
+            cwd: cwd.to_string(),
+            location: location.clone(),
+            binary: binary.to_string(),
+            model: cheap.model.clone(),
+            effort: cheap.effort.clone(),
+            permission: oah_core::settings::PermissionMode::Ask,
+            resume: None,
+            env: vec![],
+        };
+        return crate::acp::ask_once(opts, question, Duration::from_secs(180));
+    }
     let prog = program(kind, binary);
     let mut args: Vec<String> = match kind {
         AgentKind::Claude => ["-p", "--tools", "", "--no-session-persistence", "--output-format", "text"].map(String::from).to_vec(),
@@ -97,6 +117,7 @@ pub fn ask(kind: AgentKind, binary: &str, location: &Location, cwd: &str, cheap:
         }
         AgentKind::Opencode | AgentKind::Opencode2 => vec!["run".into()],
         AgentKind::Antigravity => crate::antigravity::oneshot_args(cheap.model.as_deref(), cheap.effort.as_deref()),
+        AgentKind::Grok => unreachable!("asked over ACP above"),
     };
     if let Some(m) = cheap.model.as_ref().filter(|_| kind != AgentKind::Antigravity) {
         args.extend(["--model".into(), m.clone()]);

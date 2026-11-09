@@ -222,6 +222,7 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: 
             AgentKind::Codex => account::codex_limits(&binary, &location),
             AgentKind::Opencode | AgentKind::Opencode2 => account::opencode_go_limits(&location, &env),
             AgentKind::Antigravity => oah_agents::antigravity::limits(&binary, &location, &env),
+            AgentKind::Grok => oah_agents::grok::limits(&binary, &location, &env),
         }
     })
     .await
@@ -274,7 +275,7 @@ pub(crate) fn catalog(s: &Settings, kind: AgentKind, project_id: Option<&str>) -
             };
             oah_agents::acp::opencode_catalog(opts).map(|(models, commands)| Catalog { models, commands })
         }
-        AgentKind::Antigravity => {
+        AgentKind::Antigravity | AgentKind::Grok => {
             let opts = oah_agents::driver::StartOptions {
                 kind,
                 cwd,
@@ -286,7 +287,8 @@ pub(crate) fn catalog(s: &Settings, kind: AgentKind, project_id: Option<&str>) -
                 resume: None,
                 env: secrets::resolve(&secrets::scope(kind), &s.providers.get(kind).env),
             };
-            oah_agents::antigravity::catalog(&opts).map(|(models, commands)| Catalog { models, commands })
+            let listed = if kind == AgentKind::Grok { oah_agents::grok::catalog(&opts) } else { oah_agents::antigravity::catalog(&opts) };
+            listed.map(|(models, commands)| Catalog { models, commands })
         }
     }
 }

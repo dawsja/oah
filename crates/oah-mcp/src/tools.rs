@@ -69,7 +69,7 @@ pub fn list(settings: &Settings) -> Vec<Value> {
     let (worktree, cwd) = place();
     let wait = json!({"type": "boolean", "description": "Wait for the turn to finish or to need you (an approval or a question) before returning. Default true."});
     let timeout = json!({"type": "integer", "minimum": 1, "maximum": MAX_WAIT, "description": "Longest wait, in seconds (default 300). On timeout the session keeps running: call wait_for_session."});
-    let agent = json!({"type": "string", "enum": ["claude", "codex", "opencode", "opencode2", "antigravity"], "description": "The agent CLI: Claude Code, Codex, OpenCode (`opencode`), OpenCode 2 (`opencode2`) or Antigravity (`antigravity`, Google's `agy`). Default: the project's, else oah's default."});
+    let agent = json!({"type": "string", "enum": ["claude", "codex", "opencode", "opencode2", "antigravity", "grok"], "description": "The agent CLI: Claude Code, Codex, OpenCode (`opencode`), OpenCode 2 (`opencode2`), Antigravity (`antigravity`, Google's `agy`) or Grok Build (`grok`, xAI's). Default: the project's, else oah's default."});
     let mut tools = vec![
         tool("list_projects", "List projects", "The projects open in oah (on this computer, in WSL or over SSH). Sessions run in one of them.", json!({}), &[], true, false),
         tool("list_worktrees", "List worktrees", "A project's git worktrees (one branch checked out per folder). A session can run in one so several work on the repo at once.",

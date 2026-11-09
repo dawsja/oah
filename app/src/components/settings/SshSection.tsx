@@ -123,6 +123,7 @@ const TOOLS = [
   ["opencode", "OpenCode"],
   ["opencode2", "OpenCode 2"],
   ["antigravity", "Antigravity"],
+  ["grok", "Grok Build"],
   ["git", "git"],
   ["gh", "gh"],
 ] as const

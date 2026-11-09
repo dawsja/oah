@@ -1,7 +1,7 @@
 # oah — Open Agent Harness
 
 A chat-first desktop app for coding agents. oah drives **Claude Code**, **Codex**, **OpenCode**
-1.x and 2 (by `opencode` or `opencode2`) and **Antigravity** (Google's `agy`), the CLIs you already use with your own sign-ins, in your projects: on this computer, in WSL
+1.x and 2 (by `opencode` or `opencode2`), **Antigravity** (Google's `agy`) and **Grok Build** (xAI's `grok`), the CLIs you already use with your own sign-ins, in your projects: on this computer, in WSL
 or on an SSH host, with git, worktrees and pull requests next to the chat. Rust and Tauri; no
 Electron.
 
@@ -16,7 +16,7 @@ Electron.
   free space; Claude Code reports the breakdown, the others the total), token use per turn, a model picker with each agent's own models and their effort levels (hover a
   model: Low … Max open to the right), `@` file mentions, and a `/` menu: oah's `/model`, `/plan`, `/compact` and `/clear`, then the agent's own
   commands and skills. "Always allow" lasts for the chat's session; it never writes the agent's
-  settings files. Messages sent mid-turn are steered in (Codex) or queued (Claude, OpenCode, Antigravity). Chats
+  settings files. Messages sent mid-turn are steered in (Codex) or queued (Claude, OpenCode, Antigravity, Grok Build). Chats
   are saved and resume the agent's own session.
 - **Images.** Attach by paste, drop or the clip button; they're saved with the chat, shown as
   thumbnails in the message, and open full-window (fit or actual size, copy, save; ← → between
@@ -27,7 +27,7 @@ Electron.
 - **Side panel.** Files (tree, filter, search in files, add to chat), Source Control (stage,
   discard, commit, branches, push, pull, sync; the sparkle in the message box writes the commit
   message from the changes with the project agent's cheapest model: Haiku, Codex's fast model,
-  a free OpenCode one, or Antigravity's Flash), History (graph), Pull Request (`gh`: open one,
+  a free OpenCode one, Antigravity's Flash, or Grok at low effort), History (graph), Pull Request (`gh`: open one,
   review state, checks).
 - **Terminal.** A panel under the chat (Ctrl+` or the shell button in the title bar shows and
   hides it) with a shell where the project is: PowerShell (7 if installed) on Windows, your
@@ -55,18 +55,19 @@ Electron.
   for up to 30 seconds, then tap Stop to add the text to your draft. Audio stays on the phone;
   dictation works offline after download. Leaving the chat or backgrounding the app cancels
   recording. Turning voice off removes the model, and memory is released after each transcription.
-- **Usage.** Plan limits for Claude, Codex, OpenCode Go (session, week, month) and Antigravity
-  (5 hours and week, per model group), in a title bar
+- **Usage.** Plan limits for Claude, Codex, OpenCode Go (session, week, month), Antigravity
+  (5 hours and week, per model group) and Grok (the plan's credits this week), in a title bar
   popover and in Settings → Usage, with tokens and cost per project.
-- **MCP (optional).** Another agent (Claude Code, Codex, OpenCode, Antigravity, any MCP client) can drive oah: list
+- **MCP (optional).** Another agent (Claude Code, Codex, OpenCode, Antigravity, Grok Build, any MCP client) can drive oah: list
   projects, the agents and their models with effort levels, start chats (in a worktree too), send
   messages and wait for the turn, read transcripts and diffs, stop turns, and answer approvals,
   plans and questions. Its chats show in the sidebar as they run, and whoever answers an approval
   first, there or in oah, wins. Off until you turn it on in Settings → MCP, which also has the
   config to paste: clients run `oah mcp`, which talks to the open app over a local socket
   (a named pipe on Windows) that only you can open, or, with HTTP on, connect to
-  `http://127.0.0.1:7421/mcp` with a token (256-bit, kept in your keychain, regenerated in one
-  click). HTTP listens on this computer only and turns away browsers and other host names; wrong
+  `http://127.0.0.1:7421/mcp` (or this computer's private IP on your network) with a token
+  (256-bit, kept in your keychain, regenerated in one click). HTTP accepts loopback and private
+  network peers only and turns away browsers and DNS host names; wrong
   tokens are slowed and then refused, and recent connections, tool calls and refusals are listed
   there. Full access and deleting chats are separate switches, both off.
 - **Phone (Android, optional).** The oah app for Android continues your chats away from the
@@ -98,7 +99,7 @@ crates/
   oah-core       data folder (~/.config/oah/app, or $OAH_HOME/app), settings.json, chats on disk
   oah-transport  runs a program in a folder: locally, over ssh, or in a WSL distro; distros,
                  host checks, remote folders; terminals (a shell in a pty, wherever the project is)
-  oah-agents     Claude Code (stream-json), Codex (app-server), OpenCode and Antigravity (ACP)
+  oah-agents     Claude Code (stream-json), Codex (app-server), OpenCode, Antigravity and Grok Build (ACP)
                  drivers → ChatEvent; sign-in, models and plan limits; a scripted mock
                  (OAH_MOCK_AGENT=1)
   oah-git        git and gh: status, diffs, commits, branches, sync, graph, worktrees, PRs
