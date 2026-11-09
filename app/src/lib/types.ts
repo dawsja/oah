@@ -95,11 +95,16 @@ export type Settings = {
   remote: Remote
 }
 
-/** Another agent driving oah's chats over MCP (`oah mcp`). */
-export type Mcp = { enabled: boolean; allowFullAccess: boolean; allowDelete: boolean }
+/** Another agent driving oah's chats over MCP (`oah mcp`, or HTTP on this computer). */
+/** `http`: also serve MCP at `http://127.0.0.1:<httpPort>/mcp` with a bearer token. */
+export type Mcp = { enabled: boolean; allowFullAccess: boolean; allowDelete: boolean; http: boolean; httpPort: number }
 
 /** Where MCP listens, and who's connected. */
-export type McpStatus = { socket: string; clients: number; exe: string }
+/** Something that happened over MCP's HTTP (`connected`, `closed`, `call`, `refused`). */
+export type McpActivity = { at: number; kind: "connected" | "closed" | "call" | "refused"; detail: string; count: number }
+/** MCP over HTTP: `url` while listening, else `error` (or off). `tokenKept`: the keychain keeps the token. */
+export type McpHttpStatus = { url: string | null; error: string | null; sessions: number; tokenKept: boolean; activity: McpActivity[] }
+export type McpStatus = { socket: string; clients: number; exe: string; http: McpHttpStatus }
 
 export type AppInfo = { version: string; platform: "windows" | "linux" | "macos" | "web"; dataDir: string; home: string; bundle: string | null }
 

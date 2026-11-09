@@ -3,15 +3,20 @@
 //!
 //! The app serves it on a local socket ([`server::listen`]) over its own live chats, through
 //! [`host::Host`]; [`hub::Hub`] follows what each chat is doing from its events. MCP clients run
-//! `oah mcp` ([`bridge::run`]), which passes stdio through to that socket.
+//! `oah mcp` ([`bridge::run`]), which passes stdio through to that socket, or connect over HTTP
+//! on this computer with a token ([`http::start`]).
 
 pub mod bridge;
 pub mod host;
+pub mod http;
 pub mod hub;
 pub mod search;
 pub mod server;
 pub mod tools;
 pub mod transcript;
+
+#[cfg(test)]
+mod testing;
 
 pub use host::Host;
 pub use hub::Hub;

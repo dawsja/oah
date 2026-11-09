@@ -94,6 +94,9 @@ fn settings_set(state: State<AppState>, mut settings: Settings) -> CmdResult<Set
     secrets::stash(&mut settings, &before)?;
     settings.save(&paths::settings_file()).map_err(err)?;
     *state.settings.lock().unwrap() = settings.clone();
+    if settings.mcp != before.mcp {
+        mcp::apply_http(&settings.mcp);
+    }
     Ok(settings)
 }
 
@@ -598,6 +601,8 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_close,
             mcp::mcp_status,
+            mcp::mcp_token,
+            mcp::mcp_token_regenerate,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oah")

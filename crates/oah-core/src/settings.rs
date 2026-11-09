@@ -23,8 +23,9 @@ pub struct Settings {
 
 // ---- MCP -------------------------------------------------------------------------------------
 
-/// Another agent driving oah's chats over MCP (`oah mcp`). Off until turned on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// Another agent driving oah's chats over MCP: `oah mcp` (stdio, through a local socket), or
+/// HTTP on this computer with a token. Off until turned on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Mcp {
     pub enabled: bool,
@@ -32,6 +33,15 @@ pub struct Mcp {
     pub allow_full_access: bool,
     /// It may delete chats.
     pub allow_delete: bool,
+    /// Also serve MCP over HTTP (`http://127.0.0.1:<http_port>/mcp`, a bearer token).
+    pub http: bool,
+    pub http_port: u16,
+}
+
+impl Default for Mcp {
+    fn default() -> Self {
+        Mcp { enabled: false, allow_full_access: false, allow_delete: false, http: false, http_port: 7421 }
+    }
 }
 
 // ---- Remote (phones) -------------------------------------------------------------------------

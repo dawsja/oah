@@ -12,9 +12,9 @@ use serde_json::{json, Value};
 use crate::tools::{self, Ctx};
 
 /// Protocol versions this server speaks, newest first.
-const VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+pub(crate) const VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "oah runs coding agents (Claude Code, Codex, OpenCode) in the user's projects; each chat is a session, shown live in oah's window. \
+const INSTRUCTIONS: &str = "oah runs coding agents (Claude Code, Codex, OpenCode, Antigravity) in the user's projects; each chat is a session, shown live in oah's window. \
 Typical flow: list_projects → (list_agents / list_models for models and efforts) → create_session with a prompt → read the report it returns. \
 A report's `state` says what's next: `needsApproval` (answer_approval), `needsQuestion` (answer_question), `running` (wait_for_session), `idle` (send_message to go on). \
 get_changes and get_diff show what a session changed; close_session when done. The user may answer or type in oah too.";
@@ -72,10 +72,8 @@ pub fn serve(ctx: Arc<Ctx>, reader: impl Read, writer: impl Write + Send + 'stat
             let (ctx, writer, cancelled) = (ctx.clone(), writer.clone(), cancelled.clone());
             threads.push(std::thread::spawn(move || {
                 let params = m.get("params").cloned().unwrap_or(Value::Null);
-                let reply = match handle(&ctx, &method, params, &writer) {
-                    Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-                    Err((code, message)) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
-                };
+                let notify = |v: &Value| send(&writer, v);
+                let reply = reply_to(&ctx, &id, &method, params, &notify);
                 // A cancelled request gets no reply.
                 if !cancelled.lock().unwrap().remove(&id.to_string()) {
                     send(&writer, &reply);
@@ -87,7 +85,17 @@ pub fn serve(ctx: Arc<Ctx>, reader: impl Read, writer: impl Write + Send + 'stat
     CLIENTS.fetch_sub(1, Ordering::SeqCst);
 }
 
-fn handle(ctx: &Ctx, method: &str, params: Value, writer: &Writer) -> Result<Value, (i64, String)> {
+/// Runs one request and makes its JSON-RPC reply. `notify` gets what goes out before the
+/// reply (progress during a long tool call), on whatever carries it: the stream, or an HTTP
+/// response's event stream.
+pub(crate) fn reply_to(ctx: &Ctx, id: &Value, method: &str, params: Value, notify: &dyn Fn(&Value)) -> Value {
+    match handle(ctx, method, params, notify) {
+        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+        Err((code, message)) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
+    }
+}
+
+fn handle(ctx: &Ctx, method: &str, params: Value, notify: &dyn Fn(&Value)) -> Result<Value, (i64, String)> {
     let enabled = ctx.host.settings().mcp.enabled;
     match method {
         "initialize" => {
@@ -116,8 +124,7 @@ fn handle(ctx: &Ctx, method: &str, params: Value, writer: &Writer) -> Result<Val
             let mut progress = |message: String| {
                 if let Some(t) = &token {
                     n += 1;
-                    send(
-                        writer,
+                    notify(
                         &json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": t, "progress": n, "message": message}}),
                     );
                 }
@@ -205,155 +212,8 @@ pub fn connect(path: &str) -> std::io::Result<Stream> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::*;
-    use crate::hub::Hub;
-    use oah_agents::driver::Prompt;
-    use oah_agents::event::{ChatEvent, Decision, ModelOption, SlashCommand};
-    use oah_core::chats::ChatMeta;
-    use oah_core::settings::{AgentKind, Location, PermissionMode, Project, Settings};
-    use std::collections::BTreeMap;
-
-    /// A host with one project whose "agent" answers every message in the hub straight away.
-    struct Fake {
-        hub: Arc<Hub>,
-        settings: Mutex<Settings>,
-        chats: Mutex<Vec<ChatMeta>>,
-        events: Mutex<Vec<Value>>,
-        sent: Mutex<Vec<(String, Option<PermissionMode>)>>,
-    }
-
-    impl Host for Fake {
-        fn settings(&self) -> Settings {
-            self.settings.lock().unwrap().clone()
-        }
-        fn worktrees(&self, _: &str) -> HostResult<Vec<WorktreeInfo>> {
-            Ok(vec![WorktreeInfo { path: "/p".into(), branch: Some("main".into()), main: true }])
-        }
-        fn create_worktree(&self, _: &str, branch: &str) -> HostResult<WorktreeInfo> {
-            Ok(WorktreeInfo { path: format!("/wt/{branch}"), branch: Some(branch.into()), main: false })
-        }
-        fn check_agent(&self, _: AgentKind, _: &Location) -> AgentCheck {
-            AgentCheck { installed: true, signed_in: Some(true), ..Default::default() }
-        }
-        fn catalog(&self, _: AgentKind, _: Option<&str>) -> HostResult<(Vec<ModelOption>, Vec<SlashCommand>)> {
-            Ok((
-                vec![ModelOption {
-                    id: "opus".into(),
-                    name: "Opus".into(),
-                    efforts: vec!["low".into(), "high".into()],
-                    default_effort: Some("high".into()),
-                    ..Default::default()
-                }],
-                vec![],
-            ))
-        }
-        fn chats(&self) -> Vec<ChatMeta> {
-            self.chats.lock().unwrap().clone()
-        }
-        fn running(&self) -> Vec<String> {
-            self.chats.lock().unwrap().iter().map(|c| c.id.clone()).collect()
-        }
-        fn create(&self, c: NewChat) -> HostResult<ChatMeta> {
-            let m = ChatMeta {
-                id: format!("c{}", self.chats.lock().unwrap().len()),
-                project_id: c.project_id,
-                agent: c.agent.unwrap_or(AgentKind::Claude),
-                cwd: c.cwd.unwrap_or_else(|| "/p".into()),
-                ..Default::default()
-            };
-            self.chats.lock().unwrap().push(m.clone());
-            Ok(m)
-        }
-        fn send(&self, id: &str, p: Prompt, perm: Option<PermissionMode>) -> HostResult<()> {
-            self.sent.lock().unwrap().push((p.text.clone(), perm));
-            let evs = vec![
-                ChatEvent::UserMessage { id: p.id, text: p.text.clone(), images: vec![], files: vec![] },
-                ChatEvent::Text { item_id: "a".into(), text: format!("You said {}", p.text) },
-            ];
-            for e in &evs {
-                self.hub.push(id, e);
-                self.events.lock().unwrap().push(serde_json::to_value(e).unwrap());
-            }
-            let (hub, id, ask) = (self.hub.clone(), id.to_string(), p.text.contains("ask"));
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(20));
-                if ask {
-                    hub.push(&id, &serde_json::from_value(json!({"type":"approval","request":{"requestId":"r1","itemId":null,"kind":"command","title":"Run a command","detail":"ls","diff":null,"canRemember":true}})).unwrap());
-                } else {
-                    hub.push(
-                        &id,
-                        &ChatEvent::TurnFinished {
-                            turn_id: "t".into(),
-                            usage: None,
-                            cost_usd: None,
-                            duration_ms: Some(5),
-                            interrupted: false,
-                        },
-                    );
-                }
-            });
-            Ok(())
-        }
-        fn interrupt(&self, _: &str) -> HostResult<()> {
-            Ok(())
-        }
-        fn answer(&self, id: &str, r: &str, d: Decision) -> HostResult<()> {
-            self.hub.push(id, &ChatEvent::ApprovalResolved { request_id: r.into(), decision: d });
-            Ok(())
-        }
-        fn answer_question(&self, _: &str, _: &str, _: BTreeMap<String, Vec<String>>) -> HostResult<()> {
-            Ok(())
-        }
-        fn set_model(&self, _: &str, _: &str) -> HostResult<()> {
-            Ok(())
-        }
-        fn set_effort(&self, _: &str, _: &str) -> HostResult<()> {
-            Ok(())
-        }
-        fn set_permission(&self, _: &str, _: PermissionMode) -> HostResult<()> {
-            Ok(())
-        }
-        fn compact(&self, _: &str, _: &str) -> HostResult<()> {
-            Ok(())
-        }
-        fn clear(&self, _: &str) -> HostResult<()> {
-            Ok(())
-        }
-        fn rename(&self, id: &str, title: &str) -> HostResult<ChatMeta> {
-            let mut chats = self.chats.lock().unwrap();
-            let m = chats.iter_mut().find(|c| c.id == id).ok_or("no such chat")?;
-            m.title = title.into();
-            Ok(m.clone())
-        }
-        fn close(&self, _: &str) {}
-        fn delete(&self, _: &str) -> HostResult<()> {
-            Ok(())
-        }
-        fn events(&self, _: &str) -> HostResult<Vec<Value>> {
-            Ok(self.events.lock().unwrap().clone())
-        }
-        fn git_status(&self, _: &str, cwd: Option<&str>) -> HostResult<Value> {
-            Ok(json!({"cwd": cwd}))
-        }
-        fn git_diff(&self, _: &str, _: Option<&str>, _: &str) -> HostResult<String> {
-            Ok(String::new())
-        }
-    }
-
-    fn fake(enabled: bool) -> (Arc<Ctx>, Arc<Fake>) {
-        let hub = Arc::new(Hub::new());
-        let mut settings = Settings::default();
-        settings.mcp.enabled = enabled;
-        settings.projects.push(Project { id: "p1".into(), name: "demo".into(), path: "/p".into(), ..Default::default() });
-        let host = Arc::new(Fake {
-            hub: hub.clone(),
-            settings: Mutex::new(settings),
-            chats: Mutex::default(),
-            events: Mutex::default(),
-            sent: Mutex::default(),
-        });
-        (Arc::new(Ctx::new(host.clone(), hub)), host)
-    }
+    use crate::testing::fake;
+    use oah_core::settings::PermissionMode;
 
     /// Plays `requests` to a server over pipes; returns every line it wrote.
     fn talk(ctx: Arc<Ctx>, requests: &[Value]) -> Vec<Value> {
@@ -475,7 +335,7 @@ mod tests {
         assert!(t.starts_with("Session c0 created."), "{t}");
         assert!(t.contains("\"reply\": \"You said hello\""), "{t}");
         assert!(t.contains("\"state\": \"idle\""), "{t}");
-        let chat = host.chats().remove(0);
+        let chat = host.chats.lock().unwrap()[0].clone();
         assert_eq!(chat.cwd, "/wt/feature");
         assert_eq!(chat.title, "Fix");
         assert_eq!(host.sent.lock().unwrap()[0], ("hello".to_string(), Some(PermissionMode::AcceptEdits)));

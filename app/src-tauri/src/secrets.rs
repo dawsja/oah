@@ -54,3 +54,23 @@ pub fn resolve(scope: &str, vars: &[EnvVar]) -> Vec<EnvVar> {
         })
         .collect()
 }
+
+/// The MCP HTTP token, from the keychain; made (and saved) the first time. `false`: the keychain
+/// couldn't keep it, so it lasts until oah quits.
+pub fn mcp_token() -> (String, bool) {
+    if let Ok(e) = entry("mcp", "http-token") {
+        if let Ok(t) = e.get_password() {
+            if t.starts_with("oah_") {
+                return (t, true);
+            }
+        }
+    }
+    let t = oah_mcp::http::new_token();
+    let kept = save_mcp_token(&t);
+    (t, kept)
+}
+
+/// Saves a new MCP HTTP token over the old one.
+pub fn save_mcp_token(token: &str) -> bool {
+    entry("mcp", "http-token").and_then(|e| e.set_password(token).map_err(|e| e.to_string())).is_ok()
+}

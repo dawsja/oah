@@ -58,14 +58,17 @@ Electron.
 - **Usage.** Plan limits for Claude, Codex, OpenCode Go (session, week, month) and Antigravity
   (5 hours and week, per model group), in a title bar
   popover and in Settings → Usage, with tokens and cost per project.
-- **MCP (optional).** Another agent (Claude Code, Codex, any MCP client) can drive oah: list
+- **MCP (optional).** Another agent (Claude Code, Codex, OpenCode, Antigravity, any MCP client) can drive oah: list
   projects, the agents and their models with effort levels, start chats (in a worktree too), send
   messages and wait for the turn, read transcripts and diffs, stop turns, and answer approvals,
   plans and questions. Its chats show in the sidebar as they run, and whoever answers an approval
   first, there or in oah, wins. Off until you turn it on in Settings → MCP, which also has the
   config to paste: clients run `oah mcp`, which talks to the open app over a local socket
-  (a named pipe on Windows) that only you can open. Full access and deleting chats are separate
-  switches, both off.
+  (a named pipe on Windows) that only you can open, or, with HTTP on, connect to
+  `http://127.0.0.1:7421/mcp` with a token (256-bit, kept in your keychain, regenerated in one
+  click). HTTP listens on this computer only and turns away browsers and other host names; wrong
+  tokens are slowed and then refused, and recent connections, tool calls and refusals are listed
+  there. Full access and deleting chats are separate switches, both off.
 - **Phone (Android, optional).** The oah app for Android continues your chats away from the
   desk: projects and chats, answers streaming in, replies (queued or sent into the running
   turn), photos, approvals and questions, stop, new chats, and the model, effort and permission.
@@ -101,7 +104,8 @@ crates/
   oah-git        git and gh: status, diffs, commits, branches, sync, graph, worktrees, PRs
   oah-voice      speech to text (transcribe.cpp; needs CMake to build)
   oah-mcp        the MCP server another agent drives oah's chats with (tools, live chat status,
-                 transcripts), and `oah mcp`, the stdio bridge to the running app
+                 transcripts) over a local socket (`oah mcp`, the stdio bridge to the
+                 running app) and HTTP (Streamable HTTP on 127.0.0.1, with a token)
   oah-remote     phones: pairing (SPAKE2 on a one-time code), encrypted sessions
                  (Noise IK over WebSocket), the desktop's server and the phone's client
 app/

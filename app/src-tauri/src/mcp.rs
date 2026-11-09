@@ -3,7 +3,7 @@
 //! sidebar, and either side can answer its approvals.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use oah_agents::driver::Prompt;
 use oah_agents::event::{Decision, ModelOption, SlashCommand};
@@ -185,12 +185,102 @@ impl Host for AppHost {
     }
 }
 
-/// Opens MCP's local socket for the app's lifetime.
+/// Opens MCP's local socket for the app's lifetime, and HTTP when it's on.
 pub fn listen(app: &AppHandle) {
     let hub = app.state::<AppState>().chats.hub.clone();
     let ctx = Arc::new(oah_mcp::Ctx::new(Arc::new(AppHost { app: app.clone() }), hub));
-    if let Err(e) = oah_mcp::server::listen(&paths::mcp_socket(), ctx) {
+    if let Err(e) = oah_mcp::server::listen(&paths::mcp_socket(), ctx.clone()) {
         eprintln!("oah: couldn't open the MCP socket {}: {e}", paths::mcp_socket());
+    }
+    HTTP.lock().unwrap().ctx = Some(ctx);
+    apply_http(&app.state::<AppState>().settings.lock().unwrap().mcp);
+}
+
+// ---- HTTP ------------------------------------------------------------------------------------
+
+#[derive(Default)]
+struct Http {
+    ctx: Option<Arc<oah_mcp::Ctx>>,
+    /// The token and sessions: made when HTTP is first turned on, kept while oah runs.
+    state: Option<Arc<oah_mcp::http::HttpState>>,
+    /// The keychain keeps the token (else it's new each time oah starts).
+    kept: bool,
+    server: Option<oah_mcp::http::Server>,
+    /// Why it isn't listening (the port is taken…).
+    error: Option<String>,
+}
+
+static HTTP: Mutex<Http> = Mutex::new(Http { ctx: None, state: None, kept: false, server: None, error: None });
+
+fn http_state(h: &mut Http) -> Arc<oah_mcp::http::HttpState> {
+    h.state
+        .get_or_insert_with(|| {
+            let (token, kept) = crate::secrets::mcp_token();
+            h.kept = kept;
+            Arc::new(oah_mcp::http::HttpState::new(token))
+        })
+        .clone()
+}
+
+/// Starts, moves or stops the HTTP listener to match the settings: it runs while MCP and HTTP
+/// are both on.
+pub fn apply_http(mcp: &oah_core::settings::Mcp) {
+    let mut h = HTTP.lock().unwrap();
+    let want = (mcp.enabled && mcp.http).then_some(mcp.http_port);
+    let running = h.server.as_ref().map(|s| s.addr().port());
+    if want.is_some() && want == running {
+        return;
+    }
+    h.server = None;
+    h.error = None;
+    let (Some(port), Some(ctx)) = (want, h.ctx.clone()) else { return };
+    let state = http_state(&mut h);
+    match oah_mcp::http::start(port, ctx, state) {
+        Ok(server) => h.server = Some(server),
+        Err(e) => h.error = Some(format!("couldn't listen on 127.0.0.1:{port}: {e}")),
+    }
+}
+
+/// The HTTP token, for the client snippets.
+#[tauri::command]
+pub fn mcp_token() -> String {
+    let mut h = HTTP.lock().unwrap();
+    let state = http_state(&mut h);
+    state.token()
+}
+
+/// A new HTTP token: clients using the old one are disconnected.
+#[tauri::command]
+pub fn mcp_token_regenerate() -> String {
+    let mut h = HTTP.lock().unwrap();
+    let state = http_state(&mut h);
+    let token = oah_mcp::http::new_token();
+    h.kept = crate::secrets::save_mcp_token(&token);
+    state.set_token(token.clone());
+    token
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpStatus {
+    /// `http://127.0.0.1:<port>/mcp` while listening.
+    url: Option<String>,
+    error: Option<String>,
+    /// Sessions used in the last hour.
+    sessions: usize,
+    /// The token is in the keychain (else it changes when oah restarts).
+    token_kept: bool,
+    activity: Vec<oah_mcp::http::Activity>,
+}
+
+fn http_status() -> HttpStatus {
+    let h = HTTP.lock().unwrap();
+    HttpStatus {
+        url: h.server.as_ref().map(|s| format!("http://127.0.0.1:{}{}", s.addr().port(), oah_mcp::http::PATH)),
+        error: h.error.clone(),
+        sessions: h.state.as_ref().map(|s| s.sessions()).unwrap_or(0),
+        token_kept: h.kept,
+        activity: h.state.as_ref().map(|s| s.activity()).unwrap_or_default(),
     }
 }
 
@@ -203,6 +293,7 @@ pub struct McpStatus {
     clients: usize,
     /// This executable, for the client config snippets.
     exe: String,
+    http: HttpStatus,
 }
 
 #[tauri::command]
@@ -216,5 +307,6 @@ pub fn mcp_status() -> McpStatus {
             .filter(|p| !p.is_empty())
             .or_else(|| std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "oah".into()),
+        http: http_status(),
     }
 }

@@ -2921,11 +2921,14 @@ dependencies = [
 name = "oah-mcp"
 version = "0.3.7"
 dependencies = [
+ "getrandom 0.3.4",
+ "httparse",
  "interprocess",
  "oah-agents",
  "oah-core",
  "serde",
  "serde_json",
+ "subtle",
  "tempfile",
  "uuid",
 ]

@@ -59,6 +59,10 @@ export const ipc = {
   chatRename: (chatId: string, title: string) => call<ChatMeta>("chat_rename", { chatId, title }),
   chatPin: (chatId: string, pinned: boolean) => call<ChatMeta>("chat_pin", { chatId, pinned }),
   mcpStatus: () => call<McpStatus>("mcp_status"),
+  /** The token MCP's HTTP clients send. */
+  mcpToken: () => call<string>("mcp_token"),
+  /** A new token; clients with the old one are disconnected. */
+  mcpTokenRegenerate: () => call<string>("mcp_token_regenerate"),
 }
 
 /** What a terminal's shell sends: output, then its exit. */
