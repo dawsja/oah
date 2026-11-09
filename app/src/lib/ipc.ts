@@ -1,6 +1,6 @@
 // The commands the Rust side exposes (app/src-tauri/src/lib.rs).
 
-import type { ChatEvent, ChatMeta, Decision, ModelOption, SearchHit, SlashCommand, Snapshot } from "./chat"
+import type { ChatEvent, ChatMeta, Decision, ModelOption, SearchHit, SlashCommand, Snapshot, Waiting } from "./chat"
 import type { Account, AgentKind, AppInfo, Distro, HostCheck, Limits, Location, McpStatus, PermissionMode, Probe, Project, Settings } from "./types"
 
 /** An agent's models and slash commands, for a chat that hasn't started. */
@@ -29,11 +29,14 @@ export const ipc = {
   providerLogin: (kind: AgentKind, location: Location | null = null) => call<void>("provider_login", { kind, location }),
 
   chatList: () => call<ChatMeta[]>("chat_list"),
-  chatRunning: () => call<string[]>("chat_running"),
+  /** What each chat waits on the user for, open in this window or not. */
+  chatWaiting: () => call<Record<string, Waiting>>("chat_waiting"),
   /** Chats whose text has every word of `query`, newest first. */
   chatSearch: (query: string) => call<SearchHit[]>("chat_search", { query }),
   /** The chat as Markdown, for an issue or a PR description. */
   chatMarkdown: (chatId: string) => call<string>("chat_markdown", { chatId }),
+  /** The taskbar/dock badge and window title: how many chats wait (`icon`: Windows' overlay, square RGBA). */
+  setBadge: (count: number, icon: number[] | null) => call<void>("app_set_badge", { count, icon }),
   chatCreate: (projectId: string, agent: AgentKind | null, acpAgent: string | null, model: string | null, effort: string | null, cwd: string | null) =>
     call<ChatMeta>("chat_create", { projectId, agent, acpAgent, model, effort, cwd }),
   providerCatalog: (kind: AgentKind, projectId: string | null) => call<Catalog>("provider_catalog", { kind, projectId }),
@@ -90,6 +93,13 @@ export async function onChatEvent(fn: (chatId: string, event: ChatEvent, seq: nu
 export async function onChatsChanged(fn: () => void): Promise<() => void> {
   const { listen } = await import("@tauri-apps/api/event")
   return listen("chats-changed", () => fn())
+}
+
+/** Calls `fn` when a notification about a chat was clicked (`action`: `tap`, or `answer` for
+ *  its Answer button); the window is already in front. */
+export async function onNotificationAction(fn: (chatId: string, action: string) => void): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event")
+  return listen<{ chatId: string; action: string }>("notification-action", (e) => fn(e.payload.chatId, e.payload.action))
 }
 
 /** Picks a folder on this computer; null when cancelled. */

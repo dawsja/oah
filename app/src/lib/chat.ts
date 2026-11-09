@@ -115,6 +115,28 @@ export const emptyTranscript = (): Transcript => ({ items: [], running: false, p
 /** Something is waiting for the user. */
 export const waiting = (t: Transcript | undefined) => !!t && (t.approvals.length > 0 || t.questions.length > 0)
 
+/** What a chat waits on the user for: an approval, a plan to approve, or a question. */
+export type Waiting = "approval" | "plan" | "question"
+
+/** What the transcript waits for, if anything (the card shown first: a question, else an approval). */
+export function waitingFor(t: Transcript): Waiting | null {
+  if (t.questions.length) return "question"
+  const a = t.approvals[0]
+  return a ? (a.kind === "plan" ? "plan" : "approval") : null
+}
+
+/** What the chat waits on the user for: its transcript knows when it's loaded in this window
+ *  (kept current by events), the app's list (`chat_waiting`) otherwise. */
+export function waitingOf(s: { transcripts: Record<string, Transcript>; waiting: Record<string, Waiting> }, chatId: string): Waiting | null {
+  const t = s.transcripts[chatId]
+  return t ? waitingFor(t) : (s.waiting[chatId] ?? null)
+}
+
+/** The chats waiting on the user, newest activity first. */
+export function needsYou(s: { metas: ChatMeta[]; transcripts: Record<string, Transcript>; waiting: Record<string, Waiting> }): string[] {
+  return s.metas.filter((m) => waitingOf(s, m.id)).map((m) => m.id)
+}
+
 /** A chat found by its text (`chat_search`): the line around the match, and where it was. */
 export type SearchHit = { chatId: string; part: "user" | "agent" | "tool"; snippet: string; matches: number }
 

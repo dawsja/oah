@@ -3,7 +3,9 @@
 
 import { toast } from "sonner"
 import { create } from "zustand"
-import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript } from "@/lib/chat"
+import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript, type Waiting } from "@/lib/chat"
+
+export { needsYou, waitingOf } from "@/lib/chat"
 import { providerFor } from "@/lib/agents"
 import { ipc, onChatEvent, onChatsChanged } from "@/lib/ipc"
 import { notify } from "@/lib/notify"
@@ -23,10 +25,17 @@ type ChatsStore = {
   permission: Record<string, PermissionMode>
   /** Per chat, messages waiting for the running turn to end, in order. */
   queued: Record<string, Queued[]>
+  /** What each running chat waits on the user for, as the app last said (`chat_waiting`):
+   *  it knows about chats this window never opened. */
+  waiting: Record<string, Waiting>
+  /** A chat opened to answer it: its waiting card takes the cursor once it shows. */
+  focus: string | null
 
   init(): Promise<void>
   refresh(): Promise<void>
   open(chatId: string): Promise<void>
+  /** Opens the chat on its approval or question, wherever the window was. */
+  answerChat(chatId: string): Promise<void>
   /** Sends a prompt; with no chat yet, creates one in the current project first. */
   send(
     chatId: string | null,
@@ -66,6 +75,8 @@ export const useChats = create<ChatsStore>((set, get) => ({
   transcripts: {},
   permission: {},
   queued: {},
+  waiting: {},
+  focus: null,
 
   async init() {
     if (started) return
@@ -77,8 +88,8 @@ export const useChats = create<ChatsStore>((set, get) => ({
   },
 
   async refresh() {
-    const metas = await ipc.chatList().catch(() => [] as ChatMeta[])
-    set({ metas })
+    const [metas, waiting] = await Promise.all([ipc.chatList().catch(() => [] as ChatMeta[]), ipc.chatWaiting().catch(() => ({}))])
+    set({ metas, waiting })
   },
 
   async open(chatId) {
@@ -92,6 +103,14 @@ export const useChats = create<ChatsStore>((set, get) => ({
     loading.delete(chatId)
     const t = held.filter(([seq]) => seq > snap.seq).reduce((t, [, e]) => reduce(t, e), replay(snap.events, snap.busy))
     set((s) => ({ transcripts: { ...s.transcripts, [chatId]: t } }))
+  },
+
+  async answerChat(chatId) {
+    const meta = get().metas.find((m) => m.id === chatId)
+    if (!meta) return
+    useApp.getState().selectProject(meta.projectId)
+    set({ focus: chatId })
+    await get().open(chatId)
   },
 
   async send(chatId, text, opts) {

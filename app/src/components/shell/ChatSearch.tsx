@@ -9,7 +9,7 @@ import { ipc } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
 import { termsOf, titleMatches } from "@/lib/search"
 import { useApp } from "@/store/app"
-import { useChats } from "@/store/chats"
+import { needsYou, useChats } from "@/store/chats"
 
 const useSearch = create<{ open: boolean }>(() => ({ open: false }))
 
@@ -41,6 +41,7 @@ export function ChatSearch() {
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<{ query: string; hits: SearchHit[] } | null>(null)
   const metas = useChats((s) => s.metas)
+  const waitingIds = useChats((s) => (open ? needsYou(s).join(" ") : ""))
   const projects = useApp((s) => s.settings?.projects)
   const projectName = (id: string) => projects?.find((p) => p.id === id)?.name ?? ""
   const terms = termsOf(query)
@@ -71,7 +72,9 @@ export function ChatSearch() {
 
   const byTitle = useMemo(() => titleMatches(metas, projectName, query).slice(0, 8), [metas, query, projects])
   const inText = (hits?.hits ?? []).filter((h) => !byTitle.some((m) => m.id === h.chatId))
-  const recent = metas.slice(0, 8)
+  const waitingSet = new Set(waitingIds.split(" ").filter(Boolean))
+  const waiting = metas.filter((m) => waitingSet.has(m.id))
+  const recent = metas.filter((m) => !waitingSet.has(m.id)).slice(0, 8)
   const searching = !!query.trim() && hits?.query !== query.trim()
 
   const go = (id: string) => {
@@ -79,6 +82,7 @@ export function ChatSearch() {
     const chats = useChats.getState()
     const meta = chats.metas.find((m) => m.id === id)
     if (!meta) return
+    if (needsYou(chats).includes(id)) return void chats.answerChat(id)
     useApp.getState().selectProject(meta.projectId)
     void chats.open(id)
   }
@@ -141,6 +145,15 @@ export function ChatSearch() {
               </>
             ) : (
               <>
+                {waiting.length ? (
+                  <CommandGroup heading="Needs you">
+                    {waiting.map((m) => (
+                      <CommandItem key={m.id} value={`wait:${m.id}`} onSelect={() => go(m.id)}>
+                        {row(m)}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ) : null}
                 {recent.length ? (
                   <CommandGroup heading="Recent">
                     {recent.map((m) => (

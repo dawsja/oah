@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Check, ChevronDown, ChevronRight, Circle, CornerDownRight, FileText, FolderPlus, Image as ImageIcon, LoaderCircle, MoreHorizontal, Pause, Pencil, Server, Trash2, X } from "lucide-react"
 import { AgentGlyph, Mark } from "@/components/icons"
 import { promptText } from "@/components/Prompt"
@@ -153,6 +153,24 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
   const permission = useChats((s) => s.permission[meta.id]) ?? d.permission
   const queued = useChats((s) => s.queued[meta.id]) ?? NONE
   const chats = useChats.getState()
+  const dock = useRef<HTMLDivElement>(null)
+  const focus = useChats((s) => s.focus === meta.id)
+  const card = transcript.questions[0]?.requestId ?? transcript.approvals[0]?.requestId
+  const loaded = useChats((s) => !!s.transcripts[meta.id])
+  // Opened to answer it (the inbox, a notification): the waiting card takes the cursor.
+  useEffect(() => {
+    if (!focus) return
+    const el = dock.current?.querySelector<HTMLElement>("[data-waiting]")
+    if (!el) {
+      // Nothing waits any more once the chat loaded: nothing to focus.
+      if (loaded) useChats.setState({ focus: null })
+      return
+    }
+    useChats.setState({ focus: null })
+    el.scrollIntoView({ block: "nearest" })
+    el.querySelector<HTMLElement>("[role=region]")?.focus({ preventScroll: true })
+    el.animate([{ boxShadow: "0 0 0 2px var(--primary)" }, { boxShadow: "0 0 0 0 transparent" }], { duration: 1200, easing: "ease-out" })
+  }, [focus, card, loaded])
 
   return (
     <CwdContext.Provider value={transcript.cwd ?? meta.cwd}>
@@ -161,12 +179,16 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
       <Transcript transcript={transcript} className="flex-1" />
       {meta.sleeping && !transcript.running ? <p className="px-6 py-2 text-center text-[12px] text-muted-foreground">Sleeping · send a message to resume this session.</p> : null}
       <div className="mx-auto flex max-h-[75%] min-h-0 w-full max-w-[46rem] shrink-0 flex-col gap-2 px-6 pb-4">
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden">
+        <div ref={dock} className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden">
           {transcript.plan.length ? <PlanDock items={transcript.plan} /> : null}
           {transcript.questions[0] ? (
-            <QuestionCard request={transcript.questions[0]} onAnswer={(a) => chats.answerQuestion(meta.id, transcript.questions[0].requestId, a)} />
+            <div data-waiting className="rounded-lg flex min-h-0 flex-col">
+              <QuestionCard request={transcript.questions[0]} onAnswer={(a) => chats.answerQuestion(meta.id, transcript.questions[0].requestId, a)} />
+            </div>
           ) : transcript.approvals[0] ? (
-            <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
+            <div data-waiting className="rounded-lg flex min-h-0 flex-col">
+              <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
+            </div>
           ) : null}
         </div>
         <div className="shrink-0">

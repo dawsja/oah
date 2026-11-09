@@ -589,6 +589,24 @@ impl Chats {
         self.live.lock().unwrap().keys().cloned().collect()
     }
 
+    /// What each running chat waits on the user for: `approval`, `plan` (an approval of a plan)
+    /// or `question`. Chats waiting for nothing aren't in it.
+    pub fn waiting(&self) -> std::collections::BTreeMap<String, &'static str> {
+        self.running()
+            .into_iter()
+            .filter_map(|id| {
+                let s = self.hub.status(&id);
+                let what = match s.approvals.first() {
+                    Some(a) if a.kind == oah_agents::event::ApprovalKind::Plan => "plan",
+                    Some(_) => "approval",
+                    None if !s.questions.is_empty() => "question",
+                    None => return None,
+                };
+                Some((id, what))
+            })
+            .collect()
+    }
+
     /// Chats mid-turn right now.
     pub fn busy(&self) -> Vec<String> {
         self.live.lock().unwrap().iter().filter(|(_, d)| !d.idle()).map(|(k, _)| k.clone()).collect()

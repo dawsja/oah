@@ -243,19 +243,8 @@ impl Host for AppHost {
             "chats.list" => {
                 // What each running chat waits for, so the list can put those first.
                 let running = chats.running();
-                let waiting: serde_json::Map<String, Value> = running
-                    .iter()
-                    .filter_map(|id| {
-                        let s = chats.hub.status(id);
-                        let what = match s.approvals.first() {
-                            Some(a) if a.kind == oah_agents::event::ApprovalKind::Plan => "plan",
-                            Some(_) => "approval",
-                            None if !s.questions.is_empty() => "question",
-                            None => return None,
-                        };
-                        Some((id.clone(), Value::from(what)))
-                    })
-                    .collect();
+                let waiting: serde_json::Map<String, Value> =
+                    chats.waiting().into_iter().map(|(id, what)| (id, Value::from(what))).collect();
                 Ok(json!({ "metas": chats.store.list(), "running": running, "busy": chats.busy(), "waiting": waiting }))
             }
             "agents.list" => {

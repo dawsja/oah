@@ -16,6 +16,7 @@ import { defaultLayout, useApp } from "@/store/app"
 import { useChats } from "@/store/chats"
 import { initVoice } from "@/lib/voice"
 import { initRemote } from "@/lib/remote"
+import { initAttention } from "@/lib/attention"
 import { ChatSearch, openChatSearch } from "@/components/shell/ChatSearch"
 import { inTerminal } from "@/lib/terminal"
 import { useTerminals } from "@/store/terminals"
@@ -29,7 +30,7 @@ export function App() {
 
   useEffect(() => {
     load().then(() => {
-      useChats.getState().init()
+      void useChats.getState().init().then(initAttention)
       initVoice()
       initRemote()
     })

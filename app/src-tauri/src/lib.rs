@@ -1,6 +1,7 @@
 //! The Tauri shell: the window and the commands the UI calls. The work lives in the `oah-*`
 //! crates; this file only adapts them to IPC.
 
+mod attention;
 mod chats;
 mod git;
 mod mcp;
@@ -278,9 +279,11 @@ fn chat_list(state: State<AppState>) -> Vec<ChatMeta> {
     state.chats.store.list()
 }
 
+/// What each chat waits on the user for (`approval`, `plan` or `question`), whether or not the
+/// window has it open: a phone or MCP may have started it.
 #[tauri::command]
-fn chat_running(state: State<AppState>) -> Vec<String> {
-    state.chats.running()
+fn chat_waiting(state: State<AppState>) -> std::collections::BTreeMap<String, &'static str> {
+    state.chats.waiting()
 }
 
 /// Chats whose text has every word of `query`, newest first.
@@ -497,6 +500,8 @@ pub fn run() {
                 let minutes = state.settings.lock().unwrap().agent_sleep_minutes;
                 state.chats.sleep_idle(&handle, minutes);
             });
+            // A click on a notification opens its chat.
+            attention::listen(app.handle());
             // Phones can connect from the start when Settings → Phone has it on.
             remote::start_if_enabled(app.handle());
             #[cfg(windows)]
@@ -524,9 +529,10 @@ pub fn run() {
             provider_login,
             provider_catalog,
             chat_list,
-            chat_running,
+            chat_waiting,
             chat_search,
             chat_markdown,
+            attention::app_set_badge,
             chat_create,
             chat_events,
             chat_snapshot,

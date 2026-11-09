@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Copy, FileText, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, LoaderCircle, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Search, Settings, SquarePen, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Copy, FileText, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, ListChecks, LoaderCircle, MessageCircleQuestion, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldQuestion, SquarePen, Trash2 } from "lucide-react"
+import { useShallow } from "zustand/react/shallow"
 import { AgentGlyph } from "@/components/icons"
 import { confirmAction, promptText } from "@/components/Prompt"
 import { Tip } from "@/components/Tip"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ago, waiting, type ChatMeta } from "@/lib/chat"
+import { ago, type ChatMeta, type Waiting } from "@/lib/chat"
 import { samePath, worktrees as wt, type Worktree } from "@/lib/git"
 import { LocationIcon } from "@/components/LocationIcon"
 import { OpenProjectMenu } from "@/components/OpenProject"
@@ -16,7 +17,7 @@ import type { Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { useApp } from "@/store/app"
-import { copyChatMarkdown, useChats } from "@/store/chats"
+import { copyChatMarkdown, needsYou, useChats, waitingOf } from "@/store/chats"
 import { openChatSearch } from "./ChatSearch"
 import { useGit } from "@/store/git"
 
@@ -51,6 +52,8 @@ export function Sidebar() {
           <span className="ml-auto font-mono text-[10.5px] text-faint">Ctrl K</span>
         </button>
       </div>
+
+      <Inbox />
 
       <div className="flex h-7 items-center px-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
         Projects
@@ -290,6 +293,8 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
   const chatId = useApp((s) => s.chatId)
   const view = useApp((s) => s.view)
   const t = useChats((s) => s.transcripts[meta.id])
+  const waits = useChats((s) => waitingOf(s, meta.id))
+  const running = !!t?.running
   const active = chatId === meta.id && view === "chat"
   const rename = () =>
     void promptText({ title: "Rename chat", value: meta.title, confirm: "Rename" }).then((title) => {
@@ -309,11 +314,11 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
             useChats.getState().open(meta.id)
           }}
         >
-          {waiting(t) ? (
-            <span className="rounded-full size-1.5 shrink-0 bg-primary" />
+          {waits ? (
+            <span className="rounded-full size-1.5 shrink-0 bg-primary" aria-label={`Waiting for your ${WAITING_LABEL[waits].toLowerCase()}`} />
           ) : meta.sleeping ? (
             <Moon className="size-3 shrink-0 text-faint" aria-label="Sleeping; send a message to resume" />
-          ) : t?.running ? (
+          ) : running ? (
             <LoaderCircle className="size-3 shrink-0 animate-spin text-muted-foreground" />
           ) : (
             <AgentGlyph agent={meta.agent} className="size-3 shrink-0 opacity-70" />
@@ -328,7 +333,7 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
         <ContextMenuItem onSelect={() => useChats.getState().pin(meta.id, !meta.pinned)}>
           {meta.pinned ? <PinOff /> : <Pin />} {meta.pinned ? "Unpin" : "Pin"}
         </ContextMenuItem>
-        <ContextMenuItem disabled={meta.sleeping || t?.running || waiting(t) || !meta.agentSessionId} onSelect={() => useChats.getState().sleep(meta.id)}>
+        <ContextMenuItem disabled={meta.sleeping || running || !!waits || !meta.agentSessionId} onSelect={() => useChats.getState().sleep(meta.id)}>
           <Moon /> {meta.sleeping ? "Sleeping" : "Sleep"}
         </ContextMenuItem>
         <ContextMenuItem onSelect={rename}>
@@ -343,5 +348,60 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+  )
+}
+
+const WAITING_LABEL: Record<Waiting, string> = { approval: "Approval", plan: "Plan approval", question: "Answer" }
+const WAITING_ICON = { approval: ShieldQuestion, plan: ListChecks, question: MessageCircleQuestion } satisfies Record<Waiting, unknown>
+
+/** Chats waiting on the user, wherever they were started (here, a phone, MCP): each opens on
+ *  its approval or question. */
+function Inbox() {
+  const ids = useChats(useShallow(needsYou))
+  const metas = useChats((s) => s.metas)
+  const projects = useApp((s) => s.settings?.projects)
+  if (!ids.length) return null
+  return (
+    <div className="mx-2 mb-2 rounded-lg border border-primary/30 bg-primary/5">
+      <div className="flex h-7 items-center gap-1.5 px-2.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        <span className="rounded-full size-1.5 bg-primary" />
+        Needs you
+        <span className="ml-auto font-mono normal-case text-faint">{ids.length}</span>
+      </div>
+      <ul className="max-h-48 overflow-y-auto pb-1">
+        {ids.map((id) => {
+          const meta = metas.find((m) => m.id === id)
+          return meta ? <InboxRow key={id} meta={meta} project={projects?.find((p) => p.id === meta.projectId)?.name} /> : null
+        })}
+      </ul>
+    </div>
+  )
+}
+
+function InboxRow({ meta, project }: { meta: ChatMeta; project: string | undefined }) {
+  const what = useChats((s) => waitingOf(s, meta.id))
+  if (!what) return null
+  const Icon = WAITING_ICON[what]
+  const answer = () => void useChats.getState().answerChat(meta.id)
+  return (
+    <li className="group/in mx-1 flex h-8 cursor-pointer items-center gap-2 rounded-md pr-1 pl-1.5 text-[12.5px] hover:bg-accent" onClick={answer}>
+      <Icon className="size-3.5 shrink-0 text-primary" aria-label={WAITING_LABEL[what]} />
+      <div className="min-w-0 flex-1 leading-tight">
+        <div className="truncate">{meta.title || "New chat"}</div>
+        <div className="truncate text-[10.5px] text-faint">
+          {WAITING_LABEL[what]}
+          {project ? ` · ${project}` : ""}
+        </div>
+      </div>
+      <button
+        className="rounded-md h-6 shrink-0 bg-primary px-2 text-[11.5px] font-medium text-primary-foreground hover:bg-primary/90"
+        onClick={(e) => {
+          e.stopPropagation()
+          answer()
+        }}
+      >
+        Answer
+      </button>
+    </li>
   )
 }
