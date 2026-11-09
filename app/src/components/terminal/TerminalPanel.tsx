@@ -1,6 +1,6 @@
 import "@xterm/xterm/css/xterm.css"
 import { useEffect, useLayoutEffect, useRef } from "react"
-import { ChevronDown, Plus, SquareTerminal, X } from "lucide-react"
+import { ChevronDown, MessageSquareShare, Plus, SquareTerminal, X } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { Resizer } from "@/components/shell/Resizer"
 import { baseName, locationKey, shellLabel } from "@/lib/terminal"
@@ -8,7 +8,7 @@ import { isRemote, locationLabel, type Location, type Project } from "@/lib/type
 import { cn } from "@/lib/utils"
 import { defaultLayout, useApp, useProject } from "@/store/app"
 import { currentScope } from "@/store/git"
-import { attachTerminal, detachTerminal, fitTab, focusTerminal, learnLocalShell, useTerminals, type TermTab } from "@/store/terminals"
+import { askAgentAbout, attachTerminal, detachTerminal, fitTab, focusTerminal, learnLocalShell, useTerminals, type TermTab } from "@/store/terminals"
 
 /** The shell a terminal in `project` runs (or ran last), when known. */
 export function useProjectShell(project: Project | null): string | null {
@@ -105,6 +105,7 @@ export function TerminalPanel() {
           {tabs.map((t) => (
             <TermHost key={t.id} id={t.id} shown={visible && t.id === activeId} />
           ))}
+          {visible && activeId ? <AskAboutSelection id={activeId} /> : null}
         </div>
       </div>
     </div>
@@ -143,6 +144,23 @@ function TabButton({ tab, project, active }: { tab: TermTab; project: Project; a
         </button>
       </div>
     </Tip>
+  )
+}
+
+/** Over the terminal while text is selected in it: the selection goes to the chat's composer. */
+function AskAboutSelection({ id }: { id: string }) {
+  const selected = useTerminals((s) => !!s.selected[id])
+  if (!selected) return null
+  return (
+    <button
+      className="rounded-md absolute top-2 right-4 z-10 flex h-7 items-center gap-1.5 border border-input bg-popover px-2.5 text-[12px] font-medium text-popover-foreground shadow-md hover:bg-accent"
+      // Keep the selection: a mousedown would clear it before the click.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => askAgentAbout(id)}
+    >
+      <MessageSquareShare className="size-3.5 text-primary" />
+      Ask the agent about this
+    </button>
   )
 }
 

@@ -89,3 +89,13 @@ export function terminalTheme(dark: boolean, background: string, foreground: str
     scrollbarSliderActiveBackground: dark ? "rgba(255, 255, 255, 0.2)" : "rgba(15, 23, 42, 0.3)",
   }
 }
+
+/** Terminal text as a fenced block: Windows line ends and trailing blank lines gone, fenced
+ *  past any backticks in it. Null when there's nothing but whitespace. */
+export function selectionBlock(selection: string): string | null {
+  const text = selection.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").replace(/^\n+|\n+$/g, "")
+  if (!text.trim()) return null
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length))
+  const fence = "`".repeat(Math.max(3, longest + 1))
+  return `${fence}\n${text}\n${fence}\n`
+}

@@ -221,7 +221,12 @@ export function Composer(p: ComposerProps) {
       const add = (e as CustomEvent<string>).detail
       const el = ref.current
       const at = el?.selectionStart ?? text.length
-      setText((t) => t.slice(0, at) + (at > 0 && !/\s$/.test(t.slice(0, at)) ? " " : "") + add + t.slice(at))
+      setText((t) => {
+        const before = t.slice(0, at)
+        // A block (terminal output) starts on a line of its own; a mention or a word after a space.
+        const sep = !before ? "" : add.includes("\n") ? (before.endsWith("\n") ? "" : "\n") : /\s$/.test(before) ? "" : " "
+        return before + sep + add + t.slice(at)
+      })
       requestAnimationFrame(() => el?.focus({ preventScroll: true }))
     }
     window.addEventListener("oah:insert", onInsert)

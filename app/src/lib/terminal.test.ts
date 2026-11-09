@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { baseName, inTerminal, locationKey, parseShellOsc, shellLabel, terminalTheme } from "./terminal"
+import { baseName, inTerminal, locationKey, parseShellOsc, selectionBlock, shellLabel, terminalTheme } from "./terminal"
 
 describe("terminal helpers", () => {
   it("reads the shell a remote start script names", () => {
@@ -36,5 +36,17 @@ describe("terminal helpers", () => {
     expect(t.background).toBe("#0e0e10")
     expect(t.cursor).toBe("#ececef")
     expect(terminalTheme(false, "#eef0f3", "#16181d").white).not.toBe("#ffffff")
+  })
+})
+
+describe("selectionBlock", () => {
+  it("fences terminal output, tidied", () => {
+    expect(selectionBlock("\r\n$ cargo test   \r\ntest a ... FAILED\r\n\r\n")).toBe("```\n$ cargo test\ntest a ... FAILED\n```\n")
+  })
+  it("fences past backticks inside", () => {
+    expect(selectionBlock("a ```b``` c")).toBe("````\na ```b``` c\n````\n")
+  })
+  it("has nothing for whitespace", () => {
+    expect(selectionBlock("  \n \r\n")).toBeNull()
   })
 })

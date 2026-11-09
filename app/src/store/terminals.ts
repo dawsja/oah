@@ -8,7 +8,7 @@ import type { Terminal } from "@xterm/xterm"
 import type { FitAddon } from "@xterm/addon-fit"
 import { copyText } from "@/lib/clipboard"
 import { terminal as ipc } from "@/lib/ipc"
-import { locationKey, parseShellOsc, SHELL_OSC, terminalTheme } from "@/lib/terminal"
+import { locationKey, parseShellOsc, selectionBlock, SHELL_OSC, terminalTheme } from "@/lib/terminal"
 import type { Location } from "@/lib/types"
 import { useApp } from "./app"
 import { currentScope } from "./git"
@@ -29,6 +29,8 @@ type TermStore = {
   active: Record<string, string>
   /** The shell last seen on each system (`locationKey`), so the button shows it before connecting. */
   shells: Record<string, string>
+  /** Tabs with text selected in them. */
+  selected: Record<string, boolean>
   /** A new terminal in the project (in `cwd`, a worktree), shown. */
   add(projectId: string, cwd: string | null): string
   select(projectId: string, id: string): void
@@ -45,6 +47,7 @@ export const useTerminals = create<TermStore>((set, get) => ({
   tabs: [],
   active: {},
   shells: loadShells(),
+  selected: {},
 
   add(projectId, cwd) {
     const id = `tab${++counter}`
@@ -250,6 +253,10 @@ async function build(id: string) {
     return true
   })
   term.attachCustomKeyEventHandler((e) => keyForApp(inst, e))
+  term.onSelectionChange(() => {
+    const has = term.hasSelection() && term.getSelection().trim() !== ""
+    if (!!useTerminals.getState().selected[id] !== has) useTerminals.setState((s) => ({ selected: { ...s.selected, [id]: has } }))
+  })
   term.onData((data) => {
     const tab = useTerminals.getState().tabs.find((t) => t.id === id)
     if (tab?.status === "exited") {
@@ -342,6 +349,22 @@ export function fitTab(id: string) {
 
 export function focusTerminal(id: string) {
   instances.get(id)?.term.focus()
+}
+
+/** The tab's selected text as a code block for the chat's composer: "the test failed, here is
+ *  the output". The composer gets it at its cursor, ready for a question under it. */
+export function askAgentAbout(id: string) {
+  const inst = instances.get(id)
+  const text = inst ? selectionBlock(inst.term.getSelection()) : null
+  if (!inst || !text) return
+  inst.term.clearSelection()
+  const app = useApp.getState()
+  if (app.view !== "chat") app.closeSettings()
+  // A file or diff on screen in the chat's place: back to the chat, whose composer takes it.
+  import("./git").then((m) => {
+    m.useGit.getState().open(null)
+    requestAnimationFrame(() => requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("oah:insert", { detail: text }))))
+  })
 }
 
 function dispose(id: string) {
