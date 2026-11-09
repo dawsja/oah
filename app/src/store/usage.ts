@@ -3,7 +3,8 @@
 import { useCallback } from "react"
 import { create } from "zustand"
 import { ipc } from "@/lib/ipc"
-import { LIMIT_AGENTS, type AgentKind, type LimitWindow, type Limits, type Location } from "@/lib/types"
+import { LIMIT_AGENTS, type AgentKind, type LimitWindow, type Limits, type Location, type Settings } from "@/lib/types"
+import { useApp } from "./app"
 
 type UsageEntry = {
   limits: Partial<Record<AgentKind, Limits>>
@@ -37,7 +38,7 @@ export const useUsage = create<UsageStore>((set, get) => ({
     const update = (edit: (entry: UsageEntry) => UsageEntry) => set((s) => ({ entries: { ...s.entries, [key]: edit(s.entries[key] ?? EMPTY) } }))
     update((entry) => ({ ...entry, loading: true }))
     await Promise.all(
-      LIMIT_AGENTS.map((a) =>
+      limitAgents(useApp.getState().settings).map((a) =>
         ipc.providerLimits(a, location).then(
           (l) => update((entry) => ({ ...entry, limits: { ...entry.limits, [a]: l } })),
           (e) => update((entry) => ({ ...entry, limits: { ...entry.limits, [a]: { windows: [], error: String(e), extra: [] } } })),
@@ -47,6 +48,17 @@ export const useUsage = create<UsageStore>((set, get) => ({
     update((entry) => ({ ...entry, loading: false, at: Date.now() }))
   },
 }))
+
+/** The agents whose limits are worth asking for: those on in Settings → Providers. */
+export function limitAgents(settings: Settings | null): AgentKind[] {
+  return LIMIT_AGENTS.filter((a) => a === "acp" || settings?.providers[a].enabled !== false)
+}
+
+/** The agents with limits to show at a location: on in Settings, and installed there (an
+ *  uninstalled CLI's leftover sign-in isn't worth a row). */
+export function shownAgents(settings: Settings | null, limits: Partial<Record<AgentKind, Limits>>): AgentKind[] {
+  return limitAgents(settings).filter((a) => !limits[a]?.missing)
+}
 
 export function useUsageAt(location: Location) {
   const key = usageLocationKey(location)

@@ -3,10 +3,10 @@ import { ChevronRight, Gauge, RefreshCw } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { Tip } from "@/components/Tip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { LIMIT_AGENTS, LIMIT_LABEL, type Limits } from "@/lib/types"
+import { LIMIT_LABEL, type AgentKind, type Limits } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp, useProject } from "@/store/app"
-import { LOCAL_USAGE, nextReset, resetsIn, shortLabel, usageLocationLabel, useUsageAt } from "@/store/usage"
+import { LOCAL_USAGE, nextReset, resetsIn, shortLabel, shownAgents, usageLocationLabel, useUsageAt } from "@/store/usage"
 import { useLocationAwake } from "@/store/wsl"
 
 /** The title bar's usage icon and a popover with each agent's windows. */
@@ -19,7 +19,9 @@ export function UsageButton() {
     const t = setInterval(() => document.visibilityState === "visible" && void load(), 5 * 60_000)
     return () => clearInterval(t)
   }, [load, awake])
-  const top = Math.max(0, ...Object.values(limits).flatMap((l) => l?.windows.map((w) => w.usedPercent) ?? []))
+  const settings = useApp((s) => s.settings)
+  const agents = shownAgents(settings, limits)
+  const top = Math.max(0, ...agents.flatMap((a) => limits[a]?.windows.map((w) => w.usedPercent) ?? []))
   const tone = top >= 90 ? "text-red" : top >= 70 ? "text-warn" : "text-muted-foreground"
 
   return (
@@ -38,9 +40,10 @@ export function UsageButton() {
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
           </button>
         </div>
-        {LIMIT_AGENTS.map((a) => (
+        {agents.map((a) => (
           <AgentRow key={a} agent={a} limits={limits[a]} />
         ))}
+        {agents.length === 0 ? <div className="border-t px-3 py-2.5 text-[12px] text-faint">No agent with plan limits is set up here.</div> : null}
         <button
           className="flex w-full items-center border-t px-3 py-2.5 text-left text-[12.5px] hover:bg-accent"
           onClick={() => useApp.getState().openSettings("usage")}
@@ -53,7 +56,7 @@ export function UsageButton() {
   )
 }
 
-function AgentRow({ agent, limits }: { agent: (typeof LIMIT_AGENTS)[number]; limits: Limits | undefined }) {
+function AgentRow({ agent, limits }: { agent: AgentKind; limits: Limits | undefined }) {
   const reset = resetsIn(nextReset(limits))
   return (
     <div className="border-t px-3 py-2.5">

@@ -197,11 +197,20 @@ async fn provider_limits(state: State<'_, AppState>, kind: AgentKind, location: 
         if let Location::Wsl { distro } = &location {
             if !oah_transport::wsl::is_running(distro) {
                 return account::Limits {
-                    windows: vec![],
                     error: Some(format!("{distro} isn't running. Open one of its projects to see these.")),
-                    extra: vec![],
+                    ..Default::default()
                 };
             }
+        }
+        // An agent that isn't installed there has no limits to read (its sign-in may linger
+        // after an uninstall). Unknown (unreachable) still tries, and says why it failed.
+        let program = if binary.trim().is_empty() { kind.default_binary().to_string() } else { binary.trim().to_string() };
+        let installed = match &location {
+            Location::Local => Some(probe::resolve(kind, &binary).is_some()),
+            remote => oah_transport::remote::installed(remote, &program),
+        };
+        if installed == Some(false) {
+            return account::Limits { missing: true, ..Default::default() };
         }
         let env = secrets::resolve(&secrets::scope(kind, None), &provider.env);
         match kind {

@@ -23,6 +23,14 @@ for t in git gh claude codex opencode; do
 done
 "#;
 
+/// `$1` on the location's PATH, leaving out WSL's Windows folders (a Windows copy can't run there
+/// as a Linux agent): prints its path, or a marker when it isn't there (an exit code could be
+/// ssh's or wsl.exe's own).
+const INSTALLED: &str = r#"
+set -f; lin=; oifs=$IFS; IFS=:; for d in $PATH; do case $d in /mnt/[a-z]|/mnt/[a-z]/*) ;; *) lin=${lin:+$lin:}$d;; esac; done; IFS=$oifs; set +f
+PATH=$lin command -v "$1" || echo "oah:missing"
+"#;
+
 const LIST_DIR: &str = r#"
 cd "${1:-$HOME}" 2>/dev/null || { echo "No such folder: $1" >&2; exit 2; }
 pwd
@@ -74,6 +82,22 @@ pub fn check(location: &Location) -> HostCheck {
         Err(e) => HostCheck { error: Some(e), ..Default::default() },
         Ok(out) if !out.ok() => HostCheck { error: Some(failure(location, &out)), ..Default::default() },
         Ok(out) => parse_check(&out.stdout),
+    }
+}
+
+/// Whether `program` is installed on an SSH host or in a WSL distro; `None` when the location
+/// couldn't be asked (unreachable, or the lookup itself failed).
+pub fn installed(location: &Location, program: &str) -> Option<bool> {
+    let out = sh(location, INSTALLED, &[program], Duration::from_secs(20)).ok()?;
+    parse_installed(&out)
+}
+
+fn parse_installed(out: &crate::Output) -> Option<bool> {
+    let last = out.stdout.lines().map(str::trim).rfind(|l| !l.is_empty())?;
+    match (out.ok(), last) {
+        (true, "oah:missing") => Some(false),
+        (true, _) => Some(true),
+        _ => None,
     }
 }
 
@@ -134,6 +158,17 @@ pub fn parse_listing(out: &str) -> Listing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_whether_a_program_is_installed() {
+        let out = |code, stdout: &str| crate::Output { code, stdout: stdout.into(), stderr: String::new() };
+        assert_eq!(parse_installed(&out(Some(0), "/home/u/.local/bin/codex\n")), Some(true));
+        assert_eq!(parse_installed(&out(Some(0), "oah:missing\n")), Some(false));
+        // ssh couldn't log in, or the distro didn't start: unknown, not "missing".
+        assert_eq!(parse_installed(&out(Some(255), "")), None);
+        assert_eq!(parse_installed(&out(Some(1), "oah:missing\n")), None);
+        assert_eq!(parse_installed(&out(Some(0), "")), None);
+    }
 
     #[test]
     fn parses_a_check() {

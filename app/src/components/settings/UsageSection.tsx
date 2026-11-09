@@ -3,9 +3,9 @@ import { RefreshCw } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { formatTokens } from "@/lib/chat"
-import { LIMIT_AGENTS, LIMIT_LABEL } from "@/lib/types"
+import { LIMIT_LABEL } from "@/lib/types"
 import { useChats } from "@/store/chats"
-import { LOCAL_USAGE, usageLocationLabel, useUsageAt } from "@/store/usage"
+import { LOCAL_USAGE, shownAgents, usageLocationLabel, useUsageAt } from "@/store/usage"
 import { useLocationAwake } from "@/store/wsl"
 import { useApp, useProject } from "@/store/app"
 import { Group, Section } from "./layout"
@@ -43,6 +43,7 @@ export function UsageSection() {
   const location = useProject()?.location ?? LOCAL_USAGE
   const awake = useLocationAwake(location)
   const { limits, loading, load: fetchLimits } = useUsageAt(location)
+  const agents = shownAgents(useApp((s) => s.settings), limits)
   const load = () => void fetchLimits(true)
   useEffect(() => {
     void fetchLimits(true)
@@ -58,7 +59,8 @@ export function UsageSection() {
         </Button>
       }
     >
-      {LIMIT_AGENTS.map((a) => {
+      {agents.length === 0 ? <p className="text-[12.5px] text-muted-foreground">No agent with plan limits is installed and turned on for {usageLocationLabel(location)}.</p> : null}
+      {agents.map((a) => {
         const l = limits[a]
         return (
           <Group

@@ -110,7 +110,8 @@ export type Account = { signedIn: boolean; label: string | null; plan: string | 
 export type LimitWindow = { label: string; usedPercent: number; resetsAt: number | null }
 /** `extra`: rows that aren't windows (a balance; `value` null when unavailable, `note` says why). */
 export type LimitExtra = { label: string; value: string | null; note: string | null }
-export type Limits = { windows: LimitWindow[]; error: string | null; extra: LimitExtra[] }
+/** `missing`: the agent's CLI isn't installed where these were asked for. */
+export type Limits = { windows: LimitWindow[]; error: string | null; extra: LimitExtra[]; missing?: boolean }
 
 /** `windows`: not installed there, but a Windows copy is on WSL's PATH (where). */
 export type Tool = { path: string | null; version: string | null; windows: string | null }

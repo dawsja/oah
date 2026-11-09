@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ipc } from "@/lib/ipc"
-import type { Limits, Location } from "@/lib/types"
-import { LOCAL_USAGE, nextReset, resetsIn, shortLabel, usageLocationKey, useUsage } from "./usage"
+import type { Limits, Location, Settings } from "@/lib/types"
+import { LOCAL_USAGE, nextReset, resetsIn, shortLabel, shownAgents, usageLocationKey, useUsage } from "./usage"
 
 vi.mock("@/lib/ipc", () => ({ ipc: { providerLimits: vi.fn() } }))
 
@@ -61,5 +61,17 @@ describe("usage locations", () => {
     expect(useUsage.getState().entries[usageLocationKey(ubuntu)].limits.claude?.error).toBeNull()
     expect(useUsage.getState().entries[usageLocationKey(ubuntu)].limits.claude?.windows[0].usedPercent).toBe(25)
     expect(useUsage.getState().entries.local.limits.claude?.error).toBe("Local credential rejected")
+  })
+})
+
+describe("shownAgents", () => {
+  const settings = (codexOn: boolean) => ({ providers: { claude: { enabled: true }, codex: { enabled: codexOn }, opencode: { enabled: true } } }) as unknown as Settings
+  const none = { windows: [], error: null, extra: [] }
+
+  it("leaves out agents not installed there, and ones turned off", () => {
+    expect(shownAgents(settings(true), { claude: none, codex: { ...none, missing: true }, opencode: { ...none, missing: true } })).toEqual(["claude"])
+    expect(shownAgents(settings(false), {})).toEqual(["claude", "opencode"])
+    // Not loaded yet: shown (loading), until the app says they're missing.
+    expect(shownAgents(settings(true), {})).toEqual(["claude", "codex", "opencode"])
   })
 })

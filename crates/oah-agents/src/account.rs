@@ -43,6 +43,9 @@ pub struct Limits {
     /// Rows that aren't windows: a balance, or why it isn't shown.
     #[serde(default)]
     pub extra: Vec<LimitExtra>,
+    /// The agent's CLI isn't installed there: nothing to show for it.
+    #[serde(default)]
+    pub missing: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
@@ -206,7 +209,7 @@ pub fn claude_limits(location: &Location, env: &[EnvVar]) -> Limits {
             .call();
         return match resp {
             Ok(mut r) => match r.body_mut().read_json::<Value>() {
-                Ok(v) => Limits { windows: parse_claude_usage(&v), error: None, extra: vec![] },
+                Ok(v) => Limits { windows: parse_claude_usage(&v), error: None, extra: vec![], missing: false },
                 Err(_) => Limits { error: Some("Claude's usage endpoint returned an unexpected response.".into()), ..Default::default() },
             },
             Err(ureq::Error::StatusCode(status)) => {
@@ -336,7 +339,7 @@ fn iso_ms(s: &str) -> Option<u64> {
 /// OpenCode Go's plan limits: `GET https://opencode.ai/zen/go/v1/usage` with the `opencode-go`
 /// key from OpenCode's `auth.json` (on this computer, or on `location`).
 pub fn opencode_go_limits(location: &Location, env: &[EnvVar]) -> Limits {
-    let fail = |e: String| Limits { windows: vec![], error: Some(e), extra: vec![] };
+    let fail = |e: String| Limits { windows: vec![], error: Some(e), extra: vec![], missing: false };
     let Some(key) = opencode_go_key(location, env) else {
         return fail("No OpenCode Go key found for this location. OpenCode can still use other providers.".into());
     };
@@ -363,6 +366,7 @@ pub fn opencode_go_limits(location: &Location, env: &[EnvVar]) -> Limits {
                 value: None,
                 note: Some("The balance isn't included in this usage answer.".into()),
             }],
+            missing: false,
         },
         Err(e) => fail(e),
     }
@@ -425,8 +429,8 @@ fn opencode_go_key(location: &Location, env: &[EnvVar]) -> Option<String> {
 
 pub fn codex_limits(binary: &str, location: &Location) -> Limits {
     match codex_once(&program(AgentKind::Codex, binary), location, "account/rateLimits/read", Value::Null) {
-        Ok(v) => Limits { windows: parse_codex_limits(&v), error: None, extra: vec![] },
-        Err(e) => Limits { windows: vec![], error: Some(e), extra: vec![] },
+        Ok(v) => Limits { windows: parse_codex_limits(&v), error: None, extra: vec![], missing: false },
+        Err(e) => Limits { windows: vec![], error: Some(e), extra: vec![], missing: false },
     }
 }
 
