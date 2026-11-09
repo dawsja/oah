@@ -48,8 +48,6 @@ export function SettingsPage() {
         <div className="mt-auto px-4 font-mono text-[10.5px] leading-relaxed break-all text-faint">
           oah {info?.version}
           <br />
-          {info?.dataDir}
-          <br />
           <span className={update.kind === "error" ? "text-red" : undefined}>{updateStatus()}</span>
           {update.kind !== "off" ? (
             <button className="mt-1 block rounded-md border px-2 py-0.5 font-sans text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => void updater.check(true)}>

@@ -39,13 +39,17 @@ const INSTALL: Partial<Record<AgentKind, { url: string; options: Installer[] }>>
   opencode: {
     url: "https://opencode.ai/docs",
     options: [
-      { label: "macOS / Linux / WSL", os: "unix", command: "curl -fsSL https://opencode.ai/v2/install | bash" },
+      { label: "macOS / Linux / WSL", os: "unix", command: "curl -fsSL https://opencode.ai/install | bash" },
       { label: "npm", os: "any", command: "npm install -g opencode-ai" },
     ],
   },
+  // The v2 installer and @opencode/cli both put `opencode2` (and a 2.x `opencode`) on PATH.
   opencode2: {
     url: "https://opencode.ai/docs",
-    options: [{ label: "macOS / Linux / WSL", os: "unix", command: "curl -fsSL https://opencode.ai/v2/install | bash" }],
+    options: [
+      { label: "macOS / Linux / WSL", os: "unix", command: "curl -fsSL https://opencode.ai/v2/install | bash" },
+      { label: "npm", os: "any", command: "npm install -g @opencode/cli" },
+    ],
   },
 }
 
