@@ -268,8 +268,8 @@ export function blocks(items: Item[]): Block[] {
 }
 
 export function formatTokens(n: number): string {
-  // 1M, 1.5M, 9.9k, 54k: no trailing ".0".
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  // 1M, 1.5M, 9.9k, 54k: no trailing ".0". Anything that would round to 1000k is 1M.
+  if (n >= 999_500) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1).replace(/\.0$/, "")}k`
   return String(n)
 }

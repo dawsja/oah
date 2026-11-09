@@ -3,7 +3,7 @@ import { ArrowUp, Check, ChevronDown, Cpu, ImagePlus, ListPlus, Plus, Square, X,
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PERMISSION_ICON } from "@/components/permission"
-import { effortLabel, type ModelOption, type Transcript } from "@/lib/chat"
+import { effortLabel, formatTokens, type ModelOption, type Transcript } from "@/lib/chat"
 import { PERMISSION_LABEL, type PermissionMode } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { type Image } from "./rpc"
@@ -45,10 +45,6 @@ function Heading({ children, first }: { children: ReactNode; first?: boolean }) 
   return <h3 className={cn("mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase", !first && "mt-5")}>{children}</h3>
 }
 
-/** `61.4k` */
-function tokens(n: number) {
-  return n >= 1000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k` : String(n)
-}
 
 /** The phone's message box: text, send or stop, the model, and a "+" sheet for photos, effort,
  *  permissions and the context (`/compact`, `/clear`). */
@@ -244,7 +240,7 @@ export function MobileComposer(p: Props) {
                   <div className="mb-2.5">
                     <div className="mb-1 flex text-[12.5px] text-muted-foreground">
                       <span className="flex-1">{Math.min(100, Math.round((p.context.used / p.context.window) * 100))}% used</span>
-                      <span className="font-mono">{tokens(p.context.used)} / {tokens(p.context.window)}</span>
+                      <span className="font-mono">{formatTokens(p.context.used)} / {formatTokens(p.context.window)}</span>
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                       <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, Math.round((p.context.used / p.context.window) * 100))}%` }} />

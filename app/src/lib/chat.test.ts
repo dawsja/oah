@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { blocks, emptyTranscript, reduce, replay, type ChatEvent } from "./chat"
+import { blocks, emptyTranscript, formatTokens, reduce, replay, type ChatEvent } from "./chat"
 
 const run = (events: ChatEvent[]) => events.reduce(reduce, emptyTranscript())
 
@@ -70,5 +70,12 @@ describe("relative", () => {
     expect(relative(String.raw`cat C:\Users\me\demo\a.txt`, cwd)).toBe("cat a.txt")
     expect(relative("/home/u/x/a.rs", "/home/u/x")).toBe("a.rs")
     expect(relative("/home/u/xy/a.rs", "/home/u/x")).toBe("/home/u/xy/a.rs")
+  })
+})
+
+describe("formatTokens", () => {
+  it("uses k below a million and M from there, never 1000k", () => {
+    expect([999, 1_500, 9_950, 54_321, 263_000, 999_499].map(formatTokens)).toEqual(["999", "1.5k", "9.9k", "54k", "263k", "999k"])
+    expect([999_500, 1_000_000, 1_048_576, 1_500_000, 2_000_000].map(formatTokens)).toEqual(["1M", "1M", "1M", "1.5M", "2M"])
   })
 })
