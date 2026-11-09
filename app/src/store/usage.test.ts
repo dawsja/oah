@@ -50,6 +50,34 @@ describe("usage locations", () => {
     expect(ipc.providerLimits).toHaveBeenCalledTimes(12)
   })
 
+  it("asks again for an agent that failed (signed out, no key), but reuses ones that answered", async () => {
+    let signedIn = false
+    vi.mocked(ipc.providerLimits).mockImplementation(async (agent) =>
+      agent === "opencode" && !signedIn ? { windows: [], error: "No OpenCode Go key found for this location.", extra: [] } : limits(40),
+    )
+    await useUsage.getState().load(ubuntu)
+    expect(ipc.providerLimits).toHaveBeenCalledTimes(3)
+    signedIn = true
+    await useUsage.getState().load(ubuntu)
+    expect(ipc.providerLimits).toHaveBeenCalledTimes(4)
+    expect(ipc.providerLimits).toHaveBeenLastCalledWith("opencode", ubuntu)
+    expect(useUsage.getState().entries[usageLocationKey(ubuntu)].limits.opencode?.error).toBeNull()
+    await useUsage.getState().load(ubuntu)
+    expect(ipc.providerLimits).toHaveBeenCalledTimes(4)
+  })
+
+  it("a thrown request counts as a failure and is asked again", async () => {
+    vi.mocked(ipc.providerLimits).mockImplementation(async (agent) => {
+      if (agent === "codex") throw new Error("Codex didn't start")
+      return limits(5)
+    })
+    await useUsage.getState().load(LOCAL_USAGE)
+    expect(useUsage.getState().entries.local.limits.codex?.error).toContain("Codex didn't start")
+    await useUsage.getState().load(LOCAL_USAGE)
+    expect(ipc.providerLimits).toHaveBeenCalledTimes(4)
+    expect(ipc.providerLimits).toHaveBeenLastCalledWith("codex", LOCAL_USAGE)
+  })
+
   it("does not let slow local failures overwrite WSL results after switching", async () => {
     let finish!: (result: Limits) => void
     const pending = new Promise<Limits>((resolve) => { finish = resolve })
