@@ -196,7 +196,9 @@ pub fn start(port: u16, ctx: Arc<Ctx>, state: Arc<HttpState>) -> io::Result<Serv
         while !s.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((conn, peer)) => {
-                    if !peer.ip().is_loopback() {
+                    // On Windows an accepted socket inherits the listener's non-blocking mode;
+                    // a connection waiting for its next request must block.
+                    if !peer.ip().is_loopback() || conn.set_nonblocking(false).is_err() {
                         continue;
                     }
                     let (ctx, state) = (ctx.clone(), state.clone());
