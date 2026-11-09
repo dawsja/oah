@@ -31,8 +31,17 @@ export function Transcript({ transcript, className }: { transcript: T; className
     stuckRef.current = value
     setStuck(value)
   }
+  // A new message from you (sent here, from the phone, or a queued one going out) brings the
+  // view back to the bottom even if you'd scrolled up to read: what you just said, and the
+  // answer to it, are what's worth seeing.
+  const lastUser = transcript.items.findLast((i) => i.kind === "user")?.id
+  const seenUser = useRef(lastUser)
   useLayoutEffect(() => {
     const el = scroller.current
+    if (lastUser !== seenUser.current) {
+      seenUser.current = lastUser
+      if (lastUser && !stuckRef.current) follow(true)
+    }
     if (el && stuckRef.current && !touching.current) el.scrollTop = el.scrollHeight
   })
   useEffect(() => {
@@ -42,10 +51,14 @@ export function Transcript({ transcript, className }: { transcript: T; className
     let touchY = 0
     const onScroll = () => {
       const top = Math.max(0, el.scrollTop)
+      const atBottom = el.scrollHeight - top - el.clientHeight <= 2
       // Even a small move toward history releases the bottom lock. Only reaching
       // the bottom again resumes following; a proximity threshold traps slow swipes.
-      if (top < previousTop) follow(false)
-      else if (top > previousTop && el.scrollHeight - top - el.clientHeight <= 2) follow(true)
+      // A move up that still ends at the bottom isn't the reader: the content got shorter
+      // (finished steps collapsing, estimated block heights settling) and the browser
+      // clamped the scroll position, so keep following.
+      if (top < previousTop && !atBottom) follow(false)
+      else if (top > previousTop && atBottom) follow(true)
       previousTop = top
     }
     const onTouchStart = (event: TouchEvent) => {
