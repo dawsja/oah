@@ -242,7 +242,7 @@ function SignIn({ kind, installed }: { kind: AgentKind; installed: boolean }) {
   ) : account.signedIn ? (
     <span className="flex items-center gap-1.5">
       <Dot tone="ok" /> Signed in{account.label ? <> as <span className="text-foreground">{account.label}</span></> : null}
-      {account.plan ? <span className="rounded-sm border px-1 font-mono text-[10.5px] uppercase">{account.plan}</span> : null}
+      {account.plan ? <span className="rounded-full border px-1.5 font-mono text-[10.5px] uppercase">{account.plan}</span> : null}
     </span>
   ) : (
     <span className="flex items-center gap-1.5">

@@ -23,7 +23,7 @@ export function TitleBar() {
   const remote = project ? isRemote(project.location) : false
 
   return (
-    <header data-tauri-drag-region className="flex h-9 shrink-0 items-center border-b bg-background pl-3 text-[12px]">
+    <header data-tauri-drag-region className="flex h-9 shrink-0 items-center bg-sidebar pl-3 text-[12px]">
       <div data-tauri-drag-region className="flex items-center gap-2 pr-3">
         <Mark size={16} label="oah" />
         <span data-tauri-drag-region className="font-mono text-[12px] font-bold tracking-tight text-brand">oah</span>
@@ -40,7 +40,7 @@ export function TitleBar() {
           <>
             <span data-tauri-drag-region className="truncate font-medium text-foreground">{project.name}</span>
             {remote ? (
-              <span data-tauri-drag-region className="rounded-sm border border-cyan/30 bg-cyan/10 px-1.5 py-px text-[11px] text-cyan">{locationLabel(project.location)}</span>
+              <span data-tauri-drag-region className="rounded-full border border-cyan/30 bg-cyan/10 px-2 py-px text-[11px] text-cyan">{locationLabel(project.location)}</span>
             ) : null}
             <span data-tauri-drag-region className="truncate font-mono text-[11px] text-faint">{project.path}</span>
           </>

@@ -96,7 +96,7 @@ function NewChat({ project }: { project: Project }) {
               <p className="mt-1 text-[12.5px] text-muted-foreground">
                 {AGENT_LABEL[agent]} in <span className="font-medium text-foreground">{project.name}</span>
                 {worktree ? (
-                  <span className="rounded-sm ml-1 border px-1 font-mono text-[11px] text-muted-foreground">⎇ {worktree.branch}</span>
+                  <span className="rounded-full ml-1 border px-1.5 font-mono text-[11px] text-muted-foreground">⎇ {worktree.branch}</span>
                 ) : null}
                 <span className="text-faint"> · {locationLabel(project.location)}</span>
                 {starting ? (
@@ -133,7 +133,7 @@ function NewChat({ project }: { project: Project }) {
           />
           <div className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
             {["Explain how this project is laid out", "Find and fix a failing test", "Review my uncommitted changes"].map((t) => (
-              <button key={t} className="rounded-lg border bg-card px-3 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => send(t)}>
+              <button key={t} className="rounded-lg border bg-card px-3.5 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => send(t)}>
                 {t}
               </button>
             ))}
@@ -180,11 +180,11 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
         <div ref={dock} className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden">
           {transcript.plan.length ? <PlanDock items={transcript.plan} /> : null}
           {transcript.questions[0] ? (
-            <div data-waiting className="rounded-lg flex min-h-0 flex-col">
+            <div data-waiting className="rounded-2xl flex min-h-0 flex-col">
               <QuestionCard request={transcript.questions[0]} onAnswer={(a) => chats.answerQuestion(meta.id, transcript.questions[0].requestId, a)} />
             </div>
           ) : transcript.approvals[0] ? (
-            <div data-waiting className="rounded-lg flex min-h-0 flex-col">
+            <div data-waiting className="rounded-2xl flex min-h-0 flex-col">
               <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
             </div>
           ) : null}
@@ -276,13 +276,13 @@ const NONE: Queued[] = []
 function QueueDock({ chatId, items, running }: { chatId: string; items: Queued[]; running: boolean }) {
   const chats = useChats.getState()
   return (
-    <div className="mx-auto w-[calc(100%-2rem)] max-w-[40rem] rounded-t-lg border border-b-0 bg-card text-[12.5px]">
+    <div className="mx-auto w-[calc(100%-3rem)] max-w-[40rem] rounded-t-lg border border-b-0 bg-card text-[12.5px]">
       <div className="flex h-6 items-center gap-1.5 px-3 pt-1 text-[10.5px] text-muted-foreground">
         {running ? null : <Pause className="size-3" />}
         <span className="font-medium text-foreground">{items.length} queued</span>
         <span className="truncate text-faint">{running ? "· sends when the agent finishes" : "· held after the stop"}</span>
         {running ? null : (
-          <button className="rounded-sm ml-auto px-1.5 text-[11.5px] text-foreground hover:bg-accent" onClick={() => void chats.sendQueued(chatId)}>
+          <button className="rounded-md ml-auto px-1.5 text-[11.5px] text-foreground hover:bg-accent" onClick={() => void chats.sendQueued(chatId)}>
             Resume
           </button>
         )}
@@ -332,8 +332,8 @@ function PlanDock({ items }: { items: PlanItem[] }) {
   const done = items.filter((i) => i.status === "completed").length
   const current = items.find((i) => i.status === "inProgress") ?? items.find((i) => i.status === "pending")
   return (
-    <div className="rounded-lg border bg-card text-[12.5px]">
-      <button className="rounded-lg flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-accent" onClick={() => setOpen(!open)}>
+    <div className="overflow-hidden rounded-2xl border bg-card text-[12.5px]">
+      <button className="flex h-8 w-full items-center gap-2 px-4 text-left hover:bg-accent" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3.5 text-faint" /> : <ChevronRight className="size-3.5 text-faint" />}
         <span className="font-medium">Plan</span>
         <span className="font-mono text-[11px] text-faint">

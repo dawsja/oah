@@ -87,7 +87,7 @@ function RefChip({ name }: { name: string }) {
   const label = name.replace("HEAD -> ", "").replace("tag: ", "")
   const remote = label.includes("/")
   return (
-    <span className={cn("rounded-sm shrink-0 border px-1 font-mono text-[10px] leading-4", head ? "border-primary bg-primary text-primary-foreground" : tag ? "border-green/50 text-green" : remote ? "border-cyan/40 text-cyan" : "text-muted-foreground")}>
+    <span className={cn("rounded-full shrink-0 border px-1.5 font-mono text-[10px] leading-4", head ? "border-primary bg-primary text-primary-foreground" : tag ? "border-green/50 text-green" : remote ? "border-cyan/40 text-cyan" : "text-muted-foreground")}>
       {label}
     </span>
   )

@@ -77,14 +77,14 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
 
   if (!q) return null
   return (
-    <div className="flex min-h-0 max-h-[45vh] flex-col overflow-hidden rounded-lg border border-input bg-card">
+    <div className="flex min-h-0 max-h-[45vh] flex-col overflow-hidden rounded-2xl border border-input bg-card">
       <div className="min-h-0 overflow-y-auto overscroll-contain [overflow-wrap:anywhere]" role="region" aria-label="Question details" tabIndex={0}>
         {touch ? (
           // A phone: what it's about and how far along on one line, the question under it.
           <div className="px-3.5 pt-3">
             <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
               <MessageCircleQuestion className="size-4" />
-              {q.header ? <span className="rounded-sm border px-1.5 py-px uppercase">{q.header}</span> : null}
+              {q.header ? <span className="rounded-full border px-1.5 py-px uppercase">{q.header}</span> : null}
               {qs.length > 1 ? <span className="ml-auto font-mono">{step + 1}/{qs.length}</span> : null}
             </div>
             <div className="mt-1.5 text-[15px] leading-snug font-semibold">{q.question}</div>
@@ -92,7 +92,7 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
         ) : (
         <div className="flex items-center gap-2 px-3.5 pt-3 text-[13px] font-semibold">
           <MessageCircleQuestion className="size-4 text-muted-foreground" />
-          {q.header ? <span className="rounded-sm border px-1 text-[10.5px] font-normal text-muted-foreground uppercase">{q.header}</span> : null}
+          {q.header ? <span className="rounded-full border px-1.5 text-[10.5px] font-normal text-muted-foreground uppercase">{q.header}</span> : null}
           <span className="min-w-0 flex-1">{q.question}</span>
           {qs.length > 1 ? (
             <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-normal text-muted-foreground" aria-label={`Question ${step + 1} of ${qs.length}`}>
@@ -125,7 +125,7 @@ export function QuestionCard({ request, onAnswer }: { request: QuestionRequest; 
                     onClick={() => pick(o.label)}
                   >
                     {i < 9 && !touch ? (
-                      <kbd className={cn("mt-px grid size-4 shrink-0 place-items-center rounded-sm border font-mono text-[10px]", on ? "border-primary bg-primary text-primary-foreground" : "border-input text-muted-foreground")}>
+                      <kbd className={cn("mt-px grid size-4 shrink-0 place-items-center rounded-xs border font-mono text-[10px]", on ? "border-primary bg-primary text-primary-foreground" : "border-input text-muted-foreground")}>
                         {on && q.multi ? <Check className="size-2.5" /> : i + 1}
                       </kbd>
                     ) : null}

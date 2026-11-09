@@ -32,14 +32,14 @@ export function ApprovalCard({ request, queued = 0, onAnswer }: { request: Appro
   const plan = request.kind === "plan"
   const Icon = request.kind === "command" ? SquareTerminal : request.kind === "edit" ? FilePen : request.kind === "plan" ? ListChecks : ShieldQuestion
   return (
-    <div className="flex min-h-0 max-h-[45vh] flex-col overflow-hidden rounded-lg border border-input bg-card">
+    <div className="flex min-h-0 max-h-[45vh] flex-col overflow-hidden rounded-2xl border border-input bg-card">
       <div className="min-h-0 overflow-y-auto overscroll-contain [overflow-wrap:anywhere]" role="region" aria-label="Approval details" tabIndex={0}>
         <div className="flex items-start gap-2.5 px-3.5 pt-3">
           <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <div className={cn("flex items-baseline gap-2 font-semibold", touch ? "text-[14px]" : "text-[13px]")}>
               {rel(request.title)}
-              {queued ? <span className="rounded-sm border px-1 text-[10.5px] font-normal text-muted-foreground">+{queued} more waiting</span> : null}
+              {queued ? <span className="rounded-full border px-1.5 text-[10.5px] font-normal text-muted-foreground">+{queued} more waiting</span> : null}
             </div>
             {request.detail && request.kind === "plan" ? (
               <Markdown text={request.detail} className={cn("rounded-md mt-2 overflow-y-auto border bg-background px-3 py-2", touch ? "max-h-[30vh]" : "max-h-[45vh]")} />

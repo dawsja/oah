@@ -125,7 +125,7 @@ export function Dictation({ onText }: { onText: (text: string) => void }) {
   return (
     <>
       {phase === "recording" ? (
-        <div className="rounded-md flex h-7 items-center gap-2 border border-red/40 bg-del/40 px-2 text-[11.5px]">
+        <div className="rounded-full flex h-7 items-center gap-2 border border-red/40 bg-del/40 px-2 text-[11.5px]">
           <span className="rounded-full size-1.5 animate-pulse bg-red" />
           <span className="font-mono tabular-nums">
             {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}

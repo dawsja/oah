@@ -48,7 +48,7 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
         </button>
         <span className="h-4 w-px bg-border" />
         <span className="truncate font-mono text-[12.5px]">{viewer.path}</span>
-        {viewer.kind === "diff" ? <span className="rounded-sm border px-1.5 text-[10.5px] text-muted-foreground">{viewer.untracked ? "new file" : viewer.staged ? "staged" : "working tree"}</span> : null}
+        {viewer.kind === "diff" ? <span className="rounded-full border px-1.5 text-[10.5px] text-muted-foreground">{viewer.untracked ? "new file" : viewer.staged ? "staged" : "working tree"}</span> : null}
         {viewer.kind === "commit" ? <span className="truncate text-[11.5px] text-faint">{viewer.hash.slice(0, 8)} · {viewer.subject}</span> : null}
         <span className="ml-auto flex items-center gap-1">
           {viewer.kind !== "file" && text ? <DiffStat added={added} removed={removed} /> : null}

@@ -42,15 +42,15 @@ function Thumbs({ srcs, names, size = "size-20" }: { srcs: (string | null | "gon
     <div className="flex flex-wrap gap-1.5">
       {srcs.map((s, i) =>
         s === "gone" ? (
-          <div key={i} className={cn("rounded-md grid place-items-center border border-dashed text-faint", size)} title="This image is no longer saved">
+          <div key={i} className={cn("rounded-lg grid place-items-center border border-dashed text-faint", size)} title="This image is no longer saved">
             <ImageOff className="size-4" />
           </div>
         ) : s === null ? (
-          <div key={i} className={cn("rounded-md animate-pulse border bg-muted", size)} />
+          <div key={i} className={cn("rounded-lg animate-pulse border bg-muted", size)} />
         ) : (
           <button
             key={i}
-            className={cn("rounded-md overflow-hidden border bg-background hover:border-ring/60", size)}
+            className={cn("rounded-lg overflow-hidden border bg-background hover:border-ring/60", size)}
             onClick={() => openImages(shown, shown.findIndex((x) => x.src === s))}
             aria-label={`Open ${names[i]}`}
           >

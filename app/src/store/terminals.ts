@@ -173,7 +173,7 @@ function fontFamily() {
 function theme() {
   const css = getComputedStyle(document.documentElement)
   const dark = document.documentElement.classList.contains("dark")
-  return terminalTheme(dark, css.getPropertyValue("--sidebar").trim() || (dark ? "#0e0e10" : "#eef0f3"), css.getPropertyValue("--foreground").trim() || (dark ? "#ececef" : "#16181d"))
+  return terminalTheme(dark, css.getPropertyValue("--sidebar").trim() || (dark ? "#080808" : "#eef0f3"), css.getPropertyValue("--foreground").trim() || (dark ? "#ededed" : "#16181d"))
 }
 
 // Theme and font changes (Settings → Appearance) reach open terminals.

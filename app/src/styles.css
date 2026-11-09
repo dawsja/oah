@@ -5,17 +5,25 @@
    here": primary buttons, the selected row's bar, selected segments and toggles, badges, and the
    logo. Everything you read stays neutral: inline code, commands, file names and list numbers use
    the text color, and focus outlines are a soft gray.
-   Dark: lifted off pure black. The chat is #121214, the sidebar a step darker (#0E0E10), cards,
-   menus and the composer a step lighter (#19191C), a user turn #202024; white-alpha borders.
+   Dark: neutral grays (no blue tint), a hair off black. The window and sidebar are #080808, the
+   floating panels a step up (#0C0C0C), cards, menus and the composer #151515, a user turn
+   #222222; white-alpha borders do the separating.
    Light: cool paper. The chat is #F6F7F9, the sidebar #EEF0F3, cards white; the gold fill keeps
    ink text.
-   Corners are subtle: --radius is 6px, so rounded-sm is 2px (tags), rounded-md 4px (controls,
-   rows), rounded-lg 6px (cards, panels, menus). Toggles are round; diff lines, the history graph
-   and meters stay square. */
+   Corners: one scale, sized to the thing and nested (an inner corner is the outer one minus the
+   gap). rounded-xs 4px: key caps, inline code. rounded-sm 6px: tooltips. rounded-md 9px:
+   buttons, inputs, list rows, menu items, tabs. rounded-lg 12px: the floating panels (chat, side
+   panel, terminal), menus, and cards in a page (diffs, code, tool output, settings groups,
+   notices). rounded-xl 16px: dialogs. rounded-2xl 22px: the composer, your messages, and the
+   cards that dock on the composer (approvals, questions, the plan). rounded-full: pills (status
+   tags, counts, the round icon buttons and chips in the composer, continuous meters), dots and
+   toggles. Square on purpose: anything on a grid of lines or cells, where a curve would read as
+   a break: diff and code lines, the terminal, the history graph, segmented meters, dividers
+   inside a panel, and the window's own edges and title bar. */
 @custom-variant dark (&:is(.dark, .dark *));
 
 :root {
-  --radius: 6px;
+  --radius: 12px;
 
   --background: #f6f7f9;
   --foreground: #16181d;
@@ -67,49 +75,49 @@
 }
 
 .dark {
-  --background: #121214;
-  --foreground: #ececef;
-  --card: #19191c;
-  --card-foreground: #ececef;
-  --popover: #19191c;
-  --popover-foreground: #ececef;
+  --background: #0c0c0c;
+  --foreground: #ededed;
+  --card: #151515;
+  --card-foreground: #ededed;
+  --popover: #151515;
+  --popover-foreground: #ededed;
   --primary: #f5b800; /* oah gold */
-  --primary-foreground: #121214;
+  --primary-foreground: #0c0c0c;
   --secondary: rgb(255 255 255 / 4%);
-  --secondary-foreground: #ececef;
+  --secondary-foreground: #ededed;
   --muted: rgb(255 255 255 / 4%);
-  --muted-foreground: #9c9ca5;
+  --muted-foreground: #a1a1a1;
   --accent: rgb(255 255 255 / 6%);
-  --accent-foreground: #ececef;
+  --accent-foreground: #ededed;
   --destructive: #f87171;
   --border: rgb(255 255 255 / 8%);
   --input: rgb(255 255 255 / 12%);
   --ring: rgb(255 255 255 / 22%); /* focus: a soft gray, not gold */
 
-  --sidebar: #0e0e10;
-  --sidebar-foreground: #ececef;
+  --sidebar: #080808;
+  --sidebar-foreground: #ededed;
   --sidebar-primary: #f5b800;
-  --sidebar-primary-foreground: #121214;
+  --sidebar-primary-foreground: #0c0c0c;
   --sidebar-accent: rgb(255 255 255 / 6%);
-  --sidebar-accent-foreground: #ececef;
+  --sidebar-accent-foreground: #ededed;
   --sidebar-border: rgb(255 255 255 / 8%);
   --sidebar-ring: rgb(255 255 255 / 22%);
 
-  --oah-deep: #0e0e10;
-  --oah-faint: #6a6a73;
-  --oah-brand: #ececef;
+  --oah-deep: #080808;
+  --oah-faint: #6b6b6b;
+  --oah-brand: #ededed;
   --oah-gold: #f5b800;
   --oah-cyan: #60a5fa;
   --oah-green: #4ade80;
   --oah-red: #f87171;
   --oah-yellow: #fbbf24; /* warnings (amber), not the accent */
   --oah-orange: #fb923c;
-  --oah-code: #ececef; /* inline code and commands: the text color */
+  --oah-code: #ededed; /* inline code and commands: the text color */
   --oah-add-bg: color-mix(in srgb, #10b981 14%, transparent);
   --oah-del-bg: color-mix(in srgb, #ef4444 14%, transparent);
-  --oah-user: #202024;
+  --oah-user: #222222;
   --oah-code-bg: rgb(255 255 255 / 7%);
-  --oah-pre-fg: #e2e2e6;
+  --oah-pre-fg: #e3e3e3;
   --oah-scroll: rgb(255 255 255 / 9%);
   --oah-scroll-hover: rgb(255 255 255 / 14%);
   --oah-selection: rgb(245 184 0 / 24%);
@@ -120,12 +128,12 @@
   --font-sans: var(--oah-sans, "Inter Variable"), Inter, system-ui, "Segoe UI", sans-serif;
   --font-mono: var(--oah-mono, "JetBrains Mono Variable"), "JetBrains Mono", ui-monospace, Consolas, monospace;
 
-  --radius-xs: 2px;
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 9px;
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 2px);
-  --radius-2xl: calc(var(--radius) + 4px);
+  --radius-xl: 16px;
+  --radius-2xl: 22px;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -189,7 +197,7 @@
   }
   ::selection { background: var(--oah-selection); }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: var(--oah-scroll); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: var(--oah-scroll); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
   ::-webkit-scrollbar-thumb:hover { background: var(--oah-scroll-hover); }
   ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 }
@@ -207,7 +215,7 @@
 
   /* A selected row: a soft fill and a short gold bar on the left. */
   .row-active { position: relative; background: var(--sidebar-accent); color: var(--foreground); }
-  .row-active::before { content: ""; position: absolute; inset: 6px auto 6px 0; width: 2px; border-radius: 2px; background: var(--primary); }
+  .row-active::before { content: ""; position: absolute; inset: 9px auto 9px 4px; width: 2px; border-radius: 2px; background: var(--primary); }
 
   /* Diffs and tool output. */
   .diff { font: 12px/1.65 var(--font-mono); user-select: text; cursor: text; }
@@ -234,8 +242,8 @@
   .md li { margin: 3px 0; }
   .md li::marker { color: var(--muted-foreground); }
   .md blockquote { margin: 0 0 10px; padding-left: 12px; border-left: 2px solid var(--border); color: var(--muted-foreground); }
-  .md code { font: 0.9em var(--font-mono); color: var(--oah-code); background: var(--oah-code-bg); padding: 1px 5px; border-radius: 3px; }
-  .md pre { margin: 0 0 12px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; overflow: auto; }
+  .md code { font: 0.9em var(--font-mono); color: var(--oah-code); background: var(--oah-code-bg); padding: 1px 5px; border-radius: 4px; }
+  .md pre { margin: 0 0 12px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 14px; overflow: auto; }
   .md pre code { background: transparent; padding: 0; color: var(--oah-pre-fg); font-size: 12px; line-height: 1.65; }
   .md table { border-collapse: collapse; margin: 0 0 12px; font-size: 0.92em; display: block; overflow-x: auto; }
   /* Cells keep words whole (the table scrolls sideways instead of breaking "Step" into "St/ep"). */

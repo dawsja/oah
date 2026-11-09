@@ -177,7 +177,7 @@ function SearchResults({ scope, query }: { scope: Scope; query: string }) {
           <div className="flex h-6 items-center gap-1.5 px-3 text-[12px] font-medium">
             <File className="size-3.5 text-faint" />
             <span className="truncate">{path}</span>
-            <span className="rounded-sm ml-auto border px-1 font-mono text-[10px] text-muted-foreground">{hs.length}</span>
+            <span className="rounded-full ml-auto border px-1.5 font-mono text-[10px] text-muted-foreground">{hs.length}</span>
           </div>
           {hs.map((h) => (
             <button key={h.line} className="mx-1 rounded-md flex w-[calc(100%-0.5rem)] items-baseline gap-2 py-0.5 pr-2 pl-8 text-left hover:bg-accent" onClick={() => open({ kind: "file", path, line: h.line })}>
@@ -197,7 +197,7 @@ function highlight(text: string, q: string) {
   return (
     <>
       {text.slice(0, i)}
-      <mark className="rounded-sm bg-primary/30 text-foreground">{text.slice(i, i + q.length)}</mark>
+      <mark className="rounded-[3px] bg-primary/30 text-foreground">{text.slice(i, i + q.length)}</mark>
       {text.slice(i + q.length)}
     </>
   )

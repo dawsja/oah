@@ -49,7 +49,7 @@ function badgeIcon(count: number): number[] | null {
   g.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2)
   g.fill()
   const text = badgeText(count)
-  g.fillStyle = "#121214"
+  g.fillStyle = "#0c0c0c"
   g.font = `700 ${text.length > 1 ? 17 : 22}px "Inter Variable", system-ui, sans-serif`
   g.textAlign = "center"
   g.textBaseline = "middle"

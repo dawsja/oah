@@ -26,8 +26,8 @@ export function RightPanel() {
   const current = TABS.find((t) => t.id === tab) ?? TABS[1]
 
   return (
-    <aside className="flex h-full min-w-0 flex-col border-l bg-sidebar">
-      <div className="flex h-9 shrink-0 items-stretch border-b">
+    <aside className="flex h-full min-w-0 flex-col bg-background">
+      <div className="flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
         {TABS.map((t) => (
           <Tip key={t.id} content={t.label} side="bottom">
             <button
@@ -35,14 +35,14 @@ export function RightPanel() {
               aria-selected={t.id === tab}
               aria-label={t.label}
               className={cn(
-                "relative grid w-10 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground",
-                t.id === tab && "bg-background text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary",
+                "relative grid h-7 w-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+                t.id === tab && "bg-accent text-foreground",
               )}
               onClick={() => setLayout({ rightTab: t.id })}
             >
               <t.icon className="size-4" />
               {t.id === "scm" && count > 0 ? (
-                <span className="rounded-sm absolute top-1 right-0.5 min-w-3.5 bg-primary px-0.5 text-center font-mono text-[9px] leading-3.5 text-primary-foreground">{count > 99 ? "99" : count}</span>
+                <span className="rounded-full absolute -top-0.5 -right-0.5 min-w-3.5 bg-primary px-1 text-center font-mono text-[9px] leading-3.5 text-primary-foreground">{count > 99 ? "99" : count}</span>
               ) : null}
             </button>
           </Tip>

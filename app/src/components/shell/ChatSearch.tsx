@@ -24,7 +24,7 @@ function Marked({ text, terms }: { text: string; terms: string[] }) {
     <>
       {text.split(re).map((part, i) =>
         i % 2 ? (
-          <mark key={i} className="rounded-sm bg-primary/25 text-foreground">
+          <mark key={i} className="rounded-[3px] bg-primary/25 text-foreground">
             {part}
           </mark>
         ) : (

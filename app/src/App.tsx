@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils"
 import { useEffect } from "react"
 import { PhonePairingHost } from "@/components/settings/PhoneSection"
 import { PromptHost } from "@/components/Prompt"
@@ -64,10 +65,10 @@ export function App() {
 
   return (
     <TooltipProvider delayDuration={400}>
-      <div className="flex h-full min-h-0 flex-col overflow-clip">
+      <div className="flex h-full min-h-0 flex-col overflow-clip bg-sidebar">
         <TitleBar />
         {ready ? (
-          <div className="flex min-h-0 flex-1">
+          <div className={cn("flex min-h-0 flex-1 pr-2 pb-2", layout.sidebarWidth > 0 ? "" : "pl-2")}>
             {layout.sidebarWidth > 0 ? (
               <>
                 <div style={{ width: layout.sidebarWidth }} className="shrink-0">
@@ -77,13 +78,13 @@ export function App() {
               </>
             ) : null}
             <main className="flex min-w-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1">{view === "settings" ? <SettingsPage /> : <ChatView />}</div>
+              <div className="min-h-0 flex-1 overflow-clip rounded-lg border bg-background">{view === "settings" ? <SettingsPage /> : <ChatView />}</div>
               <TerminalPanel />
             </main>
             {view === "chat" && layout.rightOpen ? (
               <>
                 <Resizer side="right" defaultWidth={defaultLayout.rightWidth} width={layout.rightWidth} min={260} max={640} onWidth={(w) => setLayout({ rightWidth: w })} />
-                <div style={{ width: layout.rightWidth }} className="shrink-0">
+                <div style={{ width: layout.rightWidth }} className="shrink-0 overflow-clip rounded-lg border bg-background">
                   <RightPanel />
                 </div>
               </>

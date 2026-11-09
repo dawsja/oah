@@ -33,12 +33,12 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full min-w-0 bg-background">
-      <nav className="flex w-52 shrink-0 flex-col border-r bg-sidebar py-3">
+      <nav className="flex w-52 shrink-0 flex-col border-r bg-sidebar/60 px-1.5 py-3">
         <div className="mb-2 px-4 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Settings</div>
         {SECTIONS.map((s) => (
           <button
             key={s.id}
-            className={cn("mx-1 rounded-md flex h-8 items-center gap-2.5 px-4 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", s.id === section && "row-active")}
+            className={cn("rounded-md flex h-8 items-center gap-2.5 px-3 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground", s.id === section && "row-active")}
             onClick={() => useApp.setState({ section: s.id })}
           >
             <s.icon className="size-3.5" />
@@ -59,7 +59,7 @@ export function SettingsPage() {
         </div>
       </nav>
       <div className="relative min-w-0 flex-1 overflow-y-auto">
-        <button className="rounded-md absolute top-3 right-3 grid size-8 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Close settings" onClick={close}>
+        <button className="rounded-full absolute top-3 right-3 grid size-8 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Close settings" onClick={close}>
           <X className="size-4" />
         </button>
         {section === "providers" ? <ProvidersSection /> : null}

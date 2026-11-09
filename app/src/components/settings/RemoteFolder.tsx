@@ -107,7 +107,7 @@ export function RemoteFolderHost() {
             >
               {isDrive(d) ? <HardDrive className="size-3.5 text-muted-foreground" /> : <Folder className="size-3.5 text-muted-foreground" />}
               <span className={d.startsWith(".") ? "text-faint" : undefined}>{d}</span>
-              {isDrive(d) ? <span className="rounded-sm border px-1 text-[10px] text-faint">Windows drive {d.toUpperCase()}:</span> : null}
+              {isDrive(d) ? <span className="rounded-full border px-1.5 text-[10px] text-faint">Windows drive {d.toUpperCase()}:</span> : null}
             </button>
           ))}
         </div>

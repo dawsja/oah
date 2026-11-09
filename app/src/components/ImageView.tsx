@@ -149,10 +149,10 @@ function Lightbox() {
         <ImageStage image={image} className="flex-1" />
         {images.length > 1 ? (
           <>
-            <button className="rounded-md absolute top-1/2 left-3 grid size-9 -translate-y-1/2 place-items-center border bg-card/90 hover:bg-accent" aria-label="Previous image" onClick={() => go(-1)}>
+            <button className="rounded-full absolute top-1/2 left-3 grid size-9 -translate-y-1/2 place-items-center border bg-card/90 hover:bg-accent" aria-label="Previous image" onClick={() => go(-1)}>
               <ChevronLeft className="size-4" />
             </button>
-            <button className="rounded-md absolute top-1/2 right-3 grid size-9 -translate-y-1/2 place-items-center border bg-card/90 hover:bg-accent" aria-label="Next image" onClick={() => go(1)}>
+            <button className="rounded-full absolute top-1/2 right-3 grid size-9 -translate-y-1/2 place-items-center border bg-card/90 hover:bg-accent" aria-label="Next image" onClick={() => go(1)}>
               <ChevronRight className="size-4" />
             </button>
           </>
@@ -161,7 +161,7 @@ function Lightbox() {
       {images.length > 1 ? (
         <div className="flex shrink-0 justify-center gap-1.5 border-t p-2">
           {images.map((im, i) => (
-            <button key={i} className={cn("rounded-sm size-12 overflow-hidden border", i === index ? "border-primary" : "opacity-60 hover:opacity-100")} onClick={() => useLightbox.setState({ index: i })} aria-label={im.name}>
+            <button key={i} className={cn("rounded-md size-12 overflow-hidden border", i === index ? "border-primary" : "opacity-60 hover:opacity-100")} onClick={() => useLightbox.setState({ index: i })} aria-label={im.name}>
               <img src={im.src} alt="" className="size-full object-cover" />
             </button>
           ))}

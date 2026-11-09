@@ -106,7 +106,7 @@ function Snippet({ label, hint, text }: { label: string; hint: string; text: str
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      <pre className="overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre">{text}</pre>
+      <pre className="overflow-x-auto rounded-lg border bg-background px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre">{text}</pre>
     </div>
   )
 }

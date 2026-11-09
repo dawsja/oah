@@ -121,7 +121,7 @@ export function ToolRow({ item }: { item: ToolItem }) {
           <DiffCard diff={item.diff} defaultOpen />
         </div>
       ) : open && hasOutput ? (
-        <pre className={cn("rounded-md mt-1 mb-1.5 max-h-64 overflow-auto border bg-card px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap select-text", item.status === "error" ? "text-red" : "text-muted-foreground")}>
+        <pre className={cn("rounded-lg mt-1 mb-1.5 max-h-64 overflow-auto border bg-card px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap select-text", item.status === "error" ? "text-red" : "text-muted-foreground")}>
           {item.output}
         </pre>
       ) : null}

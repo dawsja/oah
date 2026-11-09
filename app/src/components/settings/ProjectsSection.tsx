@@ -151,8 +151,8 @@ function DistroRow({ distro, onChange }: { distro: Distro; onChange: () => void 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 font-mono text-[12.5px]">
             {distro.name}
-            {distro.default ? <span className="rounded-sm border px-1 font-sans text-[10px] text-faint">default</span> : null}
-            {distro.version === 1 ? <span className="rounded-sm border px-1 font-sans text-[10px] text-faint">WSL 1</span> : null}
+            {distro.default ? <span className="rounded-full border px-1.5 font-sans text-[10px] text-faint">default</span> : null}
+            {distro.version === 1 ? <span className="rounded-full border px-1.5 font-sans text-[10px] text-faint">WSL 1</span> : null}
           </div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
             {c === "checking" ? (

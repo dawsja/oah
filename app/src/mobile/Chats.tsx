@@ -77,7 +77,7 @@ function ChatRow({ meta, project, onMenu }: { meta: ChatMeta; project: Project |
         </div>
       </div>
       {waiting ? (
-        <span className="rounded-sm shrink-0 bg-primary px-2 py-1 text-[11.5px] font-medium text-primary-foreground">{WAITING_LABEL[waiting]}</span>
+        <span className="rounded-full shrink-0 bg-primary px-2.5 py-1 text-[11.5px] font-medium text-primary-foreground">{WAITING_LABEL[waiting]}</span>
       ) : busy ? (
         <Loader2 className="size-4 shrink-0 animate-spin text-primary" aria-label="Working" />
       ) : (
@@ -117,7 +117,7 @@ function ChatMenu({ meta, onClose }: { meta: ChatMeta | null; onClose: () => voi
 
   return (
     <Sheet open={!!meta} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="gap-0 rounded-t-lg pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="gap-0 rounded-t-2xl pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <SheetHeader className="pb-2">
           <SheetTitle className="line-clamp-2 pr-8 leading-snug">{meta?.title || "New chat"}</SheetTitle>
           <SheetDescription>{meta ? AGENT_LABEL[meta.agent] : ""}</SheetDescription>

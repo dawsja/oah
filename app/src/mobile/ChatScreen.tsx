@@ -65,14 +65,14 @@ export function ChatScreen({ chatId }: { chatId: string }) {
       <CwdContext.Provider value={t.cwd ?? meta?.cwd ?? null}>
         <ImageSourceContext.Provider value={source}>
           {transcript ? <Transcript transcript={t} className="flex-1" /> : <div className="grid flex-1 place-items-center text-[13px] text-muted-foreground">{link === "connected" ? "Loading…" : ""}</div>}
-          <div className="flex flex-col gap-2 px-2.5 pt-1">
+          <div className="flex flex-col gap-2 px-2.5 pt-1 [&:not(:empty)]:pb-2">
             {t.questions[0] ? (
               <QuestionCard request={t.questions[0]} onAnswer={(a) => st.answerQuestion(chatId, t.questions[0].requestId, a)} />
             ) : t.approvals[0] ? (
               <ApprovalCard request={t.approvals[0]} queued={t.approvals.length - 1} onAnswer={(d) => st.answer(chatId, t.approvals[0].requestId, d)} />
             ) : null}
             {queued.length ? (
-              <div className="rounded-lg divide-y border bg-card">
+              <div className="rounded-2xl divide-y border bg-card">
                 {queued.map((q, i) => (
                   <div key={q.id} className="flex items-center gap-2 py-1 pr-1 pl-3 text-[13px]">
                     <span className="text-[11px] text-faint">{i === 0 ? "Next" : "Queued"}</span>

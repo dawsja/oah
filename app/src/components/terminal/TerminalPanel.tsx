@@ -75,16 +75,16 @@ export function TerminalPanel() {
   return (
     <div className={cn("flex shrink-0 flex-col", !visible && "hidden")} style={{ height: visible ? height : undefined }}>
       <Resizer side="top" defaultWidth={defaultLayout.terminalHeight} width={height} min={120} max={Math.max(160, window.innerHeight - 220)} onWidth={(h) => setLayout({ terminalHeight: h })} />
-      <div className="flex min-h-0 flex-1 flex-col border-t bg-sidebar">
-        <div className="flex h-8 shrink-0 items-stretch border-b" role="tablist" aria-label="Terminals">
-          <div className="flex min-w-0 items-stretch overflow-x-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-clip rounded-lg border bg-sidebar">
+        <div className="flex h-9 shrink-0 items-center gap-0.5 border-b px-1.5" role="tablist" aria-label="Terminals">
+          <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
             {mine.map((t) => (
               <TabButton key={t.id} tab={t} project={project!} active={t.id === activeId} />
             ))}
           </div>
           <Tip content="New terminal" side="top">
             <button
-              className="grid w-8 shrink-0 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="New terminal"
               onClick={() => {
                 const scope = currentScope()
@@ -96,7 +96,7 @@ export function TerminalPanel() {
           </Tip>
           <div className="flex-1" />
           <Tip content="Hide terminal (Ctrl+`)" side="top">
-            <button className="grid w-8 shrink-0 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Hide terminal" onClick={() => setLayout({ terminalOpen: false })}>
+            <button className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Hide terminal" onClick={() => setLayout({ terminalOpen: false })}>
               <ChevronDown className="size-3.5" />
             </button>
           </Tip>
@@ -122,8 +122,8 @@ function TabButton({ tab, project, active }: { tab: TermTab; project: Project; a
         aria-selected={active}
         tabIndex={0}
         className={cn(
-          "group relative flex max-w-56 shrink-0 cursor-default items-center gap-1.5 border-r pr-1 pl-2.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground",
-          active && "bg-background text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary",
+          "group relative flex h-6 max-w-56 shrink-0 cursor-default items-center gap-1.5 rounded-md pr-1 pl-2.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground",
+          active && "bg-accent text-foreground",
         )}
         onClick={() => useTerminals.getState().select(project.id, tab.id)}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && useTerminals.getState().select(project.id, tab.id)}

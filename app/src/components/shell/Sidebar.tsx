@@ -32,7 +32,7 @@ export function Sidebar() {
 
 
   return (
-    <aside className="flex h-full min-w-0 flex-col border-r bg-sidebar text-sidebar-foreground">
+    <aside className="flex h-full min-w-0 flex-col bg-sidebar text-sidebar-foreground">
       <div className="p-2">
         <button
           className="rounded-md flex h-8 w-full items-center gap-2 border border-input bg-background px-2.5 text-left text-[12.5px] font-medium hover:border-ring/60 hover:bg-accent disabled:opacity-50"
@@ -157,7 +157,7 @@ function ProjectGroup({ project }: { project: Project }) {
         <LocationIcon location={project.location} />
         <span className="truncate font-medium">{project.name}</span>
         {remote ? <span className="truncate text-[11px] text-faint">{locationLabel(project.location)}</span> : null}
-        {stopped && !selected ? <span className="rounded-sm shrink-0 border px-1 text-[10px] text-faint">stopped</span> : null}
+        {stopped && !selected ? <span className="rounded-full shrink-0 border px-1.5 text-[10px] text-faint">stopped</span> : null}
         <div className="ml-auto flex opacity-0 group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
           <Tip content="New chat" side="top">
             <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="New chat" onClick={(e) => (e.stopPropagation(), newChat(project.id, null))}>
@@ -257,7 +257,7 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
         </button>
         <GitBranch className={cn("size-3.5 shrink-0", "text-muted-foreground")} />
         <span className="truncate font-mono text-[12px]">{tree?.branch ?? "main checkout"}</span>
-        {main ? <span className="rounded-sm border px-1 text-[10px] text-faint">main</span> : null}
+        {main ? <span className="rounded-full border px-1.5 text-[10px] text-faint">main</span> : null}
         <div className="ml-auto flex opacity-0 group-hover/wt:opacity-100 has-[[data-state=open]]:opacity-100">
           <Tip content="New chat here" side="top">
             <button className="rounded-md grid size-6 place-items-center text-muted-foreground hover:bg-background hover:text-foreground" aria-label="New chat here" onClick={(e) => (e.stopPropagation(), newChat(project.id, cwd))}>

@@ -39,7 +39,7 @@ export function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
   if (!resolved) return <span className="my-1 inline-block text-sm text-muted-foreground" role="status">Loading {name}…</span>
   return (
     <button className="my-1 inline-block" onClick={() => openImages([{ src: resolved, name }])} aria-label={`Open ${name}`}>
-      <img src={resolved} alt={alt ?? ""} loading="lazy" className="rounded-md max-h-96 max-w-full border object-contain" onError={() => setLoaded({ key, error: "The image could not be displayed" })} />
+      <img src={resolved} alt={alt ?? ""} loading="lazy" className="rounded-lg max-h-96 max-w-full border object-contain" onError={() => setLoaded({ key, error: "The image could not be displayed" })} />
     </button>
   )
 }

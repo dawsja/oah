@@ -96,7 +96,7 @@ export function MobileComposer(p: Props) {
           {images.map((im, i) => (
             <div key={i} className="relative size-16 shrink-0">
               <button className="size-full" aria-label={`View attachment ${i + 1}`} onClick={() => openImages(images.map((x, j) => ({ src: `data:${x.mime};base64,${x.data}`, name: `Attachment ${j + 1}` })), i)}>
-                <img src={`data:${im.mime};base64,${im.data}`} alt={`Attachment ${i + 1}`} className="rounded-md size-full border object-cover" />
+                <img src={`data:${im.mime};base64,${im.data}`} alt={`Attachment ${i + 1}`} className="rounded-lg size-full border object-cover" />
               </button>
               <button className="rounded-full absolute -top-1 -right-1 grid size-7 place-items-center border bg-background" aria-label="Remove image" onClick={() => setImages((a) => a.filter((_, j) => j !== i))}>
                 <X className="size-3" />
@@ -105,7 +105,7 @@ export function MobileComposer(p: Props) {
           ))}
         </div>
       ) : null}
-      <div className="rounded-lg border bg-card">
+      <div className="rounded-2xl border bg-card">
         <textarea
           ref={box}
           rows={1}
@@ -133,11 +133,11 @@ export function MobileComposer(p: Props) {
         />
         {/* "+" and the model on the left; stop, the mic, then send now and send/queue on the right. */}
         <div className="flex items-center gap-1 p-1">
-          <button className="rounded-md grid size-10 shrink-0 place-items-center text-muted-foreground active:bg-accent" aria-label="Attach, effort, permissions and context" onClick={() => setSheet("more")}>
+          <button className="rounded-full grid size-10 shrink-0 place-items-center text-muted-foreground active:bg-accent" aria-label="Attach, effort, permissions and context" onClick={() => setSheet("more")}>
             <Plus className="size-5" />
           </button>
           <button
-            className="rounded-md flex h-10 min-w-10 shrink items-center justify-center gap-1.5 px-2 text-[13px] text-muted-foreground active:bg-accent"
+            className="rounded-full flex h-10 min-w-10 shrink items-center justify-center gap-1.5 px-3 text-[13px] text-muted-foreground active:bg-accent"
             aria-label="Model"
             onClick={() => (setSheet("model"), p.onModelsOpen?.())}
           >
@@ -152,23 +152,23 @@ export function MobileComposer(p: Props) {
           </button>
           <span className="flex-1" />
           {p.running && p.onStop ? (
-            <button className="rounded-md grid size-10 shrink-0 place-items-center border border-input active:bg-accent" aria-label="Stop the turn" onClick={p.onStop}>
+            <button className="rounded-full grid size-10 shrink-0 place-items-center border border-input active:bg-accent" aria-label="Stop the turn" onClick={p.onStop}>
               <Square className="size-3.5 fill-current" />
             </button>
           ) : null}
           {dictation.button}
           {p.running && has ? (
             <>
-              <button className="rounded-md flex h-10 shrink-0 items-center gap-1 border border-input px-2.5 text-[13px] active:bg-accent" disabled={p.disabled || dictation.busy} aria-label="Send now, into the running turn" onClick={() => send("now")}>
+              <button className="rounded-full flex h-10 shrink-0 items-center gap-1 border border-input px-3 text-[13px] active:bg-accent" disabled={p.disabled || dictation.busy} aria-label="Send now, into the running turn" onClick={() => send("now")}>
                 <Zap className="size-4" /> Now
               </button>
-              <button className="rounded-md flex h-10 shrink-0 items-center gap-1.5 bg-primary px-3 text-[13px] font-medium text-primary-foreground" disabled={p.disabled || dictation.busy} aria-label="Queue: send when the turn ends" onClick={() => send("queue")}>
+              <button className="rounded-full flex h-10 shrink-0 items-center gap-1.5 bg-primary px-3.5 text-[13px] font-medium text-primary-foreground" disabled={p.disabled || dictation.busy} aria-label="Queue: send when the turn ends" onClick={() => send("queue")}>
                 <ListPlus className="size-4" /> Queue
               </button>
             </>
           ) : p.running ? null : (
             <button
-              className="rounded-md grid size-10 shrink-0 place-items-center bg-primary text-primary-foreground disabled:bg-muted disabled:text-faint"
+              className="rounded-full grid size-10 shrink-0 place-items-center bg-primary text-primary-foreground disabled:bg-muted disabled:text-faint"
               aria-label="Send"
               disabled={!has || p.disabled || dictation.busy}
               onClick={() => send("queue")}
@@ -180,7 +180,7 @@ export function MobileComposer(p: Props) {
       </div>
 
       <Sheet open={sheet === "more"} onOpenChange={(o) => setSheet(o ? "more" : null)}>
-        <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="max-h-[85vh] gap-0 overflow-y-auto rounded-t-lg pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="max-h-[85vh] gap-0 overflow-y-auto rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
           <SheetHeader>
             <SheetTitle>Chat options</SheetTitle>
           </SheetHeader>
@@ -274,7 +274,7 @@ export function MobileComposer(p: Props) {
       </Sheet>
 
       <Sheet open={sheet === "model"} onOpenChange={(o) => setSheet(o ? "model" : null)}>
-        <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="max-h-[85vh] gap-0 overflow-y-auto rounded-t-lg pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="max-h-[85vh] gap-0 overflow-y-auto rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
           <SheetHeader>
             <SheetTitle>Model</SheetTitle>
           </SheetHeader>

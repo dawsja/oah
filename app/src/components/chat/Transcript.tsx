@@ -92,7 +92,7 @@ export function Transcript({ transcript, className }: { transcript: T; className
         <div className={cn("mx-auto flex w-full max-w-[46rem] flex-col gap-4", touch ? "px-4 pt-4 pb-6" : "px-6 pt-6 pb-10")}>
           {hidden ? (
             <button
-              className="self-center rounded-md border px-3 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="self-center rounded-full border px-3.5 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={() => {
                 const el = scroller.current
                 const from = el ? el.scrollHeight - el.scrollTop : 0
@@ -135,7 +135,7 @@ function Row({ item }: { item: Item }) {
     case "user":
       return (
         <div className="flex justify-end">
-          <div className="rounded-xl max-w-[85%] border bg-user px-3.5 py-2.5 text-[length:var(--oah-chat-size,14px)] leading-relaxed whitespace-pre-wrap select-text">
+          <div className="rounded-2xl max-w-[85%] border bg-user px-3.5 py-2.5 text-[length:var(--oah-chat-size,14px)] leading-relaxed whitespace-pre-wrap select-text">
             {item.text}
             <MessageImages files={item.files} count={item.images.length} />
           </div>
@@ -176,7 +176,7 @@ function Row({ item }: { item: Item }) {
 function PlanCard({ text, decision }: { text: string; decision: Decision }) {
   const [open, setOpen] = useState(decision !== "deny")
   return (
-    <div className="rounded-lg border bg-card">
+    <div className="overflow-hidden rounded-lg border bg-card">
       <button className="flex min-h-10 w-full items-center gap-2 px-3 py-2 text-left text-[12.5px]" onClick={() => setOpen(!open)}>
         <ListChecks className="size-3.5 text-muted-foreground" />
         <span className="font-medium">Plan</span>

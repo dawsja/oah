@@ -262,7 +262,7 @@ export function Composer(p: ComposerProps) {
 
   return (
     <div
-      className={cn("rounded-xl border border-input bg-card focus-within:border-ring/70", dragging && "border-primary", p.className)}
+      className={cn("rounded-2xl border border-border bg-card shadow-[0_6px_20px_-12px_rgb(15_23_42/0.25)] dark:shadow-[0_1px_0_rgb(255_255_255/0.03)_inset,0_8px_24px_-12px_rgb(0_0_0/0.6)] focus-within:border-ring/70", dragging && "border-primary", p.className)}
       onDragOver={(e) => {
         if ([...e.dataTransfer.items].some((i) => i.kind === "file")) {
           e.preventDefault()
@@ -281,7 +281,7 @@ export function Composer(p: ComposerProps) {
       {images.length ? (
         <div className="flex flex-wrap gap-1.5 px-3 pt-3">
           {images.map((img, i) => (
-            <div key={i} className="rounded-md group/img relative size-14 border bg-background">
+            <div key={i} className="rounded-lg group/img relative size-14 overflow-hidden border bg-background">
               <button className="size-full" aria-label={`View ${img.name}`} onClick={() => openImages(images.map((x) => ({ src: `data:${x.mime};base64,${x.data}`, name: x.name })), i)}>
                 <img src={`data:${img.mime};base64,${img.data}`} alt={img.name} className="size-full object-cover" />
               </button>
@@ -313,7 +313,7 @@ export function Composer(p: ComposerProps) {
                 <span className="shrink-0 font-mono text-foreground">{c.name}</span>
                 {c.hint ? <span className="max-w-40 shrink-0 truncate font-mono text-[11px] text-faint">{c.hint}</span> : null}
                 <span className="min-w-0 flex-1 truncate text-[11.5px] text-faint">{c.description}</span>
-                {c.skill ? <span className="shrink-0 rounded-sm border px-1 text-[10px] text-faint">skill</span> : null}
+                {c.skill ? <span className="shrink-0 rounded-full border px-1.5 text-[10px] text-faint">skill</span> : null}
               </button>
             ))}
           </div>
@@ -344,7 +344,7 @@ export function Composer(p: ComposerProps) {
         value={text}
         rows={3}
         placeholder={p.placeholder ?? "Ask anything, @ to add files, / for commands"}
-        className="block max-h-72 min-h-[76px] w-full resize-none bg-transparent px-3.5 pt-3 text-[length:var(--oah-chat-size,14px)] leading-relaxed outline-none placeholder:text-faint"
+        className="block max-h-72 min-h-[76px] w-full resize-none bg-transparent px-4 pt-3.5 text-[length:var(--oah-chat-size,14px)] leading-relaxed outline-none placeholder:text-faint"
         onChange={(e) => {
           setText(e.target.value)
           const caret = e.target.selectionStart ?? e.target.value.length
@@ -432,10 +432,10 @@ export function Composer(p: ComposerProps) {
           }
         }}
       />
-      <div className="flex items-center gap-1 px-1.5 pb-1.5">
+      <div className="flex items-center gap-1 px-2 pb-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild disabled={p.lockAgent}>
-            <button className="rounded-md flex h-7 items-center gap-1.5 px-2 text-[12px] font-medium hover:bg-accent disabled:hover:bg-transparent">
+            <button className="rounded-full flex h-7 items-center gap-1.5 px-2.5 text-[12px] font-medium hover:bg-accent disabled:hover:bg-transparent">
               <AgentGlyph agent={p.agent} className="size-3.5" />
               {AGENT_LABEL[p.agent]}
               {p.lockAgent ? null : <ChevronDown className="size-3 text-muted-foreground" />}
@@ -460,7 +460,7 @@ export function Composer(p: ComposerProps) {
           }}
         >
           <DropdownMenuTrigger asChild disabled={!p.onModel}>
-            <button className="rounded-md flex h-7 max-w-56 items-center gap-1 px-2 font-mono text-[11.5px] text-muted-foreground hover:bg-accent disabled:hover:bg-transparent">
+            <button className="rounded-full flex h-7 max-w-56 items-center gap-1 px-2.5 font-mono text-[11.5px] text-muted-foreground hover:bg-accent disabled:hover:bg-transparent">
               <span className="truncate">{p.models?.find((m) => m.id === p.model)?.name ?? (p.model || "default model")}</span>
               {p.effort ? <span className="shrink-0 text-faint">· {effortLabel(p.effort)}</span> : null}
               {p.onModel ? <ChevronDown className="size-3 shrink-0" /> : null}
@@ -496,7 +496,7 @@ export function Composer(p: ComposerProps) {
         </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className={cn("rounded-md flex h-7 items-center gap-1 px-2 text-[12px] hover:bg-accent", PERMISSION_TONE[p.permission] || "text-muted-foreground")}>
+            <button className={cn("rounded-full flex h-7 items-center gap-1 px-2.5 text-[12px] hover:bg-accent", PERMISSION_TONE[p.permission] || "text-muted-foreground")}>
               <PermissionIcon className="size-3.5" />
               {PERMISSION_LABEL[p.permission]}
               <ChevronDown className="size-3" />
@@ -521,28 +521,28 @@ export function Composer(p: ComposerProps) {
         <div className="ml-auto flex items-center gap-0.5">
           <ContextRing context={p.context ?? null} />
           <Tip content="Attach images (up to 5 MB each, 8 at a time)">
-            <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Attach image" onClick={() => picker.current?.click()}>
+            <button className="rounded-full grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Attach image" onClick={() => picker.current?.click()}>
               <Paperclip className="size-3.5" />
             </button>
           </Tip>
           <Dictation onText={(t) => window.dispatchEvent(new CustomEvent("oah:insert", { detail: t + " " }))} />
           {p.running && (text.trim() || images.length) ? (
             <Tip content={`Queue: sends when the agent finishes (Enter) · Send now (${STEER_KEY}+Enter)`}>
-              <button className="rounded-md ml-1 grid size-7 place-items-center bg-primary text-primary-foreground hover:bg-primary/90" aria-label="Queue" onClick={() => send()}>
+              <button className="rounded-full ml-1 grid size-7 place-items-center bg-primary text-primary-foreground hover:bg-primary/90" aria-label="Queue" onClick={() => send()}>
                 <ArrowUp className="size-4" />
               </button>
             </Tip>
           ) : null}
           {p.running ? (
             <Tip content="Stop (Esc)">
-              <button className="rounded-md ml-1 grid size-7 place-items-center bg-foreground text-background hover:opacity-90" aria-label="Stop" onClick={p.onStop}>
+              <button className="rounded-full ml-1 grid size-7 place-items-center bg-foreground text-background hover:opacity-90" aria-label="Stop" onClick={p.onStop}>
                 <Square className="size-3 fill-current" />
               </button>
             </Tip>
           ) : (
             <Tip content="Send (Enter)">
               <button
-                className="rounded-md ml-1 grid size-7 place-items-center bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint"
+                className="rounded-full ml-1 grid size-7 place-items-center bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-faint"
                 aria-label="Send"
                 disabled={(!text.trim() && !images.length) || p.disabled}
                 onClick={() => send()}

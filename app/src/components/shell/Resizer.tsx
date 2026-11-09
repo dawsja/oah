@@ -17,8 +17,8 @@ export function Resizer({ width, defaultWidth, onWidth, side, min, max }: { widt
       }}
       aria-orientation={vertical ? "horizontal" : "vertical"}
       className={cn(
-        "relative z-10 shrink-0 hover:bg-ring/50 active:bg-ring",
-        vertical ? "-my-[3px] h-[7px] w-full cursor-row-resize" : "-mx-[3px] w-[7px] cursor-col-resize",
+        "group/rs relative z-10 shrink-0 after:absolute after:rounded-full after:transition-colors hover:after:bg-ring/60 active:after:bg-ring",
+        vertical ? "h-2 w-full cursor-row-resize after:inset-x-[40%] after:top-1/2 after:h-[3px] after:-translate-y-1/2" : "w-2 cursor-col-resize after:inset-y-[40%] after:left-1/2 after:w-[3px] after:-translate-x-1/2",
       )}
       onPointerDown={(e) => {
         start.current = { at: vertical ? e.clientY : e.clientX, w: width }

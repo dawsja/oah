@@ -99,7 +99,7 @@ function Panel({ scope, status }: { scope: Scope; status: Status }) {
           rows={3}
           readOnly={writing}
           placeholder={writing ? "Writing a commit message…" : `Message (Ctrl Enter to commit on ${status.branch ?? "HEAD"})`}
-          className={cn("rounded-md block w-full resize-none border border-input bg-background py-2 pr-8 pl-2.5 text-[12.5px] outline-none placeholder:text-faint focus:border-ring/70", writing && "shimmer")}
+          className={cn("rounded-lg block w-full resize-none border border-input bg-background py-2 pr-8 pl-2.5 text-[12.5px] outline-none placeholder:text-faint focus:border-ring/70", writing && "shimmer")}
         />
           <Tip content={writing ? "Writing…" : nothingStaged ? "Write a message from all changes (cheapest model)" : "Write a message from the staged changes (cheapest model)"}>
             <button
@@ -181,7 +181,7 @@ function Section({ scope, title, changes, kind }: { scope: Scope; title: string;
           {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
           {title}
         </button>
-        <span className="rounded-sm border px-1 font-mono text-[10px] normal-case">{changes.length}</span>
+        <span className="rounded-full border px-1.5 font-mono text-[10px] normal-case">{changes.length}</span>
         <span className="font-mono text-[10.5px] normal-case">
           <span className="text-green">+{added}</span> <span className="text-red">−{removed}</span>
         </span>

@@ -63,7 +63,7 @@ function Open({ pr }: { pr: PR }) {
           </button>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
-          <span className={cn("rounded-sm border px-1.5 py-px font-medium uppercase", tone)}>{merged ? "merged" : closed ? "closed" : pr.draft ? "draft" : "open"}</span>
+          <span className={cn("rounded-full border px-2 py-px font-medium uppercase", tone)}>{merged ? "merged" : closed ? "closed" : pr.draft ? "draft" : "open"}</span>
           <span className="font-mono text-muted-foreground">
             {pr.head} → {pr.base}
           </span>
@@ -71,7 +71,7 @@ function Open({ pr }: { pr: PR }) {
             <span className="text-green">+{pr.additions}</span> <span className="text-red">−{pr.deletions}</span>
           </span>
         </div>
-        <div className="overflow-hidden rounded-md mt-2 grid grid-cols-2 gap-px border bg-border text-[11.5px]">
+        <div className="overflow-hidden rounded-lg mt-2 grid grid-cols-2 gap-px border bg-border text-[11.5px]">
           <div className="bg-sidebar px-2 py-1.5">
             <div className="text-faint">Review</div>
             <div className={pr.review === "APPROVED" ? "text-green" : pr.review === "CHANGES_REQUESTED" ? "text-red" : "text-muted-foreground"}>{(pr.review || "none").replace(/_/g, " ").toLowerCase()}</div>
@@ -140,7 +140,7 @@ function CreateForm({ scope, branch, base, onCreated }: { scope: Scope; branch: 
       <div className="text-[12px] text-muted-foreground">
         No pull request for <span className="font-mono text-foreground">{branch}</span> yet.
       </div>
-      {onBase ? <div className="rounded-md border border-warn/40 p-2 text-[11.5px] text-warn">You're on {base}. Make a branch or a worktree first.</div> : null}
+      {onBase ? <div className="rounded-lg border border-warn/40 p-2 text-[11.5px] text-warn">You're on {base}. Make a branch or a worktree first.</div> : null}
       <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="rounded-md h-8 border border-input bg-background px-2.5 text-[12.5px] outline-none focus:border-ring/70" />
       <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6} placeholder="Description (markdown)" className="rounded-md resize-none border border-input bg-background px-2.5 py-2 text-[12.5px] outline-none focus:border-ring/70" />
       <div className="flex items-center gap-2 text-[12px]">

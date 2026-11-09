@@ -66,7 +66,7 @@ function AgentRow({ agent, limits }: { agent: AgentKind; limits: Limits | undefi
         {reset ? <span className="text-[11px] text-faint">Resets {reset}</span> : null}
       </div>
       {limits === undefined ? (
-        <div className="mt-1.5 h-3 w-40 animate-pulse rounded-sm bg-muted" />
+        <div className="mt-1.5 h-3 w-40 animate-pulse rounded-full bg-muted" />
       ) : limits.error ? (
         <div className="mt-1 text-[11.5px] leading-snug text-faint">{limits.error}</div>
       ) : (
@@ -74,7 +74,7 @@ function AgentRow({ agent, limits }: { agent: AgentKind; limits: Limits | undefi
           {limits.windows.map((w) => (
             <span key={w.label} className="flex items-center gap-1.5 text-[11px]" title={w.label}>
               <span className="text-faint">{shortLabel(w)}</span>
-              <span className="flex h-1.5 w-10 bg-muted">
+              <span className="flex h-1.5 w-10 overflow-hidden rounded-full bg-muted">
                 <span className={cn("h-full", w.usedPercent >= 90 ? "bg-red" : w.usedPercent >= 70 ? "bg-warn" : "bg-primary")} style={{ width: `${Math.min(100, w.usedPercent)}%` }} />
               </span>
               <span className="font-mono text-muted-foreground">{Math.round(w.usedPercent)}%</span>
