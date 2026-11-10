@@ -56,9 +56,10 @@ mod paths {
         pub agent: PathBuf,
     }
 
-    /// `~/.oah/run/<machine>`, or `/tmp/oah-<uid>` when that path is too long for a socket.
-    /// Per machine, since a home folder can be shared (NFS) while sockets and locks belong to
-    /// one machine. The folder is private to this user; one that isn't is refused.
+    /// `~/.oah/run/<machine>`, or `/tmp/oah-<uid>-<home>` (`<home>` a short hash of the home
+    /// folder) when that path is too long for a socket. Per machine, since a home folder can be
+    /// shared (NFS) while sockets and locks belong to one machine. The folder is private to this
+    /// user; one that isn't is refused.
     pub fn paths(tag: &str) -> io::Result<Paths> {
         if !crate::valid_tag(tag) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("not a valid tag: {tag:?}")));
@@ -68,7 +69,8 @@ mod paths {
         // A socket's path has to fit in sun_path (108 bytes on Linux, 104 on macOS).
         if dir.join(format!("{tag}.agent")).as_os_str().len() > 100 {
             // SAFETY: geteuid can't fail.
-            dir = PathBuf::from(format!("/tmp/oah-{}", unsafe { libc::geteuid() }));
+            let home_tag = &crate::tag_of(home.as_encoded_bytes())[..8];
+            dir = PathBuf::from(format!("/tmp/oah-{}-{home_tag}", unsafe { libc::geteuid() }));
         }
         private_dir(&dir)?;
         Ok(Paths {

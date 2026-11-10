@@ -110,11 +110,11 @@ fn commands_run_through_the_helper() {
     assert_eq!(out.stdout, "hello\nworld\n");
     assert_eq!(out.stderr, "oops\n");
     assert_eq!(out.code, Some(3));
-    // It went through the daemon, not a plain ssh.
-    assert!(helper_name(&world().remote_home).len() > "oah-host-".len());
-    let run_dir = world().remote_home.join(".oah/run");
-    let machine = std::fs::read_dir(&run_dir).unwrap().next().expect("a folder for this machine").unwrap().path();
-    assert!(std::fs::read_dir(&machine).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".sock")));
+    // It went through the daemon, not a plain ssh (its socket is in ~/.oah/run, or in /tmp when
+    // that path is too long, as in CI).
+    let name = helper_name(&world().remote_home);
+    let serving = format!("{}/.oah/bin/{name} serve", world().remote_home.display());
+    assert!(std::process::Command::new("pgrep").args(["-f", &serving]).status().unwrap().success(), "a daemon is serving");
 
     // Binary data and big outputs arrive whole.
     let out = oah_transport::run(&sh(&loc, "head -c 3000000 /dev/zero | tr '\\0' 'x'"), None, Duration::from_secs(30)).unwrap();
