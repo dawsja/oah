@@ -55,7 +55,10 @@
         "installerHooks": "windows/hooks.nsh"
       }
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "resources": [
+      "host/*"
+    ]
   },
   "plugins": {
     "updater": {

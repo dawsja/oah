@@ -2919,6 +2919,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oah-host"
+version = "0.3.11"
+dependencies = [
+ "libc",
+ "oah-core",
+ "oah-transport",
+ "tempfile",
+]
+
+[[package]]
 name = "oah-mcp"
 version = "0.3.11"
 dependencies = [
@@ -2957,9 +2967,11 @@ version = "0.3.11"
 dependencies = [
  "libc",
  "oah-core",
+ "oah-host",
  "portable-pty",
  "serde",
  "tempfile",
+ "uuid",
  "which",
 ]
 

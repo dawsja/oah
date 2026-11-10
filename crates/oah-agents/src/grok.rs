@@ -71,8 +71,7 @@ fn with_agent<T>(binary: &str, location: &Location, env: &[EnvVar], f: impl FnOn
     let cwd = home_cwd(location);
     let mut env = env.to_vec();
     acp_env(&mut env);
-    let mut child = oah_transport::command(&Spec { location, cwd: &cwd, program: prog, args: acp_args(), env: &env })?
-        .spawn()
+    let mut child = oah_transport::spawn(&Spec { location, cwd: &cwd, program: prog, args: acp_args(), env: &env })
         .map_err(|e| format!("couldn't start {prog}: {e}"))?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let rpc = Rpc::new(child.stdin.take(), "Grok");

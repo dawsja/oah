@@ -46,7 +46,15 @@ Electron.
   distros with what's installed and signed in there; Usage shows a distro's own plan limits.
   A stopped distro is left asleep until you open one of its projects.
 - **SSH hosts.** Hosts from `~/.ssh/config` (with `Include`) or added by hand. A remote project
-  runs the agent CLI, git and gh over `ssh`, so the agent works on that machine's files.
+  runs the agent CLI, git and gh over `ssh`, so the agent works on that machine's files. On a
+  Linux host (x86-64 or ARM64) oah copies a small helper, `oah-host` (about 500 KB, static, no
+  download on the host), to `~/.oah/bin` the first time, then keeps one connection to it for
+  everything on that host. Agents run under it, so a laptop that sleeps or changes networks
+  reconnects to agents that kept working, with nothing they read or printed lost. Quitting oah
+  ends its agents there; ones a crash left behind end when oah next connects to that host, or
+  after 12 hours without a connection. Other hosts,
+  and hosts where it can't run, get one `ssh` per program. The agent CLIs themselves still need
+  to be installed on the host.
 - **Voice (optional).** Off until you turn it on in Settings → Voice, which asks before the
   one-time 731 MB download of NVIDIA Parakeet. Dictation is then transcribed on this computer;
   nothing you say leaves the machine. The mic appears in the message box only while voice is on,
@@ -99,6 +107,8 @@ crates/
   oah-core       data folder (~/.config/oah/app, or $OAH_HOME/app), settings.json, chats on disk
   oah-transport  runs a program in a folder: locally, over ssh, or in a WSL distro; distros,
                  host checks, remote folders; terminals (a shell in a pty, wherever the project is)
+  oah-host       the helper on SSH hosts: one connection per host, agents that outlive a dropped
+                 one (`bun scripts/build-host.ts` builds the bundled Linux binaries)
   oah-agents     Claude Code (stream-json), Codex (app-server), OpenCode, Antigravity and Grok Build (ACP)
                  drivers → ChatEvent; sign-in, models and plan limits; a scripted mock
                  (OAH_MOCK_AGENT=1)

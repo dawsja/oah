@@ -5,3 +5,4 @@ dist/
 target/
 .dev-home/
 .screenshots/
+app/src-tauri/host/oah-host-*

@@ -16,6 +16,7 @@ oah-git = { path = "crates/oah-git" }
 oah-voice = { path = "crates/oah-voice" }
 oah-mcp = { path = "crates/oah-mcp" }
 oah-remote = { path = "crates/oah-remote" }
+oah-host = { path = "crates/oah-host" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

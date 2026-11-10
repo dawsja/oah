@@ -1,12 +1,16 @@
 //! Running a program in a project's folder, wherever the project is: on this computer, on an
-//! SSH host through `ssh -T`, or in a WSL distro through `wsl.exe -e` (the program's stdio is
-//! ssh's or wsl.exe's). Remote commands are one POSIX `sh` script with every word
-//! single-quoted; nothing from the user is spliced in unquoted.
+//! SSH host, or in a WSL distro through `wsl.exe -e` (the program's stdio is wsl.exe's). On an
+//! SSH host it runs under `oah-host` when oah can put that there ([`host`]: one connection per
+//! host, and agents that outlive a dropped one), else through its own `ssh -T`. Remote commands
+//! are one POSIX `sh` script with every word single-quoted; nothing from the user is spliced in
+//! unquoted.
 
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 
 use oah_core::settings::{EnvVar, Location};
+pub mod host;
 pub mod pty;
 pub mod remote;
 pub mod wsl;
@@ -46,8 +50,131 @@ pub fn find_local(program: &str) -> Option<PathBuf> {
     USER_BIN_DIRS.iter().flat_map(|d| names.iter().map(|n| home.join(d).join(n)).collect::<Vec<_>>()).find(|p| p.is_file())
 }
 
-/// A `Command` ready to spawn, with piped stdio and no console window. Local programs are
-/// found with [`find_local`].
+/// Starts `spec` with piped stdio: under the host's `oah-host` when it has one, else as a
+/// process here ([`command`]).
+pub fn spawn(spec: &Spec) -> Result<Proc, String> {
+    if let Location::Ssh { host } = spec.location {
+        if valid_host(host) {
+            if let Some(session) = host::session_for(host) {
+                let p = session.spawn(remote_script(spec, false))?;
+                return Ok(Proc {
+                    stdin: Some(Stdin::Host(p.stdin())),
+                    stdout: Some(Out::Host(p.stdout())),
+                    stderr: Some(Out::Host(p.stderr())),
+                    inner: Inner::Host(p),
+                });
+            }
+        }
+    }
+    let mut child = command(spec)?.spawn().map_err(|e| e.to_string())?;
+    Ok(Proc {
+        stdin: child.stdin.take().map(Stdin::Child),
+        stdout: child.stdout.take().map(Out::Child),
+        stderr: child.stderr.take().map(Out::ChildErr),
+        inner: Inner::Child(child),
+    })
+}
+
+/// A running program, here or on a host. Like [`std::process::Child`]: take its stdio, then
+/// wait for it or [`stop_tree`] it.
+pub struct Proc {
+    pub stdin: Option<Stdin>,
+    pub stdout: Option<Out>,
+    pub stderr: Option<Out>,
+    inner: Inner,
+}
+
+enum Inner {
+    Child(Child),
+    Host(host::HostProc),
+}
+
+/// How a program ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExitStatus {
+    code: Option<i32>,
+}
+
+impl ExitStatus {
+    /// Its exit code; `None` when a signal ended it or the host lost it.
+    pub fn code(&self) -> Option<i32> {
+        self.code
+    }
+
+    pub fn success(&self) -> bool {
+        self.code == Some(0)
+    }
+}
+
+impl Proc {
+    pub fn wait(&mut self) -> io::Result<ExitStatus> {
+        match &mut self.inner {
+            Inner::Child(c) => c.wait().map(|s| ExitStatus { code: s.code() }),
+            Inner::Host(h) => Ok(ExitStatus { code: h.wait().code }),
+        }
+    }
+
+    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        match &mut self.inner {
+            Inner::Child(c) => c.try_wait().map(|s| s.map(|s| ExitStatus { code: s.code() })),
+            Inner::Host(h) => Ok(h.try_wait().map(|e| ExitStatus { code: e.code })),
+        }
+    }
+
+    /// Kills the program (on a host: its whole process group).
+    pub fn kill(&mut self) -> io::Result<()> {
+        match &mut self.inner {
+            Inner::Child(c) => c.kill(),
+            Inner::Host(h) => {
+                h.kill();
+                Ok(())
+            }
+        }
+    }
+}
+
+/// A [`Proc`]'s stdin. Dropping it closes it.
+pub enum Stdin {
+    Child(ChildStdin),
+    Host(host::HostStdin),
+}
+
+impl Write for Stdin {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Stdin::Child(w) => w.write(buf),
+            Stdin::Host(w) => w.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Stdin::Child(w) => w.flush(),
+            Stdin::Host(w) => w.flush(),
+        }
+    }
+}
+
+/// A [`Proc`]'s stdout or stderr.
+pub enum Out {
+    Child(ChildStdout),
+    ChildErr(ChildStderr),
+    Host(host::HostOut),
+}
+
+impl Read for Out {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Out::Child(r) => r.read(buf),
+            Out::ChildErr(r) => r.read(buf),
+            Out::Host(r) => r.read(buf),
+        }
+    }
+}
+
+/// A `Command` ready to spawn, with piped stdio and no console window, for running `spec` as a
+/// process here (on an SSH host: through its own `ssh -T`). Local programs are found with
+/// [`find_local`]. [`spawn`] is what to use to start a program.
 pub fn command(spec: &Spec) -> Result<Command, String> {
     let mut cmd = match spec.location {
         Location::Local => {
@@ -83,10 +210,17 @@ pub fn command(spec: &Spec) -> Result<Command, String> {
     Ok(cmd)
 }
 
-/// Ends `child` and what it started on this computer: its process group on Unix (see
-/// [`command`]), its process tree on Windows. A program that exits by itself once its stdin is
-/// closed (close it first) gets `grace` to do so, and to finish writing its session.
-pub fn stop_tree(child: &mut std::process::Child, grace: std::time::Duration) {
+/// Ends `proc` and what it started: its process group on Unix (see [`command`]) and on a host,
+/// its process tree on Windows. A program that exits by itself once its stdin is closed (close
+/// it first) gets `grace` to do so, and to finish writing its session.
+pub fn stop_tree(proc: &mut Proc, grace: std::time::Duration) {
+    match &mut proc.inner {
+        Inner::Child(c) => stop_child(c, grace),
+        Inner::Host(h) => h.stop(grace),
+    }
+}
+
+fn stop_child(child: &mut Child, grace: std::time::Duration) {
     let until = std::time::Instant::now() + grace;
     while std::time::Instant::now() < until {
         match child.try_wait() {
@@ -274,8 +408,23 @@ impl Output {
 
 /// Runs `spec` to completion with `input` on stdin (none: closed), giving up after `limit`.
 pub fn run(spec: &Spec, input: Option<&[u8]>, limit: std::time::Duration) -> Result<Output, String> {
-    use std::io::{Read, Write};
+    let child = spawn(spec).map_err(|e| format!("couldn't run {}: {e}", spec.program))?;
+    finish(child, spec, input, limit)
+}
+
+/// [`run`] as a process here, never under `oah-host` (setting a host up uses this).
+pub(crate) fn run_direct(spec: &Spec, input: Option<&[u8]>, limit: std::time::Duration) -> Result<Output, String> {
     let mut child = command(spec)?.spawn().map_err(|e| format!("couldn't run {}: {e}", spec.program))?;
+    let proc = Proc {
+        stdin: child.stdin.take().map(Stdin::Child),
+        stdout: child.stdout.take().map(Out::Child),
+        stderr: child.stderr.take().map(Out::ChildErr),
+        inner: Inner::Child(child),
+    };
+    finish(proc, spec, input, limit)
+}
+
+fn finish(mut child: Proc, spec: &Spec, input: Option<&[u8]>, limit: std::time::Duration) -> Result<Output, String> {
     if let Some(mut stdin) = child.stdin.take() {
         if let Some(data) = input {
             let _ = stdin.write_all(data);
@@ -328,7 +477,7 @@ mod stop_tests {
             args: vec!["-c".into(), script],
             env: &[],
         };
-        let mut child = command(&spec).unwrap().spawn().unwrap();
+        let mut child = spawn(&spec).unwrap();
         let mut pid = String::new();
         for _ in 0..100 {
             pid = std::fs::read_to_string(&pidfile).unwrap_or_default().trim().to_string();

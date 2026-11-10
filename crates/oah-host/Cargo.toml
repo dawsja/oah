@@ -1,0 +1,24 @@
+[package]
+name = "oah-host"
+description = "oah: the helper oah puts on an SSH host, so agents keep running through dropped connections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "oah_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "oah-host"
+path = "src/main.rs"
+
+# Nothing but std and libc: the binary is built static (musl) and copied to the host.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+# The end-to-end tests drive oah's side of the connection.
+oah-core.workspace = true
+oah-transport.workspace = true

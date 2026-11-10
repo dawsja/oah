@@ -19,7 +19,31 @@ permissions:
   contents: write
 
 jobs:
+  host:
+    # oah-host, the helper the app copies to SSH hosts: static Linux builds (x86-64, ARM64) that
+    # both installers bundle (app/src-tauri/host).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: oah-host
+      - name: cargo-zigbuild (and zig)
+        run: pip install cargo-zigbuild==0.24.1 ziglang==0.17.1
+      - name: Build
+        run: bun scripts/build-host.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oah-host
+          path: app/src-tauri/host/oah-host-*
+          if-no-files-found: error
+
   build:
+    needs: host
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +59,10 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: oah-host
+          path: app/src-tauri/host
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:

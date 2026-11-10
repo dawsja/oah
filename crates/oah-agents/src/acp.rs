@@ -10,9 +10,9 @@
 //! and `_x.ai/exit_plan_mode` (a finished plan, to approve). We advertise no file system or
 //! terminal, so `fs/*` and `terminal/*` requests are refused.
 
+use oah_transport::Proc;
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read};
-use std::process::Child;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -31,7 +31,7 @@ const PROMPT_LIMIT: Duration = Duration::from_secs(12 * 60 * 60);
 
 pub struct AcpDriver {
     rpc: Rpc,
-    child: Arc<Mutex<Option<Child>>>,
+    child: Arc<Mutex<Option<Proc>>>,
     state: Arc<Mutex<State>>,
     sink: Sink,
     queue: Arc<Mutex<VecDeque<Prompt>>>,
@@ -156,8 +156,8 @@ impl AcpDriver {
         if kind == AgentKind::Grok {
             crate::grok::acp_env(&mut env);
         }
-        let mut cmd = oah_transport::command(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &env })?;
-        let mut child = cmd.spawn().map_err(|e| format!("couldn't start {program}: {e}"))?;
+        let mut child = oah_transport::spawn(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &env })
+            .map_err(|e| format!("couldn't start {program}: {e}"))?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let stderr = child.stderr.take().ok_or("no stderr")?;
         let rpc = Rpc::new(child.stdin.take(), name.clone());

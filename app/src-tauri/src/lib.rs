@@ -606,6 +606,11 @@ pub fn run() {
             remote: remote::Remote::default(),
         })
         .setup(|app| {
+            // The oah-host builds copied to SSH hosts (bundled; a dev build may have none, and
+            // then SSH hosts get one ssh per program).
+            if let Ok(dir) = app.path().resource_dir() {
+                oah_transport::host::set_binary_dir(dir.join("host"));
+            }
             // Voice state (and with it the microphone answer) before the page asks.
             let _ = voice::voice_state(app.handle().clone());
             // MCP's socket (it refuses clients while Settings → MCP is off).
@@ -718,6 +723,8 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 app.state::<AppState>().chats.stop_all();
                 app.state::<AppState>().terminals.close_all();
+                // What's still running on SSH hosts ends there too, as it would with plain ssh.
+                oah_transport::host::shutdown();
             }
         });
 }

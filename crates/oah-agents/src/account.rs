@@ -492,9 +492,7 @@ pub fn codex_limits(binary: &str, location: &Location, env: &[EnvVar]) -> Limits
 /// One request to a short-lived `codex app-server` (where `location` says).
 pub fn codex_once(prog: &str, location: &Location, env: &[EnvVar], method: &str, params: Value) -> Result<Value, String> {
     let home = if matches!(location, Location::Local) { oah_core::paths::home_dir().to_string_lossy().into_owned() } else { "~".into() };
-    let mut child = oah_transport::command(&Spec { location, cwd: &home, program: prog, args: vec!["app-server".into()], env })?
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let mut child = oah_transport::spawn(&Spec { location, cwd: &home, program: prog, args: vec!["app-server".into()], env })?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let (tx, rx) = std::sync::mpsc::channel();

@@ -1,9 +1,9 @@
 //! JSON-RPC 2.0 over a child's stdio, one object per line (Codex's app-server and OpenCode's ACP):
 //! numbered requests whose replies come back through the driver's reader thread.
 
+use oah_transport::Stdin;
 use std::collections::HashMap;
 use std::io::Write;
-use std::process::ChildStdin;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,7 +16,7 @@ pub type Replies = Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>;
 
 #[derive(Clone)]
 pub struct Rpc {
-    pub stdin: Arc<Mutex<Option<ChildStdin>>>,
+    pub stdin: Arc<Mutex<Option<Stdin>>>,
     pub next: Arc<Mutex<u64>>,
     pub replies: Replies,
     /// "Codex", "OpenCode"… for error messages.
@@ -24,7 +24,7 @@ pub struct Rpc {
 }
 
 impl Rpc {
-    pub fn new(stdin: Option<ChildStdin>, name: impl Into<String>) -> Rpc {
+    pub fn new(stdin: Option<Stdin>, name: impl Into<String>) -> Rpc {
         Rpc {
             stdin: Arc::new(Mutex::new(stdin)),
             next: Arc::new(Mutex::new(0)),

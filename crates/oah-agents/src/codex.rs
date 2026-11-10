@@ -7,9 +7,9 @@
 //! with server requests (`item/commandExecution/requestApproval`,
 //! `item/fileChange/requestApproval`), which we answer with `{decision}`.
 
+use oah_transport::Proc;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
-use std::process::Child;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -24,7 +24,7 @@ use crate::jsonrpc::Rpc;
 
 pub struct CodexDriver {
     rpc: Rpc,
-    child: Arc<Mutex<Option<Child>>>,
+    child: Arc<Mutex<Option<Proc>>>,
     state: Arc<Mutex<State>>,
     sink: Sink,
     permission: PermissionMode,
@@ -69,14 +69,14 @@ pub fn policy(mode: PermissionMode) -> (&'static str, &'static str) {
 impl CodexDriver {
     pub fn start(opts: StartOptions, sink: Sink) -> DriverResult<CodexDriver> {
         let program = if opts.binary.trim().is_empty() { AgentKind::Codex.default_binary().to_string() } else { opts.binary.clone() };
-        let mut cmd = oah_transport::command(&Spec {
+        let mut child = oah_transport::spawn(&Spec {
             location: &opts.location,
             cwd: &opts.cwd,
             program: &program,
             args: vec!["app-server".into()],
             env: &opts.env,
-        })?;
-        let mut child = cmd.spawn().map_err(|e| format!("couldn't start Codex: {e}"))?;
+        })
+        .map_err(|e| format!("couldn't start Codex: {e}"))?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let stderr = child.stderr.take().ok_or("no stderr")?;
         let rpc = Rpc::new(child.stdin.take(), "Codex");
@@ -884,10 +884,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn permission_changes_update_approvals_and_sandbox_on_the_same_thread() {
-        use std::process::{Command, Stdio};
         use std::sync::mpsc;
 
-        let mut child = Command::new("cat").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        let loc = oah_core::settings::Location::Local;
+        let mut child = oah_transport::spawn(&Spec { location: &loc, cwd: "/", program: "cat", args: vec![], env: &[] }).unwrap();
         let stdout = child.stdout.take().unwrap();
         let rpc = Rpc::new(child.stdin.take(), "test peer");
         let peer = rpc.clone();

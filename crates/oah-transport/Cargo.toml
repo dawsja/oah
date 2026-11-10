@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 oah-core.workspace = true
+oah-host.workspace = true
+uuid.workspace = true
 serde.workspace = true
 which = "8"
 portable-pty = "0.9"

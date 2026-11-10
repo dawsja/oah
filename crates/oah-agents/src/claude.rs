@@ -8,9 +8,9 @@
 //! messages (text, thinking, tool_use), `user` messages carrying tool results, `control_request`
 //! `can_use_tool` (answered with a `control_response`), and a `result` per turn.
 
+use oah_transport::{Proc, Stdin};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{Child, ChildStdin};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -22,8 +22,8 @@ use crate::driver::{Driver, DriverResult, Prompt, Sink, StartOptions};
 use crate::event::*;
 
 pub struct ClaudeDriver {
-    stdin: Arc<Mutex<Option<ChildStdin>>>,
-    child: Arc<Mutex<Option<Child>>>,
+    stdin: Arc<Mutex<Option<Stdin>>>,
+    child: Arc<Mutex<Option<Proc>>>,
     state: Arc<Mutex<State>>,
     sink: Sink,
     turn: u32,
@@ -109,8 +109,8 @@ impl ClaudeDriver {
             args.extend(["--resume".into(), r.clone()]);
         }
         let program = if opts.binary.trim().is_empty() { AgentKind::Claude.default_binary().to_string() } else { opts.binary.clone() };
-        let mut cmd = oah_transport::command(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &opts.env })?;
-        let mut child = cmd.spawn().map_err(|e| format!("couldn't start Claude Code: {e}"))?;
+        let mut child = oah_transport::spawn(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &opts.env })
+            .map_err(|e| format!("couldn't start Claude Code: {e}"))?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let stderr = child.stderr.take().ok_or("no stderr")?;
         let stdin = Arc::new(Mutex::new(child.stdin.take()));
@@ -311,7 +311,7 @@ struct Translator {
     sink: Sink,
     state: Arc<Mutex<State>>,
     /// To ask Claude for its context breakdown after a turn (none in tests).
-    stdin: Option<Arc<Mutex<Option<ChildStdin>>>>,
+    stdin: Option<Arc<Mutex<Option<Stdin>>>>,
     asked: u32,
 }
 
@@ -912,7 +912,7 @@ pub fn catalog(
 ) -> DriverResult<(Vec<ModelOption>, Vec<SlashCommand>)> {
     let program = if binary.trim().is_empty() { AgentKind::Claude.default_binary().to_string() } else { binary.to_string() };
     let args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"].map(String::from).to_vec();
-    let mut child = oah_transport::command(&Spec { location, cwd, program: &program, args, env })?.spawn().map_err(|e| e.to_string())?;
+    let mut child = oah_transport::spawn(&Spec { location, cwd, program: &program, args, env })?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let (tx, rx) = std::sync::mpsc::channel();
