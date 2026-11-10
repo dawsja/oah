@@ -50,7 +50,7 @@ export function usePhoneVoice(onText: (text: string) => void) {
     busy,
     button: state.state === "ready" || busy ? (
       <button
-        className={`rounded-md grid size-10 shrink-0 place-items-center active:bg-accent ${phase === "recording" ? "bg-red text-white" : "text-muted-foreground"}`}
+        className={`rounded-full grid size-10 shrink-0 place-items-center active:bg-accent ${phase === "recording" ? "bg-red text-white" : "text-muted-foreground"}`}
         aria-label={phase === "recording" ? "Stop dictation" : "Dictate on this phone"}
         disabled={phase === "starting" || phase === "working"}
         onClick={() => void (phase === "recording" ? stop() : start())}

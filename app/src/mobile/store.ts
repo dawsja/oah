@@ -46,7 +46,7 @@ type Store = {
   /** Sends a prompt; with no chat yet (`chatId` null), creates one in `projectId` first. */
   /** The chat it went to, or null (after saying why) when it didn't go. A new chat whose
    *  first message didn't go is removed again. */
-  send(chatId: string | null, text: string, images: Image[], o?: { projectId?: string; agent?: AgentInfo; model?: string }): Promise<string | null>
+  send(chatId: string | null, text: string, images: Image[], o?: { projectId?: string; agent?: AgentInfo; model?: string; effort?: string }): Promise<string | null>
   steer(chatId: string, text: string, images: Image[]): Promise<string | null>
   enqueue(chatId: string, text: string, images: Image[]): void
   unqueue(chatId: string, id: string): void
@@ -176,8 +176,9 @@ export const useMobile = create<Store>((set, get) => ({
     try {
       if (!id) {
         if (!o.projectId || !o.agent) return null
-        const meta = await api.create(o.projectId, o.agent.kind, o.model || null)
+        let meta = await api.create(o.projectId, o.agent.kind, o.model || null)
         id = meta.id
+        if (o.effort) meta = await api.setEffort(meta.id, o.effort)
         // Open it before sending, so every event of the first turn arrives here.
         const snap = await api.open(meta.id)
         set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: replay(snap.events, snap.busy, snap.live) }, chatId: meta.id }))

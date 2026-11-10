@@ -33,7 +33,7 @@ export function UsageButton() {
           </button>
         </PopoverTrigger>
       </Tip>
-      <PopoverContent align="end" className="w-80 p-0">
+      <PopoverContent align="end" className="w-80 overflow-hidden p-0">
         <div className="flex items-center px-3 pt-2.5 pb-1.5 text-[12.5px] font-semibold">
           <span className="min-w-0 truncate" title={usageLocationLabel(location)}>Usage · {usageLocationLabel(location)}</span>
           <button className="rounded-md ml-auto grid size-6 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Refresh usage" onClick={() => void load(true)}>

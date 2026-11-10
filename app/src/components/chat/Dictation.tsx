@@ -144,7 +144,7 @@ export function Dictation({ onText }: { onText: (text: string) => void }) {
       ) : null}
       <Tip content={phase === "recording" ? "Stop and transcribe" : `Dictate${settings?.holdKey ? ` (hold ${settings.holdKey})` : ""}`}>
         <button
-          className={cn("rounded-md grid size-7 place-items-center hover:bg-accent", phase === "recording" ? "bg-red text-white hover:bg-red/90" : "text-muted-foreground hover:text-foreground")}
+          className={cn("rounded-full grid size-7 place-items-center hover:bg-accent", phase === "recording" ? "bg-red text-white hover:bg-red/90" : "text-muted-foreground hover:text-foreground")}
           aria-label={phase === "recording" ? "Stop dictation" : "Dictate"}
           disabled={phase === "working"}
           onClick={() => (phase === "recording" ? stop() : start())}

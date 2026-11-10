@@ -73,7 +73,7 @@ function ChatRow({ meta, project, onMenu }: { meta: ChatMeta; project: Project |
           {meta.pinned ? <Pin className="size-3 shrink-0" aria-label="Pinned" /> : null}
           {meta.sleeping ? <Moon className="size-3 shrink-0" aria-label="Sleeping" /> : null}
           <span>{AGENT_LABEL[meta.agent]}</span>
-          {worktree ? <span className="rounded-sm min-w-0 truncate bg-muted px-1.5 font-mono text-[11.5px]">{worktree}</span> : null}
+          {worktree ? <span className="rounded-full min-w-0 truncate bg-muted px-1.5 font-mono text-[11.5px]">{worktree}</span> : null}
         </div>
       </div>
       {waiting ? (

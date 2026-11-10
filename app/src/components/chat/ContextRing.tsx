@@ -20,7 +20,7 @@ export function ContextRing({ context }: { context: ContextFill | null }) {
     <Popover>
       <PopoverTrigger asChild>
         <button
-          className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded-full grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label={`Context: ${Math.round(pct)}% used`}
           title={`Context: ${formatTokens(context.used)} of ${formatTokens(context.window)} (${Math.round(pct)}%)`}
         >

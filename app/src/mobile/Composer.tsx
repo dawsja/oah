@@ -217,7 +217,7 @@ export function MobileComposer(p: Props) {
                   <SelectTrigger className={TRIGGER} aria-label="Effort">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent position="popper" side="top">
                     {[DEFAULT_EFFORT, ...current.efforts].map((e) => (
                       <SelectItem key={e} value={e} className={ITEM}>
                         {e === DEFAULT_EFFORT ? "Default" : effortLabel(e)}
@@ -234,7 +234,7 @@ export function MobileComposer(p: Props) {
                   <SelectTrigger className={TRIGGER} aria-label="Permissions">
                     <SelectValue placeholder="Choose…" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent position="popper" side="top">
                     {MODES.map((m) => {
                       const Icon = PERMISSION_ICON[m]
                       return (
@@ -298,7 +298,7 @@ export function MobileComposer(p: Props) {
                 {p.modelsFailed ? "The agent didn't list its models. The chat uses its default; close and reopen this to try again." : "Loading models…"}
               </div>
             ) : null}
-            <div className="divide-y rounded-lg border">
+            <div className="divide-y overflow-hidden rounded-lg border">
               {p.models.map((m) => (
                 <button
                   key={m.id}

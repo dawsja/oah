@@ -134,6 +134,7 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
   const [pick, setPick] = useState<string | null>(null)
   const agent = agents.find((a) => a.kind === pick) ?? agents.find((a) => a.kind === preferred) ?? agents[0]
   const [model, setModel] = useState("")
+  const [effort, setEffort] = useState("")
   const { models, load, failed: modelsFailed } = useModels(agent, projectId, NONE)
   const [sending, setSending] = useState(false)
 
@@ -149,7 +150,7 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
               <button
                 key={a.kind}
                 className={cn("rounded-md h-10 border px-3 text-[13px]", agent?.kind === a.kind ? "border-primary bg-primary text-primary-foreground" : "active:bg-accent")}
-                onClick={() => (setPick(a.kind), setModel(""))}
+                onClick={() => (setPick(a.kind), setModel(""), setEffort(""))}
               >
                 {a.name}
               </button>
@@ -167,7 +168,7 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
         placeholder="What should it do?"
         onSend={async (text, images) => {
           setSending(true)
-          const id = await useMobile.getState().send(null, text, images, { projectId, agent, model })
+          const id = await useMobile.getState().send(null, text, images, { projectId, agent, model, effort })
           setSending(false)
           if (id) go(`/chat/${encodeURIComponent(id)}`, true)
           return !!id
@@ -175,8 +176,8 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
         models={models}
         modelsFailed={modelsFailed}
         model={model || agent?.defaultModel || ""}
-        effort=""
-        onModel={(m) => setModel(m)}
+        effort={effort}
+        onModel={(m, e) => (setModel(m), setEffort(e))}
         onModelsOpen={load}
         permission={null}
       />
