@@ -35,12 +35,12 @@ Electron.
   them. The sidebar, the side panel, the terminal and the title bar follow the pane you're in
   (Ctrl+1 and Ctrl+2 move between them, Ctrl+Shift+\ closes one). A chat is on screen once:
   picking one that's in the other pane goes there.
-- **The agent's own CLI.** The Chat | CLI switch in a chat's header (Ctrl+Shift+M) opens the same
+- **The agent's own CLI.** "Open in CLI" in a chat's ··· menu (Ctrl+Shift+M) opens the same
   conversation in the agent's terminal interface (`claude --resume`, `codex resume`,
   `opencode -s`, `agy --conversation`, `grok --resume`), with the chat's model, effort and
   permission mode, where the project is (this computer, the WSL distro, the SSH host). The CLI
   has the session while it's open: the chat's agent stops first (one that's working is asked
-  about), and nothing is sent to the chat until you switch back, leave the CLI, or take the
+  about), and nothing is sent to the chat until you go back ("Back to chat" in the same menu), leave the CLI, or take the
   chat back from a phone ("Close it") or over MCP (`close_session`). Then what was said in the
   CLI is read back from what it saved and becomes part of the chat: the messages, the answers,
   the commands and edits, under a line saying how long the CLI had it; the next message

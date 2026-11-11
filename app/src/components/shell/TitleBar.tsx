@@ -1,7 +1,6 @@
 import { Columns2, PanelLeft, PanelRight, Smartphone } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { Mark, WinClose, WinMax, WinMin } from "@/components/icons"
-import { isRemote, locationLabel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useRemote } from "@/lib/remote"
 import { useApp, useProject } from "@/store/app"
@@ -19,7 +18,6 @@ export function TitleBar() {
   const layout = useApp((s) => s.layout)
   const setLayout = useApp((s) => s.setLayout)
   const project = useProject()
-  const remote = project ? isRemote(project.location) : false
 
   return (
     <header data-tauri-drag-region className="flex h-9 shrink-0 items-center bg-sidebar pl-3 text-[12px]">
@@ -28,7 +26,13 @@ export function TitleBar() {
         <span data-tauri-drag-region className="font-mono text-[12px] font-bold tracking-tight text-brand">oah</span>
       </div>
       <Tip content="Toggle sidebar" side="bottom">
-        <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Toggle sidebar" onClick={() => setLayout({ sidebarWidth: layout.sidebarWidth > 0 ? 0 : 272 })}>
+        {/* Bright while the sidebar is shown, as the side panel's toggle is. */}
+        <button
+          className={cn("rounded-md grid size-7 place-items-center hover:bg-accent hover:text-foreground", layout.sidebarWidth > 0 ? "text-foreground" : "text-muted-foreground")}
+          aria-label="Toggle sidebar"
+          aria-pressed={layout.sidebarWidth > 0}
+          onClick={() => setLayout({ sidebarWidth: layout.sidebarWidth > 0 ? 0 : 272 })}
+        >
           <PanelLeft className="size-3.5" />
         </button>
       </Tip>
@@ -37,11 +41,8 @@ export function TitleBar() {
           <span data-tauri-drag-region className="text-foreground">Settings</span>
         ) : project ? (
           <>
+            {/* Where the project is (its system, its folder) is in the sidebar already. */}
             <span data-tauri-drag-region className="truncate font-medium text-foreground">{project.name}</span>
-            {remote ? (
-              <span data-tauri-drag-region className="rounded-full border border-cyan/30 bg-cyan/10 px-2 py-px text-[11px] text-cyan">{locationLabel(project.location)}</span>
-            ) : null}
-            <span data-tauri-drag-region className="truncate font-mono text-[11px] text-faint">{project.path}</span>
           </>
         ) : null}
       </div>
@@ -55,6 +56,7 @@ export function TitleBar() {
           <button
             className={cn("rounded-md mr-1 grid size-7 place-items-center hover:bg-accent", layout.rightOpen ? "text-foreground" : "text-muted-foreground")}
             aria-label="Toggle side panel"
+            aria-pressed={layout.rightOpen}
             onClick={() => setLayout({ rightOpen: !layout.rightOpen })}
           >
             <PanelRight className="size-3.5" />

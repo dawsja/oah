@@ -3,7 +3,7 @@ import { Check, ChevronDown, ChevronRight, Circle, CornerDownRight, FileText, Fo
 import { AgentGlyph, Mark } from "@/components/icons"
 import { promptText } from "@/components/Prompt"
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { agentChoices } from "@/lib/agents"
 import { toast } from "sonner"
 import { emptyTranscript, type ChatMeta, type ModelOption, type SlashCommand, type PlanItem, type Transcript as T } from "@/lib/chat"
@@ -323,14 +323,15 @@ function ChatHeader({ meta, transcript, model, inCli }: { meta: ChatMeta; transc
       <span className="truncate text-[13px] font-medium">{meta.title || "New chat"}</span>
       {transcript.running ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" /> : null}
       <span className="ml-auto truncate font-mono text-[11px] text-faint">{model}</span>
-      <ModeSwitch meta={meta} inCli={inCli} />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Chat menu">
             <MoreHorizontal className="size-4" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuContent align="end" className="w-auto min-w-56">
+          <ModeItem meta={meta} inCli={inCli} />
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={() => {
               void promptText({ title: "Rename chat", value: meta.title, confirm: "Rename" }).then((t) => {
@@ -360,24 +361,15 @@ function ChatHeader({ meta, transcript, model, inCli }: { meta: ChatMeta; transc
 /** Chat or CLI: the same conversation in oah's chat, or in the agent's own terminal interface.
  *  Going to the CLI hands it the session (the chat's agent stops); coming back ends the CLI,
  *  and the next message here continues from what was said there. */
-function ModeSwitch({ meta, inCli }: { meta: ChatMeta; inCli: boolean }) {
+function ModeItem({ meta, inCli }: { meta: ChatMeta; inCli: boolean }) {
   // An agent that names its sessions itself has none to open before the first message.
   const none = !inCli && !meta.agentSessionId && !STARTS_IN_CLI.includes(meta.agent)
-  const side = "flex h-6 items-center gap-1 rounded-[5px] px-2 text-[11.5px] font-medium text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm disabled:pointer-events-none disabled:opacity-50"
   return (
-    <div role="group" aria-label="Chat or CLI" className="flex shrink-0 items-center rounded-md bg-muted p-0.5">
-      <button className={side} aria-pressed={!inCli} onClick={() => inCli && void leaveCli(meta.id)}>
-        <MessageSquare className="size-3" /> Chat
-      </button>
-      <Tip content={none ? `Send a first message, then ${AGENT_LABEL[meta.agent]}'s CLI can open this chat` : inCli ? "" : `Continue this chat in ${AGENT_LABEL[meta.agent]}'s own CLI (Ctrl+Shift+M)`} side="bottom">
-        {/* A disabled button shows no tip: the span takes the hover. */}
-        <span className="flex">
-          <button className={side} aria-pressed={inCli} disabled={none} onClick={() => !inCli && void enterCli(meta.id)}>
-            <SquareTerminal className="size-3" /> CLI
-          </button>
-        </span>
-      </Tip>
-    </div>
+    <DropdownMenuItem disabled={none} onSelect={() => void (inCli ? leaveCli(meta.id) : enterCli(meta.id))}>
+      {inCli ? <MessageSquare /> : <SquareTerminal />}
+      <span className="flex-1 whitespace-nowrap">{inCli ? "Back to chat" : "Open in CLI"}</span>
+      <DropdownMenuShortcut className="pl-4">Ctrl+Shift+M</DropdownMenuShortcut>
+    </DropdownMenuItem>
   )
 }
 
