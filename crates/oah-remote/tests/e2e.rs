@@ -130,6 +130,7 @@ async fn pairs_by_code_then_connects() {
     assert_eq!(c.call("chats.list", Value::Null).await.unwrap()["device"], "dev1");
     assert!(c.call("settings.set", Value::Null).await.unwrap_err().contains("unknown method"));
     assert!(c.call("chat.rename", Value::Null).await.unwrap_err().contains("mock"), "allowed methods reach the host");
+    assert!(c.call("chat.endCli", Value::Null).await.unwrap_err().contains("mock"), "the phone's Close it reaches the host");
     // Bigger than one Noise message, both ways.
     let image = c.call("chat.readImage", json!({ "chatId": "c1", "path": "/tmp/preview.png" })).await.unwrap();
     assert_eq!(image.as_str().unwrap(), format!("data:image/png;base64,{}", "AAAA".repeat(400_000)));

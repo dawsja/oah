@@ -58,7 +58,7 @@ pub const HOST_METHODS: &[&str] = &[
     "projects.list",
     // → {agents: [{kind, name, defaultModel, permissionMode}], defaultAgent}
     "agents.list",
-    // → {metas, running, busy}
+    // → {metas, running, busy, waiting, cli}
     "chats.list",
     // {projectId, agent?, model?, effort?, cwd?} → meta
     "chat.create",
@@ -80,6 +80,8 @@ pub const HOST_METHODS: &[&str] = &[
     "chat.compact",
     // {chatId}
     "chat.clear",
+    // {chatId} → whether the agent's CLI was open (it's ended; the chat takes messages again)
+    "chat.endCli",
     // {chatId, file} → data: URL
     "chat.image",
     "chat.readImage",
