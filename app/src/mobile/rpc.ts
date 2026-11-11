@@ -36,7 +36,7 @@ export const native = {
   /** Starts the demo desktop inside the app and pairs with it. */
   demo: () => invoke<Desktop>("demo_start"),
   /** How the app was asked to start (screenshots and tests): in the demo, on a screen. */
-  launch: () => invoke<{ demo: boolean; route: string | null; debug?: boolean }>("launch"),
+  launch: () => invoke<{ demo: boolean; route: string | null }>("launch"),
   /** With the address and code the desktop shows. */
   pair: (o: { addresses: string[]; code: string; name: string }) => invoke<Desktop>("pair", { addresses: o.addresses, code: o.code, name: o.name }),
   forget: (id: string) => invoke<void>("forget", { id }),
@@ -48,20 +48,11 @@ export const native = {
   },
   disconnect: () => invoke<void>("disconnect"),
   wake: () => invoke<void>("wake"),
-  /** This app's page in the phone's Settings (an iPhone's Local Network switch). */
-  openSettings: () => invoke<void>("open_settings"),
 }
 
-/** A light tap under the finger. Safari has no `navigator.vibrate`: the iPhone's own haptics do it. */
+/** A light tap under the finger. */
 export function tap() {
-  if (isIOS()) void invoke<void>("haptic").catch(() => {})
-  else navigator.vibrate?.(10)
-}
-
-/** An iPhone keeps apps off the local network until it's allowed in Settings; a connection then
- *  fails as if the desktop weren't there. */
-export function needsLocalNetwork(error: string | null | undefined, ios = isIOS()): boolean {
-  return ios && !!error && /Local Network|No route to host|os error 65\b/i.test(error)
+  navigator.vibrate?.(10)
 }
 
 const rpc = <T>(method: string, params: Record<string, unknown> = {}) => invoke<T>("rpc", { method, params })
@@ -94,16 +85,8 @@ export const api = {
   catalog: (kind: AgentKind, projectId: string | null) => rpc<Catalog>("provider.catalog", { kind, projectId }),
 }
 
-/** An iPhone (or iPad): its WebView is Safari's, which differs from Android's in a few places. */
-export function isIOS(ua = navigator.userAgent): boolean {
-  return /\b(iPhone|iPad|iPod)\b/.test(ua)
-}
-
-/** What this phone calls itself when it pairs: its model, from the WebView's user agent (iOS
- *  doesn't say which iPhone). */
+/** What this phone calls itself when it pairs: its model, from the WebView's user agent. */
 export function phoneName(ua = navigator.userAgent): string {
-  const apple = /\b(iPhone|iPad|iPod)\b/.exec(ua)
-  if (apple) return apple[1]
   if (!/Android/.test(ua)) return "Phone"
   const m = /Android [\d.]+; ([^;)]+?)(?: Build\/[^;)]*)?[;)]/.exec(ua)
   const model = m?.[1]?.trim()

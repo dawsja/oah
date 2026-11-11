@@ -21,8 +21,8 @@ export default defineConfig({
   envPrefix: ["VITE_", "TAURI_ENV_*"],
   build: {
     outDir: "dist-mobile",
-    // Android's WebView (Chromium) and the iPhone's (Safari).
-    target: ["chrome105", "safari17"],
+    // Android's WebView (Chromium).
+    target: ["chrome105"],
     minify: !process.env.TAURI_ENV_DEBUG,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     chunkSizeWarningLimit: 2000,

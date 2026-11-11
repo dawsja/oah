@@ -12,11 +12,10 @@ function apply(theme: Theme) {
   const dark = theme === "dark" || (theme === "system" && (media?.matches ?? true))
   document.documentElement.classList.toggle("dark", dark)
   usePhoneTheme.setState({ theme, dark })
-  // The WebView uses the shared desktop CSS; Android's system bars need matching icon colors,
-  // and an iPhone's window the same theme (or the phone's own, when following it).
+  // The WebView uses the shared desktop CSS; Android's system bars need matching icon colors.
   // One import for every call, so they reach the phone in the order they were made.
   core ??= import("@tauri-apps/api/core")
-  void core.then(({ invoke }) => invoke("phone_theme", { dark, system: theme === "system" })).catch(() => {})
+  void core.then(({ invoke }) => invoke("phone_theme", { dark })).catch(() => {})
 }
 
 export function setPhoneTheme(theme: Theme) {

@@ -24,8 +24,6 @@ use crate::{err, AppState, CmdResult};
 pub struct Remote {
     server: Mutex<Option<Server>>,
     discovery: Mutex<Option<oah_remote::discovery::Beacon>>,
-    /// The same, as a Bonjour service: how an iPhone finds this desktop.
-    bonjour: Mutex<Option<oah_remote::discovery::Bonjour>>,
     /// Why the server isn't running when it should be.
     error: Mutex<Option<String>>,
     identity: OnceLock<Identity>,
@@ -411,15 +409,8 @@ async fn start(app: &AppHandle, port: u16) -> Result<u16, String> {
     if let Err(e) = &discovery {
         eprintln!("oah: nearby discovery unavailable: {e}");
     }
-    // iPhones can't send that broadcast: they browse for the Bonjour service instead.
-    let ips = || addresses().iter().filter_map(|a| a.ip.parse().ok()).collect();
-    let bonjour = oah_remote::discovery::advertise_bonjour(desktop_name(), bound, ips);
-    if let Err(e) = &bonjour {
-        eprintln!("oah: Bonjour discovery unavailable: {e}");
-    }
     let state = app.state::<AppState>();
     *state.remote.discovery.lock().unwrap() = discovery.ok();
-    *state.remote.bonjour.lock().unwrap() = bonjour.ok();
     *state.remote.server.lock().unwrap() = Some(server);
     Ok(bound)
 }
@@ -427,7 +418,6 @@ async fn start(app: &AppHandle, port: u16) -> Result<u16, String> {
 fn stop(app: &AppHandle) {
     let state = app.state::<AppState>();
     state.remote.discovery.lock().unwrap().take();
-    state.remote.bonjour.lock().unwrap().take();
     let server = state.remote.server.lock().unwrap().take();
     drop(server);
 }

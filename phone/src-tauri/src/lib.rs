@@ -5,7 +5,6 @@
 mod appearance;
 mod demo;
 mod images;
-mod nearby;
 mod voice;
 
 use std::path::PathBuf;
@@ -15,12 +14,10 @@ use std::time::Duration;
 use oah_remote::client::{self, Client};
 use oah_remote::pairing;
 use oah_remote::Identity;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::{Manager, State};
-use tauri_plugin_oah_phone::Native;
 use tokio::sync::Notify;
 
 /// The port the desktop listens on unless it was changed there.
@@ -51,8 +48,7 @@ pub struct Desktop {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Saved {
-    /// This phone's private key (base64). The app's data folder is private to the app. Empty on
-    /// an iPhone, where the key is in the Keychain ([`keychain`]).
+    /// This phone's private key (base64). The app's data folder is private to the app.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     device_key: String,
     desktops: Vec<Desktop>,
@@ -77,10 +73,8 @@ pub struct AppState {
 impl AppState {
     fn load(path: PathBuf) -> AppState {
         let mut saved: Saved = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-        let stored = keychain::load().unwrap_or_else(|| saved.device_key.clone());
-        let identity = Identity::from_private_b64(&stored).unwrap_or_else(Identity::generate);
-        // Once the Keychain has the key, the file doesn't.
-        saved.device_key = if keychain::save(&identity.private_b64()) { String::new() } else { identity.private_b64() };
+        let identity = Identity::from_private_b64(&saved.device_key).unwrap_or_else(Identity::generate);
+        saved.device_key = identity.private_b64();
         let state = AppState { path, saved: Mutex::new(saved), identity, live: Mutex::new(None), demo: Mutex::new(None) };
         state.save();
         state
@@ -107,44 +101,6 @@ impl AppState {
             l.task.abort();
         }
     }
-}
-
-/// On an iPhone the phone's key lives in the Keychain rather than in the app's files, which
-/// every backup of the phone copies. Elsewhere there's no such place and the file keeps it.
-mod keychain {
-    #[cfg(target_os = "ios")]
-    fn entry() -> Option<keyring::Entry> {
-        keyring::Entry::new("dev.oah.mobile", "device-key").ok()
-    }
-
-    /// The saved key, if this phone keeps it in a keychain.
-    pub fn load() -> Option<String> {
-        #[cfg(target_os = "ios")]
-        return entry()?.get_password().ok();
-        #[cfg(not(target_os = "ios"))]
-        None
-    }
-
-    /// Whether the key is in the keychain now.
-    pub fn save(_key: &str) -> bool {
-        #[cfg(target_os = "ios")]
-        return entry().is_some_and(|e| e.get_password().is_ok_and(|k| k == _key) || e.set_password(_key).is_ok());
-        #[cfg(not(target_os = "ios"))]
-        false
-    }
-}
-
-/// Runs a command of the iPhone's native plugin (`phone/plugin`), off the async runtime: it
-/// waits for Swift, which often answers from the main thread.
-pub(crate) async fn native<T: DeserializeOwned + Send + 'static>(
-    app: &tauri::AppHandle,
-    command: &'static str,
-    payload: Value,
-) -> Result<T, String> {
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || app.state::<Native<tauri::Wry>>().run(command, payload))
-        .await
-        .map_err(|e| e.to_string())?
 }
 
 /// `192.168.1.20` → `192.168.1.20:7787`; `host:port` and `[v6]:port` stay as they are.
@@ -181,54 +137,17 @@ async fn demo_start(state: State<'_, AppState>) -> Result<Desktop, String> {
 }
 
 /// How the app was asked to start: `OAH_DEMO=1` opens the demo, `OAH_ROUTE` a screen (`/settings`,
-/// `/chat/<id>`), `OAH_DEBUG=1` shows the page's sizes on it. For screenshots and tests that
-/// drive the real app.
+/// `/chat/<id>`). For screenshots and tests that drive the real app.
 #[tauri::command]
 fn launch() -> Value {
     let on = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
-    json!({ "demo": on("OAH_DEMO"), "route": std::env::var("OAH_ROUTE").ok().filter(|r| r.starts_with('/')), "debug": on("OAH_DEBUG") })
+    json!({ "demo": on("OAH_DEMO"), "route": std::env::var("OAH_ROUTE").ok().filter(|r| r.starts_with('/')) })
 }
 
+/// Desktops near this phone, from a UDP broadcast. Only a hint: pairing still needs the code.
 #[tauri::command]
-async fn discover(app: tauri::AppHandle) -> Result<Vec<oah_remote::discovery::Found>, String> {
-    nearby::discover(&app).await
-}
-
-/// A light tap under the finger (a long press took). Android's WebView vibrates by itself.
-#[tauri::command]
-async fn haptic(app: tauri::AppHandle) -> Result<(), String> {
-    if cfg!(target_os = "ios") {
-        native::<Value>(&app, "haptic", Value::Null).await?;
-    }
-    Ok(())
-}
-
-/// Has an iPhone's web view work its size out again: the page asks when it finds itself
-/// shorter than the screen (the plugin's `relayout` says why that happens).
-#[tauri::command]
-async fn relayout(app: tauri::AppHandle) -> Result<(), String> {
-    if cfg!(target_os = "ios") {
-        native::<Value>(&app, "relayout", Value::Null).await?;
-    }
-    Ok(())
-}
-
-/// Where the iPhone's web view sits in its window, in lines of text (`OAH_DEBUG=1` shows them).
-#[tauri::command]
-async fn debug_layout(app: tauri::AppHandle) -> Result<Value, String> {
-    if cfg!(target_os = "ios") {
-        return native(&app, "layout", Value::Null).await;
-    }
-    Ok(json!({ "lines": [] }))
-}
-
-/// Opens this app's page in the phone's Settings (an iPhone's Local Network switch is there).
-#[tauri::command]
-async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
-    if cfg!(target_os = "ios") {
-        native::<Value>(&app, "openSettings", Value::Null).await?;
-    }
-    Ok(())
+async fn discover() -> Result<Vec<oah_remote::discovery::Found>, String> {
+    oah_remote::discovery::discover().await
 }
 
 #[tauri::command]
@@ -308,7 +227,7 @@ fn connect(app: tauri::AppHandle, state: State<AppState>, id: String, on_event: 
             // port): look for it nearby too. It's safe to try whoever answers; only the desktop
             // with this key can finish the handshake.
             if attempt >= 2 {
-                if let Ok(found) = nearby::discover(&app).await {
+                if let Ok(found) = oah_remote::discovery::discover().await {
                     for f in found {
                         if !addresses.contains(&f.address) {
                             addresses.push(f.address);
@@ -450,21 +369,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(appearance::init())
         .plugin(images::init())
-        .plugin(tauri_plugin_oah_phone::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let dir = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
             app.manage(AppState::load(dir.join("desktops.json")));
             app.manage(voice::Voice::new(dir.join("speech")));
-            // The speech model is a 731 MB download: not something for the phone's backups.
-            if cfg!(target_os = "ios") {
-                let (app, speech) = (app.handle().clone(), dir.join("speech"));
-                tauri::async_runtime::spawn(async move {
-                    let _ = std::fs::create_dir_all(&speech);
-                    let _ = native::<Value>(&app, "excludeFromBackup", json!({ "path": speech })).await;
-                });
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -474,10 +384,6 @@ pub fn run() {
             demo_start,
             launch,
             discover,
-            haptic,
-            relayout,
-            debug_layout,
-            open_settings,
             request_pairing,
             pair,
             forget,

@@ -78,7 +78,7 @@ export type ComposerProps = {
 const PERMISSIONS: PermissionMode[] = ["ask", "acceptEdits", "plan", "fullAccess"]
 
 export type { Attachment } from "@/lib/attachments"
-const MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
+const MAC = /Mac/.test(navigator.userAgent)
 /** The send-now chord's modifier, as shown. */
 export const STEER_KEY = MAC ? "⌘" : "Ctrl"
 

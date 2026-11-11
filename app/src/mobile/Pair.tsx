@@ -6,12 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
-import { isIOS, native, needsLocalNetwork, phoneName, type NearbyDesktop } from "./rpc"
+import { native, phoneName, type NearbyDesktop } from "./rpc"
 import { back, go } from "./route"
 import { useMobile } from "./store"
-
-/** Set once a search for nearby computers has worked on this iPhone. */
-const SEARCHED = "oah.mobile.searched"
 
 export function PairScreen() {
   const hasDesktops = useMobile((s) => s.desktops.length > 0)
@@ -26,23 +23,14 @@ export function PairScreen() {
   const [scanError, setScanError] = useState<string | null>(null)
   const [selected, setSelected] = useState<NearbyDesktop | null>(null)
   const [requesting, setRequesting] = useState(false)
-  // An iPhone asks "find devices on your local network?" the first time the app looks, so the
-  // first look waits to be asked for. After that it's as on Android: straight away.
-  const [searched, setSearched] = useState(() => {
-    try { return !isIOS() || localStorage.getItem(SEARCHED) === "1" } catch { return true }
-  })
   const scan = async () => {
     setScanning(true)
     setScanError(null)
-    try {
-      setNearby(await native.discover())
-      setSearched(true)
-      try { localStorage.setItem(SEARCHED, "1") } catch { /* It asks again next time. */ }
-    }
+    try { setNearby(await native.discover()) }
     catch (e) { setScanError(String(e).replace(/^Error: /, "")) }
     finally { setScanning(false) }
   }
-  useEffect(() => { if (searched) void scan() }, [])
+  useEffect(() => { void scan() }, [])
   const invite = async (desktop: NearbyDesktop) => {
     setAddress(desktop.address)
     setCode("")
@@ -108,14 +96,13 @@ export function PairScreen() {
         <div className="mb-6 rounded-md border p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[13px] font-medium">Nearby computers</span>
-            <Button size="sm" variant={searched ? "ghost" : "default"} disabled={scanning || requesting || busy} onClick={() => void scan()}>{scanning ? "Searching…" : searched ? "Refresh" : "Search"}</Button>
+            <Button size="sm" variant="ghost" disabled={scanning || requesting || busy} onClick={() => void scan()}>{scanning ? "Searching…" : "Refresh"}</Button>
           </div>
           {nearby.map((d) => <div key={d.address} className="flex items-center justify-between gap-2 py-2">
             <div className="min-w-0"><div className="truncate text-[13px]">{d.name}</div><div className="font-mono text-[11px] text-muted-foreground">{d.address}</div></div>
             <Button size="sm" disabled={requesting || busy} onClick={() => void invite(d)}>Connect</Button>
           </div>)}
-          {!scanning && !nearby.length ? <p className="text-[12px] text-muted-foreground">{scanError ?? (searched ? "No computers found. Turn on phone access in oah on the desktop. You can also enter its address below." : "Search this network for computers running oah. Your iPhone will ask you to allow it.")}</p> : null}
-          {!scanning && needsLocalNetwork(scanError) ? <Button size="sm" variant="outline" className="mt-2" onClick={() => void native.openSettings()}>Open Settings</Button> : null}
+          {!scanning && !nearby.length ? <p className="text-[12px] text-muted-foreground">{scanError ?? "No computers found. Turn on phone access in oah on the desktop. You can also enter its address below."}</p> : null}
           <p className="mt-2 text-[11px] text-faint">Ethernet and Wi-Fi can work together. Guest Wi-Fi or a firewall may block discovery.</p>
         </div>
 
@@ -166,8 +153,7 @@ export function PairScreen() {
         </label>
         <Input id="name" className="h-11 text-[14px]" value={name} onChange={(e) => setName(e.target.value)} />
 
-        {error ? <div className="mt-5 rounded-md border border-red/40 bg-red/5 px-3 py-2.5 text-[13px] leading-relaxed text-red">{error}{needsLocalNetwork(error) ? " If oah isn't allowed on the local network, turn it on in Settings." : ""}</div> : null}
-        {needsLocalNetwork(error) ? <Button variant="outline" className="mt-2 h-11" onClick={() => void native.openSettings()}>Open Settings</Button> : null}
+        {error ? <div className="mt-5 rounded-md border border-red/40 bg-red/5 px-3 py-2.5 text-[13px] leading-relaxed text-red">{error}</div> : null}
 
         <Button size="lg" className="mt-6 h-12 w-full text-[14px] disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100" disabled={!canPair} onClick={() => void pair()}>
           {busy ? <Loader2 className="animate-spin" /> : null}

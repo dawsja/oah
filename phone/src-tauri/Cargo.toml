@@ -20,13 +20,8 @@ serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12", features = [] }
 tauri-plugin-clipboard-manager = "2"
-tauri-plugin-oah-phone = { path = "../plugin" }
 tauri-plugin-opener = "2"
 tokio = { version = "1", features = ["sync", "time", "macros", "net", "rt"] }
-
-# The iPhone keeps its key in the Keychain.
-[target.'cfg(target_os = "ios")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
 
 # Only 64-bit ARM phones load the large voice model. Other ABIs can still use chat.
 [target.'cfg(target_arch = "aarch64")'.dependencies]

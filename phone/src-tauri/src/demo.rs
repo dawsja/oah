@@ -1,8 +1,8 @@
 //! A desktop to try the app against, inside the app: for someone who doesn't have oah on a
-//! computer yet (Apple's reviewers among them), and for driving the real app in a test. It is
-//! the real server (`oah_remote::server`) on this phone's loopback with a scripted host behind
-//! it, so pairing, the session and every screen work as they do against a real desktop. What it
-//! shows is `demo/demo.json`; nothing is saved, and it's gone when the app closes.
+//! computer yet, and for driving the real app in a test. It is the real server
+//! (`oah_remote::server`) on this phone's loopback with a scripted host behind it, so pairing,
+//! the session and every screen work as they do against a real desktop. What it shows is
+//! `demo/demo.json`; nothing is saved, and it's gone when the app closes.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

@@ -1,5 +1,7 @@
 //! Native image actions on the viewing phone, independent of the connected desktop.
-use serde_json::{json, Value};
+#[cfg(target_os = "android")]
+use serde_json::json;
+use serde_json::Value;
 #[cfg(target_os = "android")]
 use tauri::Manager;
 use tauri::{
@@ -33,11 +35,7 @@ pub async fn image_action(app: tauri::AppHandle, action: String, name: String, m
     }
     #[cfg(not(target_os = "android"))]
     {
-        // An iPhone saves through the share sheet (Save Image, Save to Files…).
-        if cfg!(target_os = "ios") {
-            let command = if action == "save" { "saveImage" } else { "copyImage" };
-            return crate::native(&app, command, json!({ "name": name, "data": data })).await;
-        }
+        let _ = (app, name, data);
         Err("Image actions need the phone app".into())
     }
 }

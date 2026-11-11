@@ -24,8 +24,7 @@ oah-git.workspace = true
 oah-transport.workspace = true
 oah-voice.workspace = true
 oah-mcp.workspace = true
-# The desktop advertises itself over Bonjour too, for iPhones.
-oah-remote = { workspace = true, features = ["mdns"] }
+oah-remote.workspace = true
 base64 = "0.22"
 gethostname = "1"
 if-addrs = "0.15"
