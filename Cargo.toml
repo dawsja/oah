@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "app/src-tauri", "phone/src-tauri", "phone/plugin"]
 
 [workspace.package]
-version = "0.3.13"
+version = "0.3.14"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/dawsja/oah"
