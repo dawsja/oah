@@ -27,6 +27,29 @@ pub struct CliOptions {
     /// Reasoning effort (`low` … `max`); none is the model's default.
     pub effort: Option<String>,
     pub permission: PermissionMode,
+    /// Codex: run with an app server of its own (`--no-daemon`), not the one it otherwise
+    /// leaves running in the background, which would keep the thread to itself after the CLI
+    /// is closed. For a Codex that has the flag ([`runs_alone`]).
+    pub alone: bool,
+}
+
+/// Whether this Codex's CLI can run without its shared background server (`--no-daemon`):
+/// asked of the CLI itself, once per system and binary.
+pub fn runs_alone(t: &Target) -> bool {
+    static KNOWN: std::sync::Mutex<Vec<(String, bool)>> = std::sync::Mutex::new(Vec::new());
+    if t.kind != AgentKind::Codex {
+        return false;
+    }
+    let program = if t.binary.trim().is_empty() { t.kind.default_binary() } else { t.binary.trim() };
+    let key = format!("{:?}|{program}", t.location);
+    if let Some((_, known)) = KNOWN.lock().unwrap().iter().find(|(k, _)| *k == key) {
+        return *known;
+    }
+    let spec = Spec { location: t.location, cwd: t.cwd, program, args: vec!["resume".into(), "--help".into()], env: t.env };
+    let Ok(help) = oah_transport::run(&spec, None, Duration::from_secs(20)) else { return false };
+    let alone = help.stdout.contains("--no-daemon");
+    KNOWN.lock().unwrap().push((key, alone));
+    alone
 }
 
 /// Whether the CLI starts a new conversation under an id it's given. The others name their
@@ -75,6 +98,9 @@ pub fn args(o: &CliOptions) -> Vec<String> {
             };
             flag(&mut a, "-a", approval);
             flag(&mut a, "-s", sandbox);
+            if o.alone {
+                a.push("--no-daemon".into());
+            }
             if let Some(m) = model {
                 flag(&mut a, "-m", m);
             }
@@ -592,7 +618,7 @@ mod tests {
     use std::io::Write;
 
     fn opts(kind: AgentKind, session: Session, permission: PermissionMode) -> CliOptions {
-        CliOptions { kind, session, model: Some("m1".into()), effort: Some("high".into()), permission }
+        CliOptions { kind, session, model: Some("m1".into()), effort: Some("high".into()), permission, alone: false }
     }
 
     fn resume() -> Session {
@@ -615,6 +641,7 @@ mod tests {
             model: Some(" ".into()),
             effort: None,
             permission: PermissionMode::Ask,
+            alone: false,
         };
         assert_eq!(args(&bare), ["--resume", "abc-123", "--permission-mode", "default"]);
     }
@@ -633,6 +660,18 @@ mod tests {
             args(&opts(AgentKind::Codex, resume(), PermissionMode::AcceptEdits))[2..6],
             ["-a", "on-request", "-s", "workspace-write"]
         );
+    }
+
+    /// Codex with a server of its own, where it can: none left behind holding the thread.
+    #[test]
+    fn codex_runs_without_its_background_server() {
+        let alone = CliOptions { alone: true, ..opts(AgentKind::Codex, resume(), PermissionMode::Ask) };
+        assert_eq!(args(&alone)[..7], ["resume", "abc-123", "-a", "on-request", "-s", "read-only", "--no-daemon"]);
+        assert!(!args(&CliOptions { alone: true, ..opts(AgentKind::Claude, resume(), PermissionMode::Ask) })
+            .contains(&"--no-daemon".to_string()));
+        // Only Codex is asked whether it can.
+        let t = Target { kind: AgentKind::Grok, location: &Location::Local, cwd: "/", binary: "", env: &[] };
+        assert!(!runs_alone(&t));
     }
 
     #[test]
@@ -694,7 +733,14 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("oah-real-cli-{}-{nanos}", kind.default_binary()));
             std::fs::create_dir_all(&dir).unwrap();
             let id = format!("{:08x}-0000-4000-8000-{:012x}", std::process::id(), nanos & 0xffff_ffff_ffff);
-            let o = CliOptions { kind, session: Session::New(id.clone()), model: None, effort: None, permission: PermissionMode::Ask };
+            let o = CliOptions {
+                kind,
+                session: Session::New(id.clone()),
+                model: None,
+                effort: None,
+                permission: PermissionMode::Ask,
+                alone: false,
+            };
             let mut e = vec![];
             env(kind, o.permission, &mut e);
             let spec =
@@ -785,6 +831,15 @@ mod tests {
         pty: std::sync::Arc<oah_transport::pty::Pty>,
         screen: std::sync::Arc<std::sync::Mutex<String>>,
         ended: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    /// Closing the terminal ends the CLI, as closing it in the app does (the thread answering
+    /// for the terminal keeps the pty itself alive a little longer).
+    #[cfg(unix)]
+    impl Drop for Live {
+        fn drop(&mut self) {
+            self.pty.kill();
+        }
     }
 
     #[cfg(unix)]
@@ -904,6 +959,7 @@ mod tests {
             model: Some("haiku".into()),
             effort: None,
             permission: PermissionMode::Ask,
+            alone: false,
         };
         let cli = Live::open(&t, args(&o).into_iter().chain(w.args.clone()).collect());
         let seen = || visits(&std::fs::read_to_string(&w.log).unwrap_or_default());
@@ -971,8 +1027,10 @@ mod tests {
             model: model.map(String::from),
             effort: None,
             permission: PermissionMode::Ask,
+            alone: runs_alone(t),
         };
         let also = "Also remember a second code word, KIWI-3. Reply with just OK.";
+        println!("the CLI's arguments: {:?}", args(&o));
         {
             let cli = Live::open(t, args(&o));
             cli.until("it draws", 60, || cli.screen.lock().unwrap().len() > 200);
@@ -1090,6 +1148,7 @@ mod tests {
             model: None,
             effort: Some("low".into()),
             permission: PermissionMode::Ask,
+            alone: runs_alone(&t),
         };
         let cli = Live::open(&t, args(&o));
         cli.until("it draws", 60, || cli.screen.lock().unwrap().len() > 200);
@@ -1122,6 +1181,25 @@ mod tests {
         if signed_in {
             assert!(both.contains("PLUM-7") && both.contains("KIWI-3"), "{both}");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The handover with the real Codex, on this computer: `OAH_TEST_CODEX=<codex>
+    /// [OAH_TEST_CODEX_HOME=<a Codex home>] cargo test -p oah-agents real_codex_handover --
+    /// --ignored --nocapture`. Codex has to have a model that answers: its sign-in, or a home
+    /// whose `config.toml` points it at another provider (a stand-in that answers "OK", and
+    /// with the code words in the conversation when asked which, tells as much).
+    #[test]
+    #[ignore]
+    #[cfg(unix)]
+    fn real_codex_handover() {
+        let Ok(binary) = std::env::var("OAH_TEST_CODEX") else { return println!("set OAH_TEST_CODEX to the codex to run") };
+        let dir = scratch("codex");
+        let e: Vec<EnvVar> = std::env::var("OAH_TEST_CODEX_HOME")
+            .into_iter()
+            .map(|h| EnvVar { key: "CODEX_HOME".into(), value: h, in_keychain: false })
+            .collect();
+        handover(&Target { kind: AgentKind::Codex, location: &place(), cwd: dir.to_str().unwrap(), binary: &binary, env: &e }, None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1204,7 +1282,8 @@ while ($true) {
 
         // One visit to the CLI on `session`: what its screen showed (escape codes out), and how it ended.
         let visit = |session: Session, say: &str| {
-            let o = CliOptions { kind: AgentKind::Claude, session, model: None, effort: None, permission: PermissionMode::Ask };
+            let o =
+                CliOptions { kind: AgentKind::Claude, session, model: None, effort: None, permission: PermissionMode::Ask, alone: false };
             let spec = command_spec(&Spec { location: t.location, cwd: t.cwd, program: t.binary, args: args(&o), env: t.env }).unwrap();
             let (tx, rx) = std::sync::mpsc::channel();
             let pty = Pty::spawn(&spec, 160, 30, move |ev| drop(tx.send(ev))).unwrap();

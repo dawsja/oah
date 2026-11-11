@@ -946,18 +946,20 @@ impl Chats {
             .filter(|m| !m.is_empty())
             .or_else(|| Some(project.default_model.clone()).filter(|m| !m.is_empty()))
             .or_else(|| Some(provider.default_model.clone()).filter(|m| !m.is_empty()));
+        let mut env = crate::secrets::resolve(&crate::secrets::scope(meta.agent), &provider.env);
+        cli::env(meta.agent, permission, &mut env);
+        let binary = provider.binary_on(&project.location);
+        let program = if binary.trim().is_empty() { meta.agent.default_binary() } else { binary.trim() };
+        let cwd = if meta.cwd.is_empty() { project.path.clone() } else { meta.cwd.clone() };
+        let target = cli::Target { kind: meta.agent, location: &project.location, cwd: &cwd, binary: &binary, env: &env };
         let opts = cli::CliOptions {
             kind: meta.agent,
             session: session.clone(),
             model,
             effort: Some(meta.effort.clone()).filter(|e| !e.is_empty()),
             permission,
+            alone: cli::runs_alone(&target),
         };
-        let mut env = crate::secrets::resolve(&crate::secrets::scope(meta.agent), &provider.env);
-        cli::env(meta.agent, permission, &mut env);
-        let binary = provider.binary_on(&project.location);
-        let program = if binary.trim().is_empty() { meta.agent.default_binary() } else { binary.trim() };
-        let cwd = if meta.cwd.is_empty() { project.path.clone() } else { meta.cwd.clone() };
         // The CLI notes the conversations it's on, where it can: a `/clear` there is followed.
         let watch = cli::watch(meta.agent, &project.location, &uuid::Uuid::new_v4().simple().to_string());
         let mut args = cli::args(&opts);
@@ -992,7 +994,6 @@ impl Chats {
             cli::Session::Resume(id) => (id.clone(), false),
             cli::Session::New(id) => (id.clone(), true),
         };
-        let target = cli::Target { kind: meta.agent, location: &project.location, cwd: &cwd, binary: &binary, env: &env };
         let mark = cli::mark(&target, (!preset).then_some(opened_on.as_str()), now_ms());
         let run = self.cli_runs.fetch_add(1, Ordering::Relaxed) + 1;
         // Held until the CLI is in the map, so an instant exit isn't reported before it is.

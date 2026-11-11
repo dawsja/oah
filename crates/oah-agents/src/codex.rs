@@ -66,17 +66,47 @@ pub fn policy(mode: PermissionMode) -> (&'static str, &'static str) {
     }
 }
 
+/// What Codex says when a thread is open in another of its app servers: one writes a thread
+/// at a time.
+const OTHER_WRITER: &str = "already has an active writer";
+
 impl CodexDriver {
     pub fn start(opts: StartOptions, sink: Sink) -> DriverResult<CodexDriver> {
+        // A try that fails says nothing to the chat (its process ending isn't the chat's agent
+        // exiting).
+        let attempt = |opts: StartOptions| {
+            let heard = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let own: Sink = {
+                let (heard, sink) = (heard.clone(), sink.clone());
+                Arc::new(move |e| {
+                    if heard.load(std::sync::atomic::Ordering::SeqCst) {
+                        sink(e)
+                    }
+                })
+            };
+            Self::start_once(opts, own).inspect_err(|_| heard.store(false, std::sync::atomic::Ordering::SeqCst))
+        };
+        // The thread was just open in Codex's own CLI: its app server may take a moment to let
+        // go of it as it ends.
+        let until = std::time::Instant::now() + Duration::from_secs(6);
+        loop {
+            match attempt(opts.clone()) {
+                Err(e) if opts.resume.is_some() && e.contains(OTHER_WRITER) => {
+                    if std::time::Instant::now() >= until {
+                        return Err("This chat's thread is open in another Codex: its own CLI in a terminal, or the server Codex keeps running in the background after one. Close it there (`codex app-server daemon stop` ends the background server), then send again.".into());
+                    }
+                    thread::sleep(Duration::from_millis(500));
+                }
+                r => return r,
+            }
+        }
+    }
+
+    fn start_once(opts: StartOptions, sink: Sink) -> DriverResult<CodexDriver> {
+        let args = vec!["app-server".to_string()];
         let program = if opts.binary.trim().is_empty() { AgentKind::Codex.default_binary().to_string() } else { opts.binary.clone() };
-        let mut child = oah_transport::spawn(&Spec {
-            location: &opts.location,
-            cwd: &opts.cwd,
-            program: &program,
-            args: vec!["app-server".into()],
-            env: &opts.env,
-        })
-        .map_err(|e| format!("couldn't start Codex: {e}"))?;
+        let mut child = oah_transport::spawn(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &opts.env })
+            .map_err(|e| format!("couldn't start Codex: {e}"))?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let stderr = child.stderr.take().ok_or("no stderr")?;
         let rpc = Rpc::new(child.stdin.take(), "Codex");
