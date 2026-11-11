@@ -1,0 +1,86 @@
+name: iOS
+
+# The iPhone app (phone/, built for iOS). No Mac stands behind this repository, so everything
+# that needs Xcode happens here, and for now only when asked (Actions → iOS → Run workflow):
+#
+#   project   generates the Xcode project (`tauri ios init` → phone/src-tauri/gen/apple) and
+#             uploads it as an artifact. It's generated once and then committed, like
+#             gen/android; this is how it gets made without a Mac. It also tries a simulator
+#             build and prints the tools' versions and options, so the log says what the next
+#             step needs.
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "What to run"
+        type: choice
+        options: [project]
+        default: project
+
+permissions:
+  contents: read
+
+jobs:
+  project:
+    if: inputs.job == 'project'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios
+      - name: Install
+        run: |
+          (cd app && bun install --frozen-lockfile)
+          (cd phone && bun install --frozen-lockfile)
+      - name: Tools
+        working-directory: phone
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+          cmake --version || true
+          xcrun simctl list devices available | grep -i iphone | head -n 20 || true
+          bun tauri --version
+          bun tauri ios init --help
+          bun tauri ios build --help
+      - name: Generate the Xcode project
+        working-directory: phone
+        run: bun tauri ios init
+      - name: Icons
+        working-directory: phone
+        # An iPhone's icon can't be transparent: the mark goes on the brand's ink.
+        run: |
+          bun tauri icon ../assets/png/icon/oah-icon-dark-1024.png --ios-color '#0E0E0F' -o "$RUNNER_TEMP/icons"
+          ls -R "$RUNNER_TEMP/icons" | head -n 80
+      - name: What was generated
+        working-directory: phone/src-tauri
+        run: |
+          find gen/apple -type f -not -path '*/build/*' -not -path '*/Externals/*' | sort
+          echo "--- project.yml"; cat gen/apple/project.yml
+          echo "--- Info.plist"; cat gen/apple/*_iOS/Info.plist
+          echo "--- entitlements"; cat gen/apple/*_iOS/*.entitlements || true
+          echo "--- .gitignore"; cat gen/apple/.gitignore || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oah-ios-project
+          include-hidden-files: true
+          path: |
+            phone/src-tauri/gen/apple
+            !phone/src-tauri/gen/apple/build
+            !phone/src-tauri/gen/apple/Externals
+            ${{ runner.temp }}/icons
+          if-no-files-found: error
+      # Not expected to pass first time: its log is what's wanted (does the Swift plugin
+      # compile, does the voice engine build for iOS, where does the app end up).
+      - name: Simulator build (to see how far it gets)
+        working-directory: phone
+        continue-on-error: true
+        run: |
+          bun tauri ios build --debug --target aarch64-sim
+          find src-tauri/gen/apple/build -maxdepth 4 -name '*.app' -o -maxdepth 4 -name '*.ipa' | head -n 20
