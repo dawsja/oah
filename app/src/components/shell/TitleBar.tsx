@@ -1,4 +1,4 @@
-import { PanelLeft, PanelRight, Smartphone } from "lucide-react"
+import { Columns2, PanelLeft, PanelRight, Smartphone } from "lucide-react"
 import { Tip } from "@/components/Tip"
 import { Mark, WinClose, WinMax, WinMin } from "@/components/icons"
 import { isRemote, locationLabel } from "@/lib/types"
@@ -49,6 +49,7 @@ export function TitleBar() {
       <PhoneButton />
       <UsageButton />
       <TerminalButton />
+      {view === "chat" ? <SplitButton /> : null}
       {view === "chat" ? (
         <Tip content="Toggle side panel" side="bottom">
           <button
@@ -75,6 +76,25 @@ export function TitleBar() {
         </button>
       </div>
     </header>
+  )
+}
+
+/** A second chat beside this one, or back to one pane (the active pane closes). */
+function SplitButton() {
+  const two = useApp((s) => s.panes.length > 1)
+  const project = useProject()
+  if (!project) return null
+  return (
+    <Tip content={two ? "Close the active pane (Ctrl+Shift+\\)" : "Split: a second chat beside this one (Ctrl+\\)"} side="bottom">
+      <button
+        className={cn("rounded-md grid size-7 place-items-center hover:bg-accent", two ? "bg-accent text-foreground" : "text-muted-foreground")}
+        aria-label={two ? "Close the active pane" : "Split into two panes"}
+        aria-pressed={two}
+        onClick={() => (two ? useApp.getState().closePane() : useApp.getState().splitPane())}
+      >
+        <Columns2 className="size-3.5" />
+      </button>
+    </Tip>
   )
 }
 

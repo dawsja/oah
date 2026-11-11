@@ -38,10 +38,10 @@ function flush() {
   }
 }
 
-window.addEventListener("beforeunload", flush)
+// (No window where the stores are only imported: tests.)
+if (typeof window !== "undefined") window.addEventListener("beforeunload", flush)
 
-/** The chat's draft, or a new chat's in `projectId` (and worktree `cwd`). */
-export const draftKey = (chatId: string | null, projectId: string, cwd?: string | null) => (chatId ? `chat:${chatId}` : `new:${projectId}:${cwd ?? ""}`)
+export { draftKey } from "@/lib/panes"
 
 export const drafts = {
   get(key: string): { text: string; images: Attachment[] } {
@@ -55,6 +55,20 @@ export const drafts = {
     if (text) texts[key] = { text, at: Date.now() }
     else delete texts[key]
     if (!timer) timer = setTimeout(flush, 400)
+  },
+
+  /** Trades two keys' drafts (a pane's new-chat key changed under it, see `draftSwaps`). */
+  swap(a: string, b: string) {
+    const [ta, tb, ia, ib] = [texts[a], texts[b], images.get(a), images.get(b)]
+    const put = (key: string, text: Saved | undefined, imgs: Attachment[] | undefined) => {
+      if (text) texts[key] = text
+      else delete texts[key]
+      if (imgs?.length) images.set(key, imgs)
+      else images.delete(key)
+    }
+    put(a, tb, ib)
+    put(b, ta, ia)
+    if (ta || tb) flush()
   },
 
   drop(key: string) {

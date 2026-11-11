@@ -145,10 +145,7 @@ impl AcpDriver {
             // and oah answers what its mode allows (Accept edits, Full access) by itself, so the
             // mode can change mid-chat. 1.x reads OPENCODE_PERMISSION; 2.x ignores it and takes the
             // rule only as config (OPENCODE_CONFIG_CONTENT). Your own permission settings win.
-            if !env.iter().any(|e| e.key == "OPENCODE_PERMISSION") {
-                env.push(EnvVar { key: "OPENCODE_PERMISSION".into(), value: ASK_FOR_EDITS_AND_COMMANDS.into(), in_keychain: false });
-                with_ask_config(&mut env);
-            }
+            opencode_rule(&mut env, ASK_FOR_EDITS_AND_COMMANDS);
         }
         if kind == AgentKind::Antigravity {
             crate::antigravity::acp_env(&mut env);
@@ -1457,6 +1454,140 @@ pub(crate) fn acp_commands(v: &Value) -> Vec<SlashCommand> {
         .collect()
 }
 
+/// What an agent replays of a saved session (`session/load`): its `session/update`s, in
+/// order, from a short-lived agent started where the session's folder is. For reading back a
+/// conversation the chat's driver wasn't there for (it was open in the agent's own CLI).
+pub fn replay(opts: &StartOptions, session: &str) -> DriverResult<Vec<Value>> {
+    let kind = opts.kind;
+    let program = match opts.binary.trim() {
+        "" => kind.default_binary().to_string(),
+        b => b.to_string(),
+    };
+    let args = if kind == AgentKind::Grok { crate::grok::acp_args() } else { vec!["acp".to_string()] };
+    let mut env = opts.env.clone();
+    match kind {
+        AgentKind::Antigravity => crate::antigravity::acp_env(&mut env),
+        AgentKind::Grok => crate::grok::acp_env(&mut env),
+        _ => env.push(EnvVar { key: "OPENCODE_CLIENT".into(), value: "acp".into(), in_keychain: false }),
+    }
+    let mut child = oah_transport::spawn(&Spec { location: &opts.location, cwd: &opts.cwd, program: &program, args, env: &env })
+        .map_err(|e| format!("couldn't start {program}: {e}"))?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let rpc = Rpc::new(child.stdin.take(), kind.label());
+    let updates = Arc::new(Mutex::new(Vec::new()));
+    {
+        let (rpc, updates) = (rpc.clone(), updates.clone());
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+                if rpc.take_reply(&v) {
+                    continue;
+                }
+                if v["method"] == "session/update" {
+                    updates.lock().unwrap().push(v["params"]["update"].clone());
+                } else if v.get("id").is_some() && v.get("method").is_some() {
+                    // Nothing is asked of oah while a session is only read.
+                    let _ = rpc.reply_error(&v["id"], -32601, "oah doesn't offer this");
+                }
+            }
+            rpc.fail_all();
+        });
+    }
+    let loaded = rpc
+        .call(
+            "initialize",
+            json!({
+                "protocolVersion": PROTOCOL,
+                "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
+                "clientInfo": {"name": "oah", "title": "oah", "version": env!("CARGO_PKG_VERSION")}
+            }),
+            Duration::from_secs(60),
+        )
+        .and_then(|init| {
+            if init["agentCapabilities"]["loadSession"].as_bool() != Some(true) {
+                return Err(format!("{} doesn't replay saved sessions", kind.label()));
+            }
+            let mut p = json!({"sessionId": session, "cwd": opts.cwd, "mcpServers": []});
+            if kind == AgentKind::Grok {
+                p["_meta"] = crate::grok::session_meta();
+            }
+            rpc.call("session/load", p, Duration::from_secs(120))
+        });
+    // The last of the replay may trail the answer.
+    if loaded.is_ok() {
+        thread::sleep(Duration::from_millis(300));
+    }
+    rpc.stdin.lock().unwrap().take();
+    let _ = child.kill();
+    let _ = child.wait();
+    loaded?;
+    let all = updates.lock().unwrap().clone();
+    Ok(all)
+}
+
+/// How many messages from the user a replayed session has ([`replay`]'s updates).
+pub fn replayed_messages(updates: &[Value]) -> usize {
+    let mut n = 0;
+    let mut typing = false;
+    for u in updates {
+        let user = u["sessionUpdate"] == "user_message_chunk";
+        n += usize::from(user && !typing);
+        typing = user;
+    }
+    n
+}
+
+/// A replayed session ([`replay`]'s updates) after its first `skip` messages from the user:
+/// the events its driver would have reported for the same turns, made the way it makes them.
+/// `tag` keeps their ids apart from every other turn's in the chat.
+pub fn replay_events(kind: AgentKind, updates: &[Value], skip: usize, tag: &str) -> Vec<ChatEvent> {
+    let out = Arc::new(Mutex::new(Vec::new()));
+    let sink: Sink = {
+        let out = out.clone();
+        Arc::new(move |e| out.lock().unwrap().push(e))
+    };
+    let state = Arc::new(Mutex::new(State { alive: true, kind: Some(kind), stretch: 1, ..Default::default() }));
+    let mut tr = Translator { sink: sink.clone(), state: state.clone(), rpc: Rpc::new(None, kind.label()) };
+    let (mut seen, mut turn, mut typed) = (0usize, None::<String>, String::new());
+    let finish = |turn: &mut Option<String>| {
+        if let Some(turn_id) = turn.take() {
+            sink(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted: false });
+        }
+    };
+    // One past the end: what the user typed last is a message once something else follows.
+    for u in updates.iter().chain(std::iter::once(&Value::Null)) {
+        if u["sessionUpdate"] == "user_message_chunk" {
+            typed.push_str(u["content"]["text"].as_str().unwrap_or(""));
+            continue;
+        }
+        if !typed.trim().is_empty() {
+            seen += 1;
+            finish(&mut turn);
+            if seen > skip {
+                let id = format!("cli-{tag}-{seen}");
+                sink(ChatEvent::UserMessage { id: id.clone(), text: typed.trim().to_string(), images: vec![], files: vec![] });
+                sink(ChatEvent::TurnStarted { turn_id: id.clone() });
+                let mut st = state.lock().unwrap();
+                st.turn_id = Some(id.clone());
+                st.stretch += 1;
+                turn = Some(id);
+            }
+        }
+        typed.clear();
+        // What the session offers and costs is the driver's to say when it next starts.
+        let said = matches!(
+            u["sessionUpdate"].as_str(),
+            Some("agent_message_chunk" | "agent_thought_chunk" | "tool_call" | "tool_call_update" | "plan")
+        );
+        if turn.is_some() && said {
+            tr.update(u);
+        }
+    }
+    finish(&mut turn);
+    let events = out.lock().unwrap().clone();
+    events
+}
+
 fn tool_kind(k: &str) -> ToolKind {
     match k {
         "read" => ToolKind::Read,
@@ -1763,12 +1894,21 @@ fn elicitation_reply(fields: &[Field], answers: &std::collections::BTreeMap<Stri
 }
 
 /// OpenCode's permission rule asking before edits and commands.
-const ASK_FOR_EDITS_AND_COMMANDS: &str = r#"{"edit":"ask","bash":"ask"}"#;
+pub(crate) const ASK_FOR_EDITS_AND_COMMANDS: &str = r#"{"edit":"ask","bash":"ask"}"#;
 
-/// Puts the ask-first rule in `OPENCODE_CONFIG_CONTENT`: added to your own config there when it
-/// has no `permission`, left alone when it has one (or isn't JSON oah can read).
-fn with_ask_config(env: &mut Vec<EnvVar>) {
-    let rule: Value = serde_json::from_str(ASK_FOR_EDITS_AND_COMMANDS).unwrap_or_default();
+/// Gives OpenCode the permission `rule` (JSON), unless you set your own (`OPENCODE_PERMISSION`
+/// in Settings → Providers): 1.x reads it from there, 2.x only from its config.
+pub(crate) fn opencode_rule(env: &mut Vec<EnvVar>, rule: &str) {
+    if !env.iter().any(|e| e.key == "OPENCODE_PERMISSION") {
+        env.push(EnvVar { key: "OPENCODE_PERMISSION".into(), value: rule.into(), in_keychain: false });
+        with_rule_config(env, rule);
+    }
+}
+
+/// Puts the rule in `OPENCODE_CONFIG_CONTENT`: added to your own config there when it has no
+/// `permission`, left alone when it has one (or isn't JSON oah can read).
+fn with_rule_config(env: &mut Vec<EnvVar>, rule: &str) {
+    let rule: Value = serde_json::from_str(rule).unwrap_or_default();
     match env.iter_mut().rfind(|e| e.key == "OPENCODE_CONFIG_CONTENT") {
         Some(e) => {
             if let Ok(Value::Object(mut config)) = serde_json::from_str::<Value>(&e.value) {
@@ -1814,6 +1954,57 @@ mod tests {
 
     fn upd(u: Value) -> Value {
         json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": u}})
+    }
+
+    /// A session as Antigravity replays it (captured from `agy acp` 1.x): what was said after
+    /// the messages the chat already has, as the driver would have reported it.
+    #[test]
+    fn reads_what_was_said_in_a_replayed_session() {
+        let said = |kind: &str, text: &str| json!({"sessionUpdate": kind, "content": {"type": "text", "text": text}});
+        let updates = [
+            said("user_message_chunk", "from the chat"),
+            said("agent_message_chunk", "before"),
+            said("user_message_chunk", "Run the shell command `echo hi` "),
+            said("user_message_chunk", "and tell me what it printed."),
+            json!({"sessionUpdate": "tool_call", "toolCallId": "call_1", "status": "completed", "kind": "execute", "title": "echo hi",
+                "rawInput": {"CommandLine": "echo hi"}, "rawOutput": {"output": "hi"}}),
+            said("agent_thought_chunk", "It printed hi."),
+            said("agent_message_chunk", "h"),
+            said("agent_message_chunk", "i"),
+            json!({"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "goal", "description": "x"}]}),
+            json!({"sessionUpdate": "session_info_update", "title": "Run Shell Command Echo"}),
+            said("user_message_chunk", "thanks"),
+        ];
+        assert_eq!(replayed_messages(&updates), 3);
+        let ev = replay_events(AgentKind::Antigravity, &updates, 1, "r1");
+        let kinds: Vec<String> = ev.iter().map(|e| serde_json::to_value(e).unwrap()["type"].as_str().unwrap().to_string()).collect();
+        assert_eq!(
+            kinds,
+            [
+                "userMessage",
+                "turnStarted",
+                "toolStarted",
+                "toolFinished",
+                "reasoningDelta",
+                "textDelta",
+                "textDelta",
+                "turnFinished",
+                "userMessage",
+                "turnStarted",
+                "turnFinished"
+            ]
+        );
+        assert!(
+            matches!(&ev[0], ChatEvent::UserMessage { id, text, .. } if id == "cli-r1-2" && text == "Run the shell command `echo hi` and tell me what it printed.")
+        );
+        assert!(matches!(&ev[2], ChatEvent::ToolStarted { tool, .. } if tool.kind == ToolKind::Bash && tool.title == "echo hi"));
+        assert!(matches!(&ev[3], ChatEvent::ToolFinished { ok: true, output, .. } if output == "hi"));
+        // The two halves of the answer are one item, apart from every other turn's.
+        assert!(
+            matches!((&ev[5], &ev[6]), (ChatEvent::TextDelta { item_id: a, .. }, ChatEvent::TextDelta { item_id: b, .. }) if a == b && a.starts_with("cli-r1-2"))
+        );
+        assert!(matches!(&ev[8], ChatEvent::UserMessage { text, .. } if text == "thanks"));
+        assert!(replay_events(AgentKind::Antigravity, &updates, 3, "r1").is_empty());
     }
 
     /// OpenCode 2 has no `models --verbose`: the plain list still comes back.
@@ -2117,13 +2308,13 @@ mod tests {
             serde_json::from_str::<Value>(&env.iter().find(|e| e.key == "OPENCODE_CONFIG_CONTENT").unwrap().value).unwrap()
         };
         let mut env = vec![];
-        with_ask_config(&mut env);
+        with_rule_config(&mut env, ASK_FOR_EDITS_AND_COMMANDS);
         assert_eq!(get(&env), json!({"permission": {"edit": "ask", "bash": "ask"}}));
         let mut env = vec![var("OPENCODE_CONFIG_CONTENT", r#"{"model":"x/y"}"#)];
-        with_ask_config(&mut env);
+        with_rule_config(&mut env, ASK_FOR_EDITS_AND_COMMANDS);
         assert_eq!(get(&env), json!({"model": "x/y", "permission": {"edit": "ask", "bash": "ask"}}));
         let mut env = vec![var("OPENCODE_CONFIG_CONTENT", r#"{"permission":{"bash":"allow"}}"#)];
-        with_ask_config(&mut env);
+        with_rule_config(&mut env, ASK_FOR_EDITS_AND_COMMANDS);
         assert_eq!(get(&env), json!({"permission": {"bash": "allow"}}), "yours wins");
     }
 

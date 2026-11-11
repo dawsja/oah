@@ -4,14 +4,13 @@
 // so a shell (and an ssh or WSL session) stays connected until its tab is closed.
 
 import { create } from "zustand"
-import type { Terminal } from "@xterm/xterm"
-import type { FitAddon } from "@xterm/addon-fit"
-import { copyText } from "@/lib/clipboard"
 import { terminal as ipc } from "@/lib/ipc"
-import { locationKey, parseShellOsc, selectionBlock, SHELL_OSC, terminalTheme } from "@/lib/terminal"
+import { locationKey, parseShellOsc, selectionBlock, SHELL_OSC } from "@/lib/terminal"
 import type { Location } from "@/lib/types"
-import { useApp } from "./app"
+import { disposeXterm, fitXterm, loadXterm, makeXterm, moveXterm, type Xterm } from "@/lib/xterm"
+import { paneOf, useApp } from "./app"
 import { currentScope } from "./git"
+import { insertIntoChat } from "./insert"
 
 export type TermTab = {
   id: string
@@ -77,7 +76,7 @@ export const useTerminals = create<TermStore>((set, get) => ({
     set({ tabs, active })
     const app = useApp.getState()
     // The project's last terminal closing puts the panel away.
-    if (!left.length && app.projectId === tab.projectId) app.setLayout({ terminalOpen: false })
+    if (!left.length && paneOf(app).projectId === tab.projectId) app.setLayout({ terminalOpen: false })
     else if (active[tab.projectId]) requestAnimationFrame(() => focusTerminal(active[tab.projectId]))
   },
 
@@ -146,11 +145,7 @@ export function learnLocalShell(projectId: string) {
 
 // ---- The terminals -----------------------------------------------------------------------
 
-type Instance = {
-  term: Terminal
-  fit: FitAddon
-  /** The element xterm draws in; moved between hosts as React remounts them. */
-  el: HTMLDivElement
+type Instance = Xterm & {
   /** The shell's id on the Rust side, once started. */
   session: string | null
   /** Input from before the shell's id is known: answers to Windows' pseudo console asking
@@ -163,37 +158,6 @@ type Instance = {
 
 const instances = new Map<string, Instance>()
 
-const FONT_SIZE = 13
-
-function fontFamily() {
-  const mono = getComputedStyle(document.documentElement).getPropertyValue("--oah-mono").trim()
-  return `${mono ? `${mono}, ` : ""}"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Consolas, monospace`
-}
-
-function theme() {
-  const css = getComputedStyle(document.documentElement)
-  const dark = document.documentElement.classList.contains("dark")
-  return terminalTheme(dark, css.getPropertyValue("--sidebar").trim() || (dark ? "#080808" : "#eef0f3"), css.getPropertyValue("--foreground").trim() || (dark ? "#ededed" : "#16181d"))
-}
-
-// Theme and font changes (Settings → Appearance) reach open terminals.
-let watching = false
-function watchAppearance() {
-  if (watching) return
-  watching = true
-  new MutationObserver(() => {
-    const t = theme()
-    const f = fontFamily()
-    for (const i of instances.values()) {
-      i.term.options.theme = t
-      if (i.term.options.fontFamily !== f) {
-        i.term.options.fontFamily = f
-        fitTerminal(i)
-      }
-    }
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] })
-}
-
 /** The element each tab's terminal belongs in now (React may remount it). */
 const hosts = new Map<string, HTMLElement>()
 const creating = new Set<string>()
@@ -203,8 +167,7 @@ export function attachTerminal(id: string, host: HTMLElement) {
   hosts.set(id, host)
   const inst = instances.get(id)
   if (inst) {
-    if (inst.el.parentElement !== host) host.appendChild(inst.el)
-    fitTerminal(inst)
+    moveXterm(inst, host)
   } else if (!creating.has(id)) {
     creating.add(id)
     void build(id).finally(() => creating.delete(id))
@@ -217,42 +180,18 @@ export function detachTerminal(id: string, host: HTMLElement) {
 }
 
 async function build(id: string) {
-  const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/addon-web-links")])
-  // Measure the mono font once it's loaded, or the cells come out the wrong width.
-  await document.fonts.load(`${FONT_SIZE}px "JetBrains Mono Variable"`).catch(() => undefined)
+  const modules = await loadXterm()
   const host = hosts.get(id)
   if (!host || !useTerminals.getState().tabs.some((t) => t.id === id)) return
-  const el = document.createElement("div")
-  el.className = "h-full w-full"
-  host.appendChild(el)
-  const windows = useApp.getState().info?.platform === "windows"
-  const term = new Terminal({
-    fontFamily: fontFamily(),
-    fontSize: FONT_SIZE,
-    lineHeight: 1.2,
-    cursorBlink: true,
-    scrollback: 10_000,
-    theme: theme(),
-    // Every shell runs in a Windows pseudo console there (ssh.exe and wsl.exe too).
-    windowsPty: windows ? { backend: "conpty" } : undefined,
-  })
-  const fit = new FitAddon()
-  term.loadAddon(fit)
-  term.loadAddon(
-    new WebLinksAddon((_e, uri) => {
-      import("@tauri-apps/plugin-opener").then((o) => o.openUrl(uri)).catch(() => undefined)
-    }),
-  )
-  const inst: Instance = { term, fit, el, session: null, queued: [], run: 0, disposed: false }
+  const inst: Instance = Object.assign(makeXterm(modules, host, useApp.getState().info?.platform === "windows"), { session: null, queued: [], run: 0, disposed: false })
+  const term = inst.term
   instances.set(id, inst)
-  watchAppearance()
 
   term.parser.registerOscHandler(SHELL_OSC, (data) => {
     const shell = parseShellOsc(data)
     if (shell) learnShell(id, shell)
     return true
   })
-  term.attachCustomKeyEventHandler((e) => keyForApp(inst, e))
   term.onSelectionChange(() => {
     const has = term.hasSelection() && term.getSelection().trim() !== ""
     if (!!useTerminals.getState().selected[id] !== has) useTerminals.setState((s) => ({ selected: { ...s.selected, [id]: has } }))
@@ -269,8 +208,6 @@ async function build(id: string) {
   term.onResize(({ cols, rows }) => {
     if (inst.session) void ipc.resize(inst.session, cols, rows).catch(() => undefined)
   })
-  term.open(el)
-  fitTerminal(inst)
   term.focus()
   await start(id, inst)
 }
@@ -312,39 +249,10 @@ async function start(id: string, inst: Instance) {
   }
 }
 
-/** Keys the app keeps from the shell: copy, paste, and the terminal toggle. */
-function keyForApp(inst: Instance, e: KeyboardEvent): boolean {
-  const mod = e.ctrlKey || e.metaKey
-  if (!mod || e.altKey) return true
-  if (e.code === "Backquote" || e.key === ",") return false
-  const k = e.key.toLowerCase()
-  // Ctrl+Shift+C always copies; Ctrl+C copies when there's a selection (else it's ^C).
-  if (k === "c" && (e.shiftKey || inst.term.hasSelection())) {
-    if (e.type === "keydown" && inst.term.hasSelection()) {
-      copyText(inst.term.getSelection())
-      inst.term.clearSelection()
-    }
-    e.preventDefault()
-    return false
-  }
-  // Ctrl+V and Ctrl+Shift+V: the browser's own paste, which xterm turns into input.
-  if (k === "v") return false
-  return true
-}
-
-function fitTerminal(inst: Instance) {
-  if (!inst.el.isConnected || inst.el.offsetWidth === 0 || inst.el.offsetHeight === 0) return
-  try {
-    inst.fit.fit()
-  } catch {
-    /* not measurable yet */
-  }
-}
-
 /** Fits the tab's terminal to its host (after the panel is shown or resized). */
 export function fitTab(id: string) {
   const inst = instances.get(id)
-  if (inst) fitTerminal(inst)
+  if (inst) fitXterm(inst)
 }
 
 export function focusTerminal(id: string) {
@@ -358,13 +266,7 @@ export function askAgentAbout(id: string) {
   const text = inst ? selectionBlock(inst.term.getSelection()) : null
   if (!inst || !text) return
   inst.term.clearSelection()
-  const app = useApp.getState()
-  if (app.view !== "chat") app.closeSettings()
-  // A file or diff on screen in the chat's place: back to the chat, whose composer takes it.
-  import("./git").then((m) => {
-    m.useGit.getState().open(null)
-    requestAnimationFrame(() => requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("oah:insert", { detail: text }))))
-  })
+  insertIntoChat(text)
 }
 
 function dispose(id: string) {
@@ -374,6 +276,5 @@ function dispose(id: string) {
   inst.disposed = true
   instances.delete(id)
   if (inst.session) void ipc.close(inst.session).catch(() => undefined)
-  inst.term.dispose()
-  inst.el.remove()
+  disposeXterm(inst)
 }

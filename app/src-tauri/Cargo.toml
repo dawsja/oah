@@ -43,6 +43,11 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 
+[dev-dependencies]
+# An app with no window, for tests of what needs one's handle (chats.rs).
+tauri = { version = "2.12", features = ["test"] }
+tempfile = "3"
+
 [target.'cfg(windows)'.dependencies]
 # Answering WebView2's microphone prompt for voice (wry's own copy).
 webview2-com = "=0.39.1"

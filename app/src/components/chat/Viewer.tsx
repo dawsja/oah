@@ -1,15 +1,20 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ArrowLeft, AtSign, Minus, Plus } from "lucide-react"
 import { git, isImagePath, type Scope } from "@/lib/git"
 import { inTerminal } from "@/lib/terminal"
 import { ImageStage } from "@/components/ImageView"
+import { PaneClose } from "@/components/shell/pane"
+import { useApp, usePane, usePaneActive } from "@/store/app"
 import { useGit, type Viewer as V } from "@/store/git"
 import { addToChat } from "@/components/right/Files"
 import { DiffLines, DiffStat, parsePatch } from "./DiffView"
 
 /** A diff or a file from the side panel, read-only, in place of the chat. */
 export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
-  const open = useGit((s) => s.open)
+  // This pane's file, whichever pane is active when the answer to a click comes.
+  const paneId = usePane().id
+  const active = usePaneActive()
+  const open = useCallback((v: V | null) => useApp.getState().setPane({ viewer: v }, paneId), [paneId])
   const run = useGit((s) => s.run)
   const [text, setText] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -50,10 +55,11 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
   }, [viewer, scope.projectId, scope.cwd, fileState])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !(e.target instanceof HTMLTextAreaElement) && !inTerminal(e.target) && open(null)
+    // Esc closes the file in the pane being worked in, not one beside it.
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && active && !(e.target instanceof HTMLTextAreaElement) && !inTerminal(e.target) && open(null)
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [open])
+  }, [open, active])
 
   const lines = viewer.kind !== "file" && text ? parsePatch(text) : []
   const added = lines.filter((l) => l.cls === "a").length
@@ -85,6 +91,7 @@ export function Viewer({ scope, viewer }: { scope: Scope; viewer: V }) {
           <ActionButton onClick={() => addToChat(viewer.path)}>
             <AtSign /> Add to chat
           </ActionButton>
+          <PaneClose className="-mr-1" />
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">

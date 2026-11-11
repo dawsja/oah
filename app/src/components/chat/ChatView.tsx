@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react"
-import { Check, ChevronDown, ChevronRight, Circle, CornerDownRight, FileText, FolderPlus, Image as ImageIcon, LoaderCircle, MoreHorizontal, Pause, Pencil, Server, Trash2, X } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Circle, CornerDownRight, FileText, FolderPlus, Image as ImageIcon, LoaderCircle, MessageSquare, MoreHorizontal, Pause, Pencil, Server, SquareTerminal, Trash2, X } from "lucide-react"
 import { AgentGlyph, Mark } from "@/components/icons"
 import { promptText } from "@/components/Prompt"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { agentChoices } from "@/lib/agents"
+import { toast } from "sonner"
 import { emptyTranscript, type ChatMeta, type ModelOption, type SlashCommand, type PlanItem, type Transcript as T } from "@/lib/chat"
 import { copyText } from "@/lib/clipboard"
 import { LocationIcon } from "@/components/LocationIcon"
@@ -12,8 +13,11 @@ import { addLocalFolder, OpenProjectMenu, useDistros } from "@/components/OpenPr
 import { ipc, type Catalog } from "@/lib/ipc"
 import { AGENT_LABEL, isOpencode, locationLabel, type AgentKind, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { useApp, useProject } from "@/store/app"
+import { newChatKey } from "@/lib/panes"
+import { PaneClose } from "@/components/shell/pane"
+import { useApp, usePane, usePaneActive, useProject } from "@/store/app"
 import { copyChatMarkdown, useChats, type Queued } from "@/store/chats"
+import { enterCli, leaveCli, STARTS_IN_CLI, startsInCli, useCli } from "@/store/cli"
 import { draftKey } from "@/store/drafts"
 import { useGit, useScope } from "@/store/git"
 import { useStartOpenDistro } from "@/store/wsl"
@@ -24,20 +28,20 @@ import { Composer, editInComposer, STEER_KEY } from "./Composer"
 import { Tip } from "@/components/Tip"
 import { CwdContext } from "./cwd"
 import { Transcript } from "./Transcript"
+import { CliView } from "./CliView"
 import { TasksDock } from "./TasksDock"
 
-/** The middle of the window: the open chat, or a new one in the current project. */
+/** What a pane shows: its open chat, or a new one in its project. */
 export function ChatView() {
   const settings = useApp((s) => s.settings)
-  const chatId = useApp((s) => s.chatId)
+  const { chatId, viewer } = usePane()
   const project = useProject()
   const meta = useChats((s) => s.metas.find((m) => m.id === chatId))
   const transcript = useChats((s) => (chatId ? s.transcripts[chatId] : undefined))
-  const viewer = useGit((s) => s.viewer)
   const scope = useScope()
 
   useEffect(() => {
-    if (chatId && !transcript) useChats.getState().open(chatId)
+    if (chatId && !transcript) void useChats.getState().load(chatId)
   }, [chatId, transcript])
 
   if (!settings) return null
@@ -100,10 +104,26 @@ function NewChat({ project }: { project: Project }) {
   const [effort, setEffort] = useState("")
   const { models, commands, load } = useCatalog(agent, project.id)
   const { distro, starting } = useStartOpenDistro(project.location)
-  const draftCwd = useApp((s) => s.draftCwd)
+  const pane = usePane()
+  const active = usePaneActive()
+  const draftCwd = pane.draftCwd
+  // Two panes on the same new chat each keep what's typed in them.
+  const draft = useApp((s) => newChatKey(s.panes, pane))
   const worktree = useGit((s) => s.worktrees[project.id]?.find((w) => !w.main && w.path === draftCwd))
   const send = (text: string, images: { mime: string; data: string; name?: string }[] = []) =>
-    useChats.getState().send(null, text, { agent, model: model ?? undefined, effort: effort || undefined, permission, cwd: draftCwd ?? undefined, images })
+    useChats.getState().send(null, text, { agent, model: model ?? undefined, effort: effort || undefined, permission, cwd: draftCwd ?? undefined, images, pane: pane.id })
+  // The agent's own CLI from the start: a chat whose first words are said there.
+  const openCli = async () => {
+    try {
+      const meta = await ipc.chatCreate(project.id, agent, model, effort || null, draftCwd)
+      useChats.setState((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: emptyTranscript() }, permission: { ...s.permission, [meta.id]: permission } }))
+      await ipc.chatSetPermission(meta.id, permission).catch(() => undefined)
+      useApp.getState().setPane({ chatId: meta.id }, pane.id)
+      await startsInCli(meta.id)
+    } catch (e) {
+      toast.error(String(e))
+    }
+  }
   // On this computer, whether the chosen agent's CLI is there at all: said before the first
   // message fails, with the way to install it.
   const [installed, setInstalled] = useState<boolean | null>(null)
@@ -120,7 +140,8 @@ function NewChat({ project }: { project: Project }) {
   }, [agent, binary, project.location.kind])
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
+      <PaneClose className="absolute top-1.5 right-2 z-10" />
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-[12vh]">
         <div className="w-full max-w-[46rem]">
           <div className="mb-6 flex items-end gap-3">
@@ -151,8 +172,8 @@ function NewChat({ project }: { project: Project }) {
             </div>
           </div>
           <Composer
-            key={draftKey(null, project.id, draftCwd)}
-            draftKey={draftKey(null, project.id, draftCwd)}
+            key={draft}
+            draftKey={draft}
             agent={agent}
             agents={choices}
             onAgent={(a) => {
@@ -174,15 +195,20 @@ function NewChat({ project }: { project: Project }) {
             permission={permission}
             onPermission={setPermission}
             onSend={send}
-            autoFocus
+            autoFocus={active}
           />
           <div className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
             {["Explain how this project is laid out", "Find and fix a failing test", "Review my uncommitted changes"].map((t) => (
-              <button key={t} className="rounded-lg border bg-card px-3.5 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => editInComposer(t, [])}>
+              <button key={t} className="rounded-lg border bg-card px-3.5 py-2.5 text-left text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground" onClick={() => editInComposer(t, [], pane.id)}>
                 {t}
               </button>
             ))}
           </div>
+          {STARTS_IN_CLI.includes(agent) && installed !== false ? (
+            <button className="mt-3 flex items-center gap-1.5 rounded-md px-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => void openCli()}>
+              <SquareTerminal className="size-3.5" /> Or start in {AGENT_LABEL[agent]}'s own CLI
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -201,6 +227,10 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
   const focus = useChats((s) => s.focus === meta.id)
   const card = transcript.questions[0]?.requestId ?? transcript.approvals[0]?.requestId
   const loaded = useChats((s) => !!s.transcripts[meta.id])
+  const pane = usePane()
+  const active = usePaneActive()
+  // Open in the agent's own CLI: a terminal on this chat's session, in the chat's place.
+  const inCli = useCli((s) => !!s.sessions[meta.id])
   // Opened to answer it (the inbox, a notification): the waiting card takes the cursor.
   useEffect(() => {
     if (!focus) return
@@ -216,10 +246,18 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
     el.animate([{ boxShadow: "0 0 0 2px var(--primary)" }, { boxShadow: "0 0 0 0 transparent" }], { duration: 1200, easing: "ease-out" })
   }, [focus, card, loaded])
 
+  if (inCli) {
+    return (
+      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
+        <ChatHeader meta={meta} transcript={transcript} model="" inCli />
+        <CliView meta={meta} />
+      </div>
+    )
+  }
   return (
     <CwdContext.Provider value={transcript.cwd ?? meta.cwd}>
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
-      <ChatHeader meta={meta} transcript={transcript} model={transcript.model || meta.model || d.model} />
+      <ChatHeader meta={meta} transcript={transcript} model={transcript.model || meta.model || d.model} inCli={false} />
       <Transcript transcript={transcript} className="flex-1" />
       {meta.sleeping && !transcript.running ? <p className="px-6 py-2 text-center text-[12px] text-muted-foreground">Sleeping · send a message to resume this session.</p> : null}
       <div className="mx-auto flex max-h-[75%] min-h-0 w-full max-w-[46rem] shrink-0 flex-col gap-2 px-6 pb-4">
@@ -237,7 +275,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
           ) : null}
         </div>
         <div className="shrink-0">
-          {queued.length ? <QueueDock chatId={meta.id} items={queued} running={transcript.running} /> : null}
+          {queued.length ? <QueueDock chatId={meta.id} items={queued} running={transcript.running} pane={pane.id} /> : null}
           <Composer
             history={transcript.items.filter((item) => item.kind === "user").map((item) => item.text)}
             key={meta.id}
@@ -269,7 +307,7 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
             onStop={() => chats.interrupt(meta.id)}
             placeholder={transcript.running ? `Queue a follow-up, or ${STEER_KEY}+Enter to send it now` : "Reply, @ to add files, / for commands"}
             lockAgent
-            autoFocus
+            autoFocus={active}
           />
         </div>
       </div>
@@ -278,13 +316,14 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
   )
 }
 
-function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T; model: string }) {
+function ChatHeader({ meta, transcript, model, inCli }: { meta: ChatMeta; transcript: T; model: string; inCli: boolean }) {
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
-      <AgentGlyph agent={meta.agent} className="size-3.5" />
+      <AgentGlyph agent={meta.agent} className="size-3.5 shrink-0" />
       <span className="truncate text-[13px] font-medium">{meta.title || "New chat"}</span>
-      {transcript.running ? <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" /> : null}
-      <span className="ml-auto font-mono text-[11px] text-faint">{model}</span>
+      {transcript.running ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" /> : null}
+      <span className="ml-auto truncate font-mono text-[11px] text-faint">{model}</span>
+      <ModeSwitch meta={meta} inCli={inCli} />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Chat menu">
@@ -313,6 +352,31 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <PaneClose className="-mr-2" />
+    </div>
+  )
+}
+
+/** Chat or CLI: the same conversation in oah's chat, or in the agent's own terminal interface.
+ *  Going to the CLI hands it the session (the chat's agent stops); coming back ends the CLI,
+ *  and the next message here continues from what was said there. */
+function ModeSwitch({ meta, inCli }: { meta: ChatMeta; inCli: boolean }) {
+  // An agent that names its sessions itself has none to open before the first message.
+  const none = !inCli && !meta.agentSessionId && !STARTS_IN_CLI.includes(meta.agent)
+  const side = "flex h-6 items-center gap-1 rounded-[5px] px-2 text-[11.5px] font-medium text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm disabled:pointer-events-none disabled:opacity-50"
+  return (
+    <div role="group" aria-label="Chat or CLI" className="flex shrink-0 items-center rounded-md bg-muted p-0.5">
+      <button className={side} aria-pressed={!inCli} onClick={() => inCli && void leaveCli(meta.id)}>
+        <MessageSquare className="size-3" /> Chat
+      </button>
+      <Tip content={none ? `Send a first message, then ${AGENT_LABEL[meta.agent]}'s CLI can open this chat` : inCli ? "" : `Continue this chat in ${AGENT_LABEL[meta.agent]}'s own CLI (Ctrl+Shift+M)`} side="bottom">
+        {/* A disabled button shows no tip: the span takes the hover. */}
+        <span className="flex">
+          <button className={side} aria-pressed={inCli} disabled={none} onClick={() => !inCli && void enterCli(meta.id)}>
+            <SquareTerminal className="size-3" /> CLI
+          </button>
+        </span>
+      </Tip>
     </div>
   )
 }
@@ -320,7 +384,7 @@ function ChatHeader({ meta, transcript, model }: { meta: ChatMeta; transcript: T
 const NONE: Queued[] = []
 
 /** Messages waiting for the turn to end: each can go now, back to the composer, or away. */
-function QueueDock({ chatId, items, running }: { chatId: string; items: Queued[]; running: boolean }) {
+function QueueDock({ chatId, items, running, pane }: { chatId: string; items: Queued[]; running: boolean; pane: string }) {
   const chats = useChats.getState()
   return (
     <div className="mx-auto w-[calc(100%-3rem)] max-w-[40rem] rounded-t-lg border border-b-0 bg-card text-[12.5px]">
@@ -355,7 +419,7 @@ function QueueDock({ chatId, items, running }: { chatId: string; items: Queued[]
                 aria-label="Edit queued message"
                 onClick={() => {
                   const item = chats.unqueue(chatId, q.id)
-                  if (item) editInComposer(item.text, item.images.map((img) => ({ mime: img.mime, data: img.data, name: img.name ?? "image" })))
+                  if (item) editInComposer(item.text, item.images.map((img) => ({ mime: img.mime, data: img.data, name: img.name ?? "image" })), pane)
                 }}
               >
                 <Pencil className="size-3" />

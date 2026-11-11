@@ -861,9 +861,260 @@ fn command_kind(item: &Value) -> ToolKind {
     }
 }
 
+/// What was said in a thread after its first `skip` lines, read from its rollout file
+/// (`sessions/<y>/<m>/<d>/rollout-<time>-<thread>.jsonl`, one item a line): the events a driver
+/// would have reported for the same turns, for a chat that was open in Codex's own interface
+/// meanwhile. Messages, reasoning, commands and patches; the rest of what Codex records
+/// (its instructions, token counts) isn't the conversation.
+///
+/// What was said is in a thread as the items sent to the model, which also carry what Codex
+/// adds for the model alone (its instructions, the environment); older versions record it as
+/// events too (`user_message`, `agent_message`). The events are read where there are any;
+/// else the items, less what Codex itself put there.
+pub fn rollout_events(text: &str, skip: usize) -> Vec<ChatEvent> {
+    let is = |v: &Value, kind: &str, payload: &str| v["type"] == kind && v["payload"]["type"] == payload;
+    let by_events =
+        text.lines().skip(skip).filter_map(|l| serde_json::from_str::<Value>(l).ok()).any(|v| is(&v, "event_msg", "user_message"));
+    // An item's text parts, joined.
+    let content =
+        |p: &Value| p["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n");
+    let mut out = Vec::new();
+    let mut turn: Option<String> = None;
+    let finish = |out: &mut Vec<ChatEvent>, turn: &mut Option<String>, interrupted: bool| {
+        if let Some(turn_id) = turn.take() {
+            out.push(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted });
+        }
+    };
+    let capped = |mut output: String| {
+        if output.len() > MAX_OUTPUT {
+            let mut cut = MAX_OUTPUT;
+            while !output.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            output.truncate(cut);
+            output.push_str("\n…");
+        }
+        output
+    };
+    for (n, v) in text.lines().enumerate().skip(skip).filter_map(|(n, l)| Some((n, serde_json::from_str::<Value>(l).ok()?))) {
+        let p = &v["payload"];
+        let kind = p["type"].as_str().unwrap_or("");
+        let call = p["call_id"].as_str().unwrap_or("").to_string();
+        // The same thing from either record, as the event it would be.
+        let (said, answered) = match (v["type"].as_str(), kind, p["role"].as_str()) {
+            (Some("event_msg"), "user_message", _) if by_events => (p["message"].as_str().map(String::from), None),
+            (Some("event_msg"), "agent_message", _) if by_events => (None, p["message"].as_str().map(String::from)),
+            (Some("response_item"), "message", Some("user")) if !by_events => (Some(content(p)).filter(|t| typed_by_user(p, t)), None),
+            (Some("response_item"), "message", Some("assistant")) if !by_events => (None, Some(content(p))),
+            _ => (None, None),
+        };
+        if let Some(said) = said {
+            let said = said.trim();
+            if said.is_empty() {
+                continue;
+            }
+            finish(&mut out, &mut turn, false);
+            out.push(ChatEvent::UserMessage { id: format!("cli-{n}"), text: said.into(), images: vec![], files: vec![] });
+            out.push(ChatEvent::TurnStarted { turn_id: format!("cli-{n}") });
+            turn = Some(format!("cli-{n}"));
+            continue;
+        }
+        if turn.is_none() {
+            continue;
+        }
+        if let Some(t) = answered {
+            if !t.trim().is_empty() {
+                out.push(ChatEvent::Text { item_id: format!("cli-{n}"), text: t });
+            }
+            continue;
+        }
+        match (v["type"].as_str(), kind) {
+            (Some("event_msg"), "agent_reasoning") => {
+                let t = p["text"].as_str().unwrap_or("");
+                if !t.trim().is_empty() {
+                    out.push(ChatEvent::Reasoning { item_id: format!("cli-{n}"), text: t.into() });
+                }
+            }
+            (Some("event_msg"), "turn_aborted") => finish(&mut out, &mut turn, true),
+            (Some("event_msg"), "task_complete" | "turn_complete") => finish(&mut out, &mut turn, false),
+            (Some("response_item"), "function_call" | "local_shell_call") if !call.is_empty() => {
+                let name = p["name"].as_str().unwrap_or("shell");
+                // Its arguments are JSON in a string; a shell call's command is a word list.
+                let input =
+                    p["arguments"].as_str().and_then(|a| serde_json::from_str::<Value>(a).ok()).unwrap_or_else(|| p["action"].clone());
+                let command = match &input["command"] {
+                    Value::String(c) => c.clone(),
+                    Value::Array(words) => {
+                        let words: Vec<&str> = words.iter().filter_map(Value::as_str).collect();
+                        // `bash -lc <script>`: the script is what was run.
+                        match words.as_slice() {
+                            [_, flag, script] if flag.starts_with('-') && flag.contains('c') => script.to_string(),
+                            _ => words.join(" "),
+                        }
+                    }
+                    _ => String::new(),
+                };
+                let tool = if command.is_empty() {
+                    ToolCall { kind: ToolKind::Other, name: name.into(), title: name.into(), input, path: None }
+                } else {
+                    ToolCall { kind: ToolKind::Bash, name: name.into(), title: command, input, path: None }
+                };
+                out.push(ChatEvent::ToolStarted { item_id: call, tool });
+            }
+            (Some("response_item"), "custom_tool_call") if !call.is_empty() => {
+                let name = p["name"].as_str().unwrap_or("tool");
+                let patch = p["input"].as_str().unwrap_or("");
+                // `*** Update File: src/a.rs` (or Add, Delete): the first file a patch names.
+                let path = patch
+                    .lines()
+                    .find_map(|l| l.strip_prefix("*** ").and_then(|l| l.split_once(" File: ")).map(|(_, f)| f.trim().to_string()));
+                let kind = if name == "apply_patch" { ToolKind::Edit } else { ToolKind::Other };
+                let title = path.clone().unwrap_or_else(|| name.to_string());
+                out.push(ChatEvent::ToolStarted {
+                    item_id: call,
+                    tool: ToolCall { kind, name: name.into(), title, input: json!({"input": patch}), path },
+                });
+            }
+            (Some("response_item"), "function_call_output" | "custom_tool_call_output") if !call.is_empty() => {
+                // The output is text, `{output, metadata: {exit_code}}` (as text or as it is),
+                // or a list of parts.
+                let raw = match &p["output"] {
+                    Value::String(o) => {
+                        serde_json::from_str::<Value>(o).ok().filter(Value::is_object).unwrap_or_else(|| json!({"output": o}))
+                    }
+                    Value::Array(parts) => {
+                        json!({"output": parts.iter().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n")})
+                    }
+                    o => o.clone(),
+                };
+                let output = raw["output"].as_str().or_else(|| raw["content"].as_str()).unwrap_or("").to_string();
+                let ok = raw["metadata"]["exit_code"].as_i64().is_none_or(|c| c == 0) && raw["success"].as_bool() != Some(false);
+                out.push(ChatEvent::ToolFinished { item_id: call, ok, output: capped(output), diff: None });
+            }
+            _ => {}
+        }
+    }
+    finish(&mut out, &mut turn, false);
+    out
+}
+
+/// Whether a user item is something the user typed, not what Codex's harness adds in the
+/// user's name (the environment, instructions): Codex says where each part came from; without
+/// that, what it adds starts as markup.
+fn typed_by_user(item: &Value, text: &str) -> bool {
+    let parts = &item["internal_chat_message_metadata_passthrough"]["content_item_metadata"];
+    match parts.as_array().filter(|p| !p.is_empty()) {
+        Some(parts) => parts.iter().all(|p| p["provenance"]["type"] == "user"),
+        None => !text.trim_start().starts_with('<'),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rollout file in the form Codex writes: what was said after the lines the chat had
+    /// already seen, with commands and patches as tools.
+    #[test]
+    fn reads_what_was_said_in_a_rollout() {
+        let lines = [
+            json!({"timestamp": "t", "type": "session_meta", "payload": {"id": "th-1"}}),
+            json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "user_message", "message": "from the chat"}}),
+            json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "agent_message", "message": "before"}}),
+            // From here on, the CLI's.
+            json!({"timestamp": "t", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>…"}]}}),
+            json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "agent_message", "message": "a stray answer with no question"}}),
+            json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "user_message", "message": "run the tests", "kind": "plain"}}),
+            json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "agent_reasoning", "text": "**Running tests**"}}),
+            json!({"timestamp": "t", "type": "response_item", "payload": {"type": "function_call", "name": "shell", "call_id": "c1", "arguments": "{\"command\":[\"bash\",\"-lc\",\"cargo test\"]}"}}),
+            json!({"timestamp": "t", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1", "output": "{\"output\":\"3 passed\",\"metadata\":{\"exit_code\":0}}"}}),
+            json!({"timestamp": "t", "type": "response_item", "payload": {"type": "custom_tool_call", "name": "apply_patch", "call_id": "c2", "input": "*** Begin Patch\n*** Update File: src/a.rs\n@@\n-x\n+y\n*** End Patch"}}),
+            json!({"timestamp": "t", "type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c2", "output": "{\"output\":\"failed\",\"metadata\":{\"exit_code\":1}}"}}),
+            json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "token_count", "info": {}}}),
+            json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "agent_message", "message": "All three pass."}}),
+            json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "user_message", "message": "stop"}}),
+            json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "turn_aborted", "reason": "interrupted"}}),
+        ];
+        let file = lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+        let ev = rollout_events(&file, 3);
+        let kinds: Vec<String> = ev.iter().map(|e| serde_json::to_value(e).unwrap()["type"].as_str().unwrap().to_string()).collect();
+        assert_eq!(
+            kinds,
+            [
+                "userMessage",
+                "turnStarted",
+                "reasoning",
+                "toolStarted",
+                "toolFinished",
+                "toolStarted",
+                "toolFinished",
+                "text",
+                "turnFinished",
+                "userMessage",
+                "turnStarted",
+                "turnFinished"
+            ]
+        );
+        assert!(matches!(&ev[0], ChatEvent::UserMessage { text, .. } if text == "run the tests"));
+        assert!(
+            matches!(&ev[3], ChatEvent::ToolStarted { item_id, tool } if item_id == "c1" && tool.kind == ToolKind::Bash && tool.title == "cargo test")
+        );
+        assert!(matches!(&ev[4], ChatEvent::ToolFinished { ok: true, output, .. } if output == "3 passed"));
+        assert!(
+            matches!(&ev[5], ChatEvent::ToolStarted { tool, .. } if tool.kind == ToolKind::Edit && tool.path.as_deref() == Some("src/a.rs"))
+        );
+        assert!(matches!(&ev[6], ChatEvent::ToolFinished { ok: false, .. }));
+        assert!(matches!(&ev[11], ChatEvent::TurnFinished { interrupted: true, .. }));
+        assert!(rollout_events(&file, lines.len()).is_empty());
+
+        // A thread recorded without the events: the items sent to the model, less what Codex
+        // adds for the model alone. Output as plain text, and as parts.
+        let item = |payload: Value| json!({"timestamp": "t", "ordinal": 1, "type": "response_item", "payload": payload}).to_string();
+        let paged = [
+            item(json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>\n  <cwd>/w</cwd>"}]})),
+            item(json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "what's here?"}]})),
+            item(json!({"type": "function_call", "name": "exec_command", "call_id": "c1", "arguments": "{\"command\":\"ls\"}"})),
+            item(json!({"type": "function_call_output", "call_id": "c1", "output": "a.rs"})),
+            item(json!({"type": "local_shell_call", "call_id": "c2", "status": "completed", "action": {"type": "exec", "command": ["ls", "-la"]}})),
+            item(json!({"type": "function_call_output", "call_id": "c2", "output": [{"type": "input_text", "text": "total 0"}]})),
+            item(json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "One file."}]})),
+        ]
+        .join("\n");
+        let ev = rollout_events(&paged, 0);
+        let kinds: Vec<String> = ev.iter().map(|e| serde_json::to_value(e).unwrap()["type"].as_str().unwrap().to_string()).collect();
+        assert_eq!(
+            kinds,
+            ["userMessage", "turnStarted", "toolStarted", "toolFinished", "toolStarted", "toolFinished", "text", "turnFinished"]
+        );
+        assert!(matches!(&ev[0], ChatEvent::UserMessage { text, .. } if text == "what's here?"));
+        assert!(matches!(&ev[2], ChatEvent::ToolStarted { tool, .. } if tool.title == "ls"));
+        assert!(matches!(&ev[3], ChatEvent::ToolFinished { ok: true, output, .. } if output == "a.rs"));
+        assert!(matches!(&ev[4], ChatEvent::ToolStarted { tool, .. } if tool.title == "ls -la"));
+        assert!(matches!(&ev[5], ChatEvent::ToolFinished { output, .. } if output == "total 0"));
+        assert!(matches!(&ev[6], ChatEvent::Text { text, .. } if text == "One file."));
+
+        // As Codex 0.167 records a turn (lines from a real rollout, cut short): its own
+        // messages in the user's name are marked as the harness's, the typed one as the
+        // user's, and the turn ends with `task_complete`.
+        let passthrough = |kind: &str| json!({"content_item_kinds": [kind], "content_item_metadata": [{"provenance": {"type": if kind == "user.text" { "user" } else { "harness" }}}]});
+        let real = [
+            json!({"timestamp": "2026-11-11T08:09:16.389Z", "ordinal": 0, "type": "session_meta", "payload": {"id": "01a1c9a7-711f-7b31-9642-c86eb01ecec9"}}),
+            json!({"timestamp": "2026-11-11T08:09:16.389Z", "ordinal": 1, "type": "event_msg", "payload": {"type": "task_started", "turn_id": "t"}}),
+            json!({"timestamp": "2026-11-11T08:09:16.510Z", "ordinal": 3, "type": "response_item", "payload": {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "You are Codex"}]}}),
+            json!({"timestamp": "2026-11-11T08:09:16.511Z", "ordinal": 7, "type": "response_item", "payload": {"type": "message", "role": "user",
+                "content": [{"type": "input_text", "text": "Not markup, but the harness's all the same"}], "internal_chat_message_metadata_passthrough": passthrough("environments.environment_context")}}),
+            json!({"timestamp": "2026-11-11T08:09:16.520Z", "ordinal": 11, "type": "response_item", "payload": {"type": "message", "role": "user",
+                "content": [{"type": "input_text", "text": "Reply with just OK."}], "internal_chat_message_metadata_passthrough": passthrough("user.text")}}),
+            json!({"timestamp": "2026-11-11T08:09:16.522Z", "ordinal": 12, "type": "event_msg", "payload": {"type": "item_completed", "item": {"type": "UserMessage", "content": [{"type": "text", "text": "Reply with just OK."}]}}}),
+            json!({"timestamp": "2026-11-11T08:09:17.000Z", "ordinal": 13, "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "OK"}]}}),
+            json!({"timestamp": "2026-11-11T08:09:30.662Z", "ordinal": 14, "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "t", "last_agent_message": "OK"}}),
+            json!({"timestamp": "2026-11-11T08:09:31.000Z", "ordinal": 15, "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "after the turn"}]}}),
+        ];
+        let ev = rollout_events(&real.iter().map(Value::to_string).collect::<Vec<_>>().join("\n"), 0);
+        let kinds: Vec<String> = ev.iter().map(|e| serde_json::to_value(e).unwrap()["type"].as_str().unwrap().to_string()).collect();
+        assert_eq!(kinds, ["userMessage", "turnStarted", "text", "turnFinished"]);
+        assert!(matches!(&ev[0], ChatEvent::UserMessage { text, .. } if text == "Reply with just OK."));
+    }
 
     fn run(lines: &[Value]) -> (Vec<ChatEvent>, Arc<Mutex<State>>) {
         let out = Arc::new(Mutex::new(Vec::new()));

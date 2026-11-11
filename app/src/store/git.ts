@@ -5,7 +5,7 @@ import { useEffect } from "react"
 import { toast } from "sonner"
 import { create } from "zustand"
 import { git, worktrees as wt, type Scope, type Status, type Worktree } from "@/lib/git"
-import { useApp, useProject } from "./app"
+import { paneOf, useApp, usePane, useProject } from "./app"
 import { useChats } from "./chats"
 
 /** Something opened from the side panel, shown in the main area instead of the chat. */
@@ -18,13 +18,13 @@ type GitStore = {
   status: Record<string, Status | null>
   errors: Record<string, string | null>
   busy: string | null
-  viewer: Viewer | null
   /** Worktrees per project (empty for folders that aren't repositories). */
   worktrees: Record<string, Worktree[]>
   loadWorktrees(projectId: string): Promise<void>
   refresh(scope: Scope): Promise<void>
   /** Runs a git action with a busy label, then refreshes. */
   run<T>(scope: Scope, label: string, f: () => Promise<T>): Promise<T | undefined>
+  /** Shows `v` in the active pane in place of its chat (null: the chat again). */
   open(v: Viewer | null): void
 }
 
@@ -57,7 +57,6 @@ export const useGit = create<GitStore>((set, get) => ({
   status: {},
   errors: {},
   busy: null,
-  viewer: null,
   worktrees: {},
 
   async loadWorktrees(projectId) {
@@ -101,7 +100,7 @@ export const useGit = create<GitStore>((set, get) => ({
   },
 
   open(viewer) {
-    set({ viewer })
+    if (paneOf(useApp.getState()).viewer !== viewer) useApp.getState().setPane({ viewer })
   },
 }))
 
@@ -112,20 +111,26 @@ function scopeOf(project: { id: string; path: string } | null, chatId: string | 
   return { projectId: project.id, cwd }
 }
 
-/** The folder the side panel works on: the open chat's (a worktree) or the project's. */
+/** The folder this component's pane works on (the active pane's, for the side panel): the
+ *  open chat's (a worktree) or the project's. */
 export function useScope(): Scope | null {
   const project = useProject()
-  const chatId = useApp((s) => s.chatId)
+  const { chatId, draftCwd } = usePane()
   const meta = useChats((s) => s.metas.find((m) => m.id === chatId))
-  const draftCwd = useApp((s) => s.draftCwd)
   return scopeOf(project, chatId, meta, draftCwd)
 }
 
-/** `useScope` outside React, as things are now. */
-export function currentScope(): Scope | null {
-  const { settings, projectId, chatId, draftCwd } = useApp.getState()
-  const project = settings?.projects.find((p) => p.id === projectId) ?? null
+/** `useScope` outside React, as things are now: the active pane's, or pane `pane`'s. */
+export function currentScope(pane?: string | null): Scope | null {
+  const app = useApp.getState()
+  const { projectId, chatId, draftCwd } = paneOf(app, pane)
+  const project = app.settings?.projects.find((p) => p.id === projectId) ?? null
   return scopeOf(project, chatId, useChats.getState().metas.find((m) => m.id === chatId), draftCwd)
+}
+
+/** What the active pane shows in place of its chat, for the side panel to mark. */
+export function useViewer(): Viewer | null {
+  return usePane().viewer
 }
 
 /** The scope's status, kept fresh: polled every few seconds (slower over SSH) and after turns. */

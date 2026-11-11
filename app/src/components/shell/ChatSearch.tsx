@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { MessageSquareText } from "lucide-react"
 import { create } from "zustand"
 import { AgentGlyph } from "@/components/icons"
@@ -77,13 +77,15 @@ export function ChatSearch() {
   const recent = metas.filter((m) => !waitingSet.has(m.id)).slice(0, 8)
   const searching = !!query.trim() && hits?.query !== query.trim()
 
+  // Ctrl/⌘ held as a chat is picked (Enter or a click): it opens beside the active pane.
+  const side = useRef(false)
   const go = (id: string) => {
     setOpen(false)
     const chats = useChats.getState()
     const meta = chats.metas.find((m) => m.id === id)
     if (!meta) return
+    if (side.current) return void chats.open(id, "side")
     if (needsYou(chats).includes(id)) return void chats.answerChat(id)
-    useApp.getState().selectProject(meta.projectId)
     void chats.open(id)
   }
 
@@ -106,7 +108,12 @@ export function ChatSearch() {
       <DialogContent className="top-[18%] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl" showCloseButton={false}>
         <DialogTitle className="sr-only">Search chats</DialogTitle>
         <DialogDescription className="sr-only">Find a chat by its title or by anything said or run in it.</DialogDescription>
-        <Command shouldFilter={false} className="[&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-item]]:py-2">
+        <Command
+          shouldFilter={false}
+          className="[&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-item]]:py-2"
+          onKeyDownCapture={(e) => (side.current = e.ctrlKey || e.metaKey)}
+          onPointerDownCapture={(e) => (side.current = e.ctrlKey || e.metaKey)}
+        >
           <CommandInput value={query} onValueChange={setQuery} placeholder="Search chats: titles, messages, commands, files…" className="text-[13px]" />
           <CommandList className="max-h-[min(60vh,420px)]">
             {query.trim() ? (
@@ -171,6 +178,14 @@ export function ChatSearch() {
               </>
             )}
           </CommandList>
+          <div className="flex h-8 shrink-0 items-center gap-3 border-t px-3 text-[11px] text-faint">
+            <span>
+              <kbd className="font-mono">Enter</kbd> to open
+            </span>
+            <span>
+              <kbd className="font-mono">Ctrl+Enter</kbd> to open beside this chat
+            </span>
+          </div>
         </Command>
       </DialogContent>
     </Dialog>

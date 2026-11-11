@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 
 use crate::account::{Account, LimitExtra, LimitWindow, Limits};
 use crate::driver::{DriverResult, StartOptions};
-use crate::event::{ModelOption, SlashCommand};
+use crate::event::{ChatEvent, ModelOption, SlashCommand, ToolCall, ToolKind};
 use crate::jsonrpc::Rpc;
 
 pub const NOT_SIGNED_IN: &str = "Grok isn't signed in. Run `grok login` in a terminal (Settings → Providers → Grok Build → Sign in).";
@@ -104,6 +104,106 @@ fn with_agent<T>(binary: &str, location: &Location, env: &[EnvVar], f: impl FnOn
     let _ = child.kill();
     let _ = child.wait();
     result
+}
+
+// ---- Saved conversations ---------------------------------------------------------------------
+
+/// What was said in a session after the first `skip` lines of its history
+/// (`sessions/<folder>/<session>/chat_history.jsonl`, one message a line): the events a driver
+/// would have reported for the same turns, for a chat that was open in Grok Build's own
+/// interface meanwhile. `tag` keeps their ids apart from every other turn's in the chat.
+pub fn history_events(text: &str, skip: usize, tag: &str) -> Vec<ChatEvent> {
+    let mut out = Vec::new();
+    let mut turn: Option<String> = None;
+    let finish = |out: &mut Vec<ChatEvent>, turn: &mut Option<String>| {
+        if let Some(turn_id) = turn.take() {
+            out.push(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted: false });
+        }
+    };
+    // A message's text: as it is, or its text parts.
+    let content = |v: &Value| match &v["content"] {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
+    };
+    for (n, v) in text.lines().enumerate().skip(skip).filter_map(|(n, l)| Some((n, serde_json::from_str::<Value>(l).ok()?))) {
+        let id = format!("cli-{tag}-{n}");
+        match v["type"].as_str() {
+            Some("user") => {
+                // What the user typed is wrapped in `<user_query>`; the other user lines are
+                // what Grok tells the model itself (its rules, reminders).
+                let all = content(&v);
+                let said = match all.split_once("<user_query>").and_then(|(_, rest)| rest.rsplit_once("</user_query>")) {
+                    Some((query, _)) => query.trim(),
+                    None if v["synthetic_reason"].is_null() && !all.trim_start().starts_with('<') => all.trim(),
+                    None => continue,
+                };
+                if said.is_empty() {
+                    continue;
+                }
+                finish(&mut out, &mut turn);
+                out.push(ChatEvent::UserMessage { id: id.clone(), text: said.to_string(), images: vec![], files: vec![] });
+                out.push(ChatEvent::TurnStarted { turn_id: id.clone() });
+                turn = Some(id);
+            }
+            _ if turn.is_none() => {}
+            Some("reasoning") => {
+                let t = v["summary"].as_array().into_iter().flatten().filter_map(|s| s["text"].as_str()).collect::<Vec<_>>().join("\n");
+                if !t.trim().is_empty() {
+                    out.push(ChatEvent::Reasoning { item_id: id, text: t });
+                }
+            }
+            Some("assistant") => {
+                let t = content(&v);
+                if !t.trim().is_empty() {
+                    out.push(ChatEvent::Text { item_id: id, text: t });
+                }
+                for call in v["tool_calls"].as_array().into_iter().flatten() {
+                    let name = call["name"].as_str().unwrap_or("tool");
+                    // Its arguments are JSON in a string.
+                    let input = call["arguments"].as_str().and_then(|a| serde_json::from_str::<Value>(a).ok()).unwrap_or(Value::Null);
+                    let s = |k: &str| input[k].as_str().unwrap_or("").to_string();
+                    let path = ["target_file", "file_path", "path"].iter().map(|k| s(k)).find(|p| !p.is_empty());
+                    let kind = match name {
+                        "run_terminal_command" => ToolKind::Bash,
+                        n if n.contains("read") => ToolKind::Read,
+                        n if n.contains("edit") || n.contains("replace") => ToolKind::Edit,
+                        n if n.contains("write") || n.contains("create") => ToolKind::Write,
+                        n if n.contains("search") || n.contains("grep") || n.contains("glob") || n.contains("list") => ToolKind::Search,
+                        n if n.contains("web") || n.contains("fetch") => ToolKind::Web,
+                        _ => ToolKind::Other,
+                    };
+                    let title = [s("command"), path.clone().unwrap_or_default(), s("pattern"), s("query"), s("url")]
+                        .into_iter()
+                        .find(|t| !t.is_empty())
+                        .unwrap_or_else(|| name.to_string());
+                    let tool = ToolCall { kind, name: name.into(), title, input, path };
+                    out.push(ChatEvent::ToolStarted { item_id: call["id"].as_str().unwrap_or("").into(), tool });
+                }
+            }
+            Some("tool_result") => {
+                // A command's result starts with how it ended (`exit: 0`).
+                let all = content(&v);
+                let (ok, output) = match all.strip_prefix("exit: ").and_then(|rest| rest.split_once('\n')) {
+                    Some((code, output)) => (code.trim() == "0", output.to_string()),
+                    None => (true, all.clone()),
+                };
+                let mut output = output.trim_end().to_string();
+                if output.len() > 16 * 1024 {
+                    let mut cut = 16 * 1024;
+                    while !output.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    output.truncate(cut);
+                    output.push_str("\n…");
+                }
+                out.push(ChatEvent::ToolFinished { item_id: v["tool_call_id"].as_str().unwrap_or("").into(), ok, output, diff: None });
+            }
+            _ => {}
+        }
+    }
+    finish(&mut out, &mut turn);
+    out
 }
 
 // ---- Sign-in ---------------------------------------------------------------------------------
@@ -331,6 +431,56 @@ pub fn models(binary: &str, location: &Location, env: &[EnvVar]) -> DriverResult
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A session's history as Grok Build 1.x saves it (two turns captured from it, cut
+    /// short): what was said after the lines the chat already has.
+    #[test]
+    fn reads_what_was_said_in_a_saved_history() {
+        let lines = [
+            json!({"type": "system", "content": "You are Grok…"}),
+            json!({"type": "user", "content": [{"type": "text", "text": "<user_info>\nOS Version: linux\n</user_info>"}]}),
+            json!({"type": "user", "content": [{"type": "text", "text": "<user_query>\nfrom the chat\n</user_query>"}], "prompt_index": 0}),
+            json!({"type": "assistant", "content": "before", "model_id": "grok-4.7-build"}),
+            // From here on, the CLI's.
+            json!({"type": "user", "content": [{"type": "text", "text": "<system-reminder>\nMCP servers currently connecting\n</system-reminder>"}], "synthetic_reason": "system_reminder"}),
+            json!({"type": "user", "content": [{"type": "text", "text": "<user_query>\nRun the shell command `echo hi-from-tool` and then reply with just DONE.\n</user_query>"}], "prompt_index": 1}),
+            json!({"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "Running `echo hi-from-tool`."}], "status": "completed"}),
+            json!({"type": "assistant", "content": "I'll run that command.", "tool_calls": [{"id": "call-1", "name": "run_terminal_command", "arguments": "{\"command\":\"echo hi-from-tool\",\"description\":\"Print\"}"}]}),
+            json!({"type": "tool_result", "tool_call_id": "call-1", "content": "exit: 0\nhi-from-tool\n"}),
+            json!({"type": "reasoning", "id": "rs_2", "summary": [], "status": "completed"}),
+            json!({"type": "assistant", "content": "DONE", "model_id": "grok-4.7-build"}),
+            json!({"type": "assistant", "content": "", "tool_calls": [{"id": "call-2", "name": "run_terminal_command", "arguments": "{\"command\":\"false\"}"}]}),
+            json!({"type": "tool_result", "tool_call_id": "call-2", "content": "exit: 1\n"}),
+        ];
+        let file = lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+        let ev = history_events(&file, 4, "r1");
+        let kinds: Vec<String> = ev.iter().map(|e| serde_json::to_value(e).unwrap()["type"].as_str().unwrap().to_string()).collect();
+        assert_eq!(
+            kinds,
+            [
+                "userMessage",
+                "turnStarted",
+                "reasoning",
+                "text",
+                "toolStarted",
+                "toolFinished",
+                "text",
+                "toolStarted",
+                "toolFinished",
+                "turnFinished"
+            ]
+        );
+        assert!(
+            matches!(&ev[0], ChatEvent::UserMessage { id, text, .. } if id == "cli-r1-5" && text == "Run the shell command `echo hi-from-tool` and then reply with just DONE.")
+        );
+        assert!(
+            matches!(&ev[4], ChatEvent::ToolStarted { item_id, tool } if item_id == "call-1" && tool.kind == ToolKind::Bash && tool.title == "echo hi-from-tool")
+        );
+        assert!(matches!(&ev[5], ChatEvent::ToolFinished { ok: true, output, .. } if output == "hi-from-tool"));
+        assert!(matches!(&ev[6], ChatEvent::Text { text, .. } if text == "DONE"));
+        assert!(matches!(&ev[8], ChatEvent::ToolFinished { ok: false, .. }));
+        assert!(history_events(&file, lines.len(), "r1").is_empty());
+    }
 
     /// `initialize`'s `_meta.modelState` from grok 1.0.77 (cut to two models).
     fn state() -> Value {

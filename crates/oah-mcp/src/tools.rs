@@ -186,7 +186,7 @@ pub fn list(settings: &Settings) -> Vec<Value> {
             json!({"session_id": session_id()}), &["session_id"], false, true),
         tool("rename_session", "Rename a session", "Sets the title oah shows.",
             json!({"session_id": session_id(), "title": string()}), &["session_id", "title"], false, false),
-        tool("close_session", "Close a session's agent", "Ends its agent CLI (the next message resumes it). Use when done.",
+        tool("close_session", "Close a session's agent", "Ends its agent CLI (the next message resumes it). Use when done. Also ends the agent's own CLI when the session is open in it on the computer, which is when messages to it are refused.",
             json!({"session_id": session_id()}), &["session_id"], false, false),
         tool("get_changes", "Uncommitted changes", "git status where the project or a worktree is: branch, and files with line counts.",
             json!({"project_id": string(), "worktree": worktree.clone(), "cwd": cwd.clone()}), &["project_id"], true, false),

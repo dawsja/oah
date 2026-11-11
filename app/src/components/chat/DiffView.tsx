@@ -35,8 +35,9 @@ export function DiffLines({ patch, className }: { patch: string; className?: str
         <tbody>
           {lines.map((l, i) => (
             <tr key={i} className={l.cls === "a" ? "bg-add" : l.cls === "d" ? "bg-del" : undefined}>
-              <td className="w-10 pr-2 text-right align-top text-faint select-none">{l.cls === "h" ? "" : (l.old ?? "")}</td>
-              <td className="w-10 pr-2 text-right align-top text-faint select-none">{l.cls === "h" ? "" : (l.new ?? "")}</td>
+              {/* Never broken: in a narrow pane the code scrolls sideways, the numbers stay whole. */}
+              <td className="w-10 pr-2 text-right align-top whitespace-nowrap text-faint select-none">{l.cls === "h" ? "" : (l.old ?? "")}</td>
+              <td className="w-10 pr-2 text-right align-top whitespace-nowrap text-faint select-none">{l.cls === "h" ? "" : (l.new ?? "")}</td>
               <td className={cn("w-4 align-top select-none", l.cls === "a" ? "text-green" : l.cls === "d" ? "text-red" : "text-faint")}>
                 {l.cls === "a" ? "+" : l.cls === "d" ? "−" : ""}
               </td>

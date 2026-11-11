@@ -6,7 +6,7 @@ import { Tip } from "@/components/Tip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { git, KIND_COLOR, KIND_LETTER, type Change, type Scope, type Status } from "@/lib/git"
 import { cn } from "@/lib/utils"
-import { useGit, useStatus } from "@/store/git"
+import { useGit, useStatus, useViewer } from "@/store/git"
 import { BranchPicker } from "./BranchPicker"
 
 /** Changes in the workspace: stage, discard, commit, and sync with the remote. */
@@ -213,7 +213,7 @@ function Section({ scope, title, changes, kind }: { scope: Scope; title: string;
 
 function ChangeRow({ scope, change, staged }: { scope: Scope; change: Change; staged: boolean }) {
   const run = useGit((s) => s.run)
-  const viewer = useGit((s) => s.viewer)
+  const viewer = useViewer()
   const open = useGit((s) => s.open)
   const slash = change.path.lastIndexOf("/")
   const name = change.path.slice(slash + 1)

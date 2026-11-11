@@ -26,7 +26,9 @@ import { git } from "@/lib/git"
 import { attachmentMime, readAttachment, MAX_IMAGE, type Attachment } from "@/lib/attachments"
 import { AGENT_LABEL, PERMISSION_LABEL, type AgentKind, type PermissionMode } from "@/lib/types"
 import { PERMISSION_ICON, PERMISSION_TONE } from "@/components/permission"
+import { usePane } from "@/store/app"
 import { useScope } from "@/store/git"
+import type { InsertDetail } from "@/store/insert"
 import { drafts } from "@/store/drafts"
 import { cn } from "@/lib/utils"
 import { PromptHistory, historyBoundary } from "@/lib/prompt-history"
@@ -80,10 +82,11 @@ const MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
 /** The send-now chord's modifier, as shown. */
 export const STEER_KEY = MAC ? "⌘" : "Ctrl"
 
-/** Puts a message back in the composer to edit (a queued one taken off the queue). */
-export function editInComposer(text: string, images: Attachment[]) {
-  window.dispatchEvent(new CustomEvent("oah:edit", { detail: { text, images } }))
+/** Puts a message back in the composer of pane `pane` to edit (a queued one taken off the queue). */
+export function editInComposer(text: string, images: Attachment[], pane: string) {
+  window.dispatchEvent(new CustomEvent<EditDetail>("oah:edit", { detail: { pane, text, images } }))
 }
+type EditDetail = { pane: string; text: string; images: Attachment[] }
 const MAX_IMAGES = 8
 
 /** Files for the @ menu, per folder, kept briefly. */
@@ -106,6 +109,8 @@ export function Composer(p: ComposerProps) {
   }
   const PermissionIcon = PERMISSION_ICON[p.permission]
   const scope = useScope()
+  // With two panes there are two composers: each takes only what's meant for its pane.
+  const paneId = usePane().id
   const [menu, setMenu] = useState<{ start: number; query: string; items: string[]; index: number } | null>(null)
   const updateMenu = async (value: string, caret: number) => {
     const m = mentionAt(value, caret)
@@ -225,27 +230,33 @@ export function Composer(p: ComposerProps) {
     })
     if (read.length) setImages((cur) => [...cur, ...read].slice(0, MAX_IMAGES))
   }
+  /** Puts `add` at the cursor: a block (terminal output) on a line of its own, a mention or a
+   *  word after a space. */
+  const insert = (add: string) => {
+    const el = ref.current
+    const at = el?.selectionStart ?? text.length
+    setText((t) => {
+      const before = t.slice(0, at)
+      const sep = !before ? "" : add.includes("\n") ? (before.endsWith("\n") ? "" : "\n") : /\s$/.test(before) ? "" : " "
+      return before + sep + add + t.slice(at)
+    })
+    requestAnimationFrame(() => el?.focus({ preventScroll: true }))
+  }
   // "Add to chat" from the side panel puts `@path ` at the cursor.
   useEffect(() => {
     const onInsert = (e: Event) => {
-      const add = (e as CustomEvent<string>).detail
-      const el = ref.current
-      const at = el?.selectionStart ?? text.length
-      setText((t) => {
-        const before = t.slice(0, at)
-        // A block (terminal output) starts on a line of its own; a mention or a word after a space.
-        const sep = !before ? "" : add.includes("\n") ? (before.endsWith("\n") ? "" : "\n") : /\s$/.test(before) ? "" : " "
-        return before + sep + add + t.slice(at)
-      })
-      requestAnimationFrame(() => el?.focus({ preventScroll: true }))
+      const { pane, text: add } = (e as CustomEvent<InsertDetail>).detail
+      if (pane === paneId) insert(add)
     }
     window.addEventListener("oah:insert", onInsert)
     return () => window.removeEventListener("oah:insert", onInsert)
-  }, [text.length])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text.length, paneId])
   // A queued message back to edit: it goes before whatever is typed already.
   useEffect(() => {
     const onEdit = (e: Event) => {
-      const back = (e as CustomEvent<{ text: string; images: Attachment[] }>).detail
+      const back = (e as CustomEvent<EditDetail>).detail
+      if (back.pane !== paneId) return
       setText((t) => (t.trim() ? `${back.text}\n\n${t}` : back.text))
       setImages((cur) => [...back.images, ...cur].slice(0, MAX_IMAGES))
       requestAnimationFrame(() => {
@@ -256,7 +267,7 @@ export function Composer(p: ComposerProps) {
     }
     window.addEventListener("oah:edit", onEdit)
     return () => window.removeEventListener("oah:edit", onEdit)
-  }, [])
+  }, [paneId])
   const send = (how: "send" | "steer" = "send") => {
     const t = text.trim()
     if (!t && !images.length && how === "steer" && p.running) return p.onSteerQueued?.()
@@ -281,7 +292,7 @@ export function Composer(p: ComposerProps) {
 
   return (
     <div
-      className={cn("rounded-2xl border border-border bg-card shadow-[0_6px_20px_-12px_rgb(15_23_42/0.25)] dark:shadow-[0_1px_0_rgb(255_255_255/0.03)_inset,0_8px_24px_-12px_rgb(0_0_0/0.6)] focus-within:border-ring/70", dragging && "border-primary", p.className)}
+      className={cn("@container rounded-2xl border border-border bg-card shadow-[0_6px_20px_-12px_rgb(15_23_42/0.25)] dark:shadow-[0_1px_0_rgb(255_255_255/0.03)_inset,0_8px_24px_-12px_rgb(0_0_0/0.6)] focus-within:border-ring/70", dragging && "border-primary", p.className)}
       onDragOver={(e) => {
         if ([...e.dataTransfer.items].some((i) => i.kind === "file")) {
           e.preventDefault()
@@ -453,12 +464,13 @@ export function Composer(p: ComposerProps) {
           }
         }}
       />
-      <div className="flex items-center gap-1 px-2 pb-2">
+      {/* In a narrow pane the agent is its glyph alone, then the model's name gives way. */}
+      <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild disabled={p.lockAgent}>
-            <button className="rounded-full flex h-7 items-center gap-1.5 px-2.5 text-[12px] font-medium hover:bg-accent disabled:hover:bg-transparent">
+            <button className="rounded-full flex h-7 shrink-0 items-center gap-1.5 px-2.5 text-[12px] font-medium whitespace-nowrap hover:bg-accent disabled:hover:bg-transparent">
               <AgentGlyph agent={p.agent} className="size-3.5" />
-              {AGENT_LABEL[p.agent]}
+              <span className="@max-[24rem]:sr-only">{AGENT_LABEL[p.agent]}</span>
               {p.lockAgent ? null : <ChevronDown className="size-3 text-muted-foreground" />}
             </button>
           </DropdownMenuTrigger>
@@ -481,7 +493,7 @@ export function Composer(p: ComposerProps) {
           }}
         >
           <DropdownMenuTrigger asChild disabled={!p.onModel}>
-            <button className="rounded-full flex h-7 max-w-56 items-center gap-1 px-2.5 font-mono text-[11.5px] text-muted-foreground hover:bg-accent disabled:hover:bg-transparent">
+            <button className="rounded-full flex h-7 max-w-56 min-w-0 items-center gap-1 px-2.5 font-mono text-[11.5px] whitespace-nowrap text-muted-foreground hover:bg-accent disabled:hover:bg-transparent">
               <span className="truncate">{p.models?.find((m) => m.id === p.model)?.name ?? (p.model || "default model")}</span>
               {p.effort ? <span className="shrink-0 text-faint">· {effortLabel(p.effort)}</span> : null}
               {p.onModel ? <ChevronDown className="size-3 shrink-0" /> : null}
@@ -517,7 +529,7 @@ export function Composer(p: ComposerProps) {
         </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className={cn("rounded-full flex h-7 items-center gap-1 px-2.5 text-[12px] hover:bg-accent", PERMISSION_TONE[p.permission] || "text-muted-foreground")}>
+            <button className={cn("rounded-full flex h-7 shrink-0 items-center gap-1 px-2.5 text-[12px] whitespace-nowrap hover:bg-accent", PERMISSION_TONE[p.permission] || "text-muted-foreground")}>
               <PermissionIcon className="size-3.5" />
               {PERMISSION_LABEL[p.permission]}
               <ChevronDown className="size-3" />
@@ -539,14 +551,14 @@ export function Composer(p: ComposerProps) {
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
           <ContextRing context={p.context ?? null} />
           <Tip content="Attach images (up to 5 MB each, 8 at a time)">
             <button className="rounded-full grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Attach image" onClick={() => picker.current?.click()}>
               <Paperclip className="size-3.5" />
             </button>
           </Tip>
-          <Dictation onText={(t) => window.dispatchEvent(new CustomEvent("oah:insert", { detail: t + " " }))} />
+          <Dictation onText={(t) => insert(t + " ")} />
           {p.running && (text.trim() || images.length) ? (
             <Tip content={`Queue: sends when the agent finishes (Enter) · Send now (${STEER_KEY}+Enter)`}>
               <button className="rounded-full ml-1 grid size-7 place-items-center bg-primary text-primary-foreground hover:bg-primary/90" aria-label="Queue" onClick={() => send()}>

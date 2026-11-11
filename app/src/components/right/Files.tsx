@@ -3,7 +3,8 @@ import { AtSign, ChevronDown, ChevronRight, File, Folder, RefreshCw, Search, Tex
 import { Tip } from "@/components/Tip"
 import { git, KIND_COLOR, type ChangeKind, type GrepHit, type Scope } from "@/lib/git"
 import { cn } from "@/lib/utils"
-import { useGit, useStatus } from "@/store/git"
+import { useGit, useStatus, useViewer } from "@/store/git"
+import { insertIntoChat } from "@/store/insert"
 
 type Node = { name: string; path: string; dir: boolean; children: Node[] }
 
@@ -32,7 +33,7 @@ function tree(paths: string[]): Node[] {
 
 /** Puts `@path` into the composer. */
 export function addToChat(path: string) {
-  window.dispatchEvent(new CustomEvent("oah:insert", { detail: `@${path} ` }))
+  insertIntoChat(`@${path} `)
 }
 
 /** The workspace's files: a tree with git colors, a name filter, and a search inside files. */
@@ -118,7 +119,7 @@ function TreeNode({ node, depth, kinds }: { node: Node; depth: number; kinds: Ma
 
 function FileRow({ path, label, depth, kind, line }: { path: string; label: string; depth: number; kind?: ChangeKind; line?: number }) {
   const open = useGit((s) => s.open)
-  const viewer = useGit((s) => s.viewer)
+  const viewer = useViewer()
   const active = viewer?.kind === "file" && viewer.path === path
   return (
     <div

@@ -479,21 +479,8 @@ impl Translator {
     }
 
     fn tool_results(&mut self, v: &Value) {
-        let Some(content) = v["message"]["content"].as_array() else { return };
-        for block in content.iter().filter(|b| b["type"] == "tool_result") {
-            let id = block["tool_use_id"].as_str().unwrap_or("").to_string();
-            let ok = !block["is_error"].as_bool().unwrap_or(false);
-            let mut output = result_text(&block["content"]);
-            if output.len() > MAX_OUTPUT {
-                let mut cut = MAX_OUTPUT;
-                while !output.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                output.truncate(cut);
-                output.push_str("\n…");
-            }
-            let diff = if ok { patch_of(&v["tool_use_result"]) } else { None };
-            self.emit(ChatEvent::ToolFinished { item_id: id, ok, output, diff });
+        for e in tool_finished(v, &v["tool_use_result"]) {
+            self.emit(e);
         }
     }
 
@@ -982,6 +969,144 @@ pub fn tool_call(name: &str, input: &Value) -> ToolCall {
     ToolCall { kind, name: name.into(), title: if title.is_empty() { name.into() } else { title }, input: input.clone(), path }
 }
 
+/// A user message's tool results as `ToolFinished` events; `result` is what Claude Code adds
+/// about the tool's effect (an edit's patch).
+fn tool_finished(v: &Value, result: &Value) -> Vec<ChatEvent> {
+    let Some(content) = v["message"]["content"].as_array() else { return vec![] };
+    content
+        .iter()
+        .filter(|b| b["type"] == "tool_result")
+        .map(|block| {
+            let id = block["tool_use_id"].as_str().unwrap_or("").to_string();
+            let ok = !block["is_error"].as_bool().unwrap_or(false);
+            let mut output = result_text(&block["content"]);
+            if output.len() > MAX_OUTPUT {
+                let mut cut = MAX_OUTPUT;
+                while !output.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                output.truncate(cut);
+                output.push_str("\n…");
+            }
+            let diff = if ok { patch_of(result) } else { None };
+            ChatEvent::ToolFinished { item_id: id, ok, output, diff }
+        })
+        .collect()
+}
+
+/// What was said in a session from `since` (Unix milliseconds) on, read from its file
+/// (`projects/<folder>/<session>.jsonl`, one message a line): the events a driver would have
+/// reported for the same turns, for a chat that was open in Claude Code's own interface
+/// meanwhile. It starts at the first thing the user typed: what a turn from before `since`
+/// still wrote isn't the CLI's.
+pub fn session_events(text: &str, since: u64) -> Vec<ChatEvent> {
+    let mut out = Vec::new();
+    let mut turn: Option<String> = None;
+    let finish = |out: &mut Vec<ChatEvent>, turn: &mut Option<String>| {
+        if let Some(turn_id) = turn.take() {
+            out.push(ChatEvent::TurnFinished { turn_id, usage: None, cost_usd: None, duration_ms: None, interrupted: false });
+        }
+    };
+    for v in text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        // A subagent's own conversation, and lines from before the CLI had the session.
+        if v["isSidechain"] == true || v["timestamp"].as_str().and_then(iso_ms).is_none_or(|t| t < since) {
+            continue;
+        }
+        let uuid = v["uuid"].as_str().unwrap_or("");
+        let msg = &v["message"];
+        match v["type"].as_str() {
+            Some("user") => {
+                let results = tool_finished(&v, &v["toolUseResult"]);
+                if !results.is_empty() {
+                    if turn.is_some() {
+                        out.extend(results);
+                    }
+                    continue;
+                }
+                let (said, images) = typed(&msg["content"]);
+                // What a slash command leaves in the session isn't something the user said.
+                if v["isMeta"] == true || v["isCompactSummary"] == true || (said.is_empty() && images.is_empty()) || said.starts_with('<') {
+                    continue;
+                }
+                finish(&mut out, &mut turn);
+                out.push(ChatEvent::UserMessage { id: uuid.to_string(), text: said, images, files: vec![] });
+                out.push(ChatEvent::TurnStarted { turn_id: format!("cli-{uuid}") });
+                turn = Some(format!("cli-{uuid}"));
+            }
+            Some("assistant") if turn.is_some() => {
+                for (i, block) in msg["content"].as_array().into_iter().flatten().enumerate() {
+                    match block["type"].as_str() {
+                        Some("text") => {
+                            let t = block["text"].as_str().unwrap_or("");
+                            if !t.trim().is_empty() {
+                                out.push(ChatEvent::Text { item_id: format!("{uuid}:t{i}"), text: t.into() });
+                            }
+                        }
+                        Some("thinking") => {
+                            let t = block["thinking"].as_str().unwrap_or("");
+                            if !t.is_empty() {
+                                out.push(ChatEvent::Reasoning { item_id: format!("{uuid}:r{i}"), text: t.into() });
+                            }
+                        }
+                        Some("tool_use") => {
+                            let name = block["name"].as_str().unwrap_or("");
+                            if name == "TodoWrite" {
+                                out.push(ChatEvent::Plan { items: todos(&block["input"]) });
+                            }
+                            out.push(ChatEvent::ToolStarted {
+                                item_id: block["id"].as_str().unwrap_or("").into(),
+                                tool: tool_call(name, &block["input"]),
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    finish(&mut out, &mut turn);
+    out
+}
+
+/// A user message's text, and the types of the images sent with it.
+fn typed(content: &Value) -> (String, Vec<String>) {
+    match content {
+        Value::String(s) => (s.trim().to_string(), vec![]),
+        Value::Array(parts) => {
+            let text = parts.iter().filter(|p| p["type"] == "text").filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n");
+            let images = parts
+                .iter()
+                .filter(|p| p["type"] == "image")
+                .map(|p| p["source"]["media_type"].as_str().unwrap_or("image/png").to_string());
+            (text.trim().to_string(), images.collect())
+        }
+        _ => (String::new(), vec![]),
+    }
+}
+
+/// `2026-11-11T00:49:12.345Z` as Unix milliseconds (the form session files stamp lines with).
+pub(crate) fn iso_ms(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| s.get(r)?.parse::<u64>().ok();
+    let (y, m, d) = (n(0..4)?, n(5..7)?, n(8..10)?);
+    let (h, min, sec) = (n(11..13)?, n(14..16)?, n(17..19)?);
+    if !(1970..=9999).contains(&y) || !(1..=12).contains(&m) || !(1..=31).contains(&d) || h > 23 || min > 59 || sec > 60 {
+        return None;
+    }
+    // Days since 1970-01-01 (Howard Hinnant's days_from_civil).
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let (era, yoe) = (y2 / 400, y2 % 400);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+    let frac: String = s[19..].strip_prefix('.').map(|f| f.chars().take_while(char::is_ascii_digit).take(3).collect()).unwrap_or_default();
+    let ms = if frac.is_empty() { 0 } else { format!("{frac:0<3}").parse::<u64>().ok()? };
+    Some((days * 86_400 + h * 3600 + min * 60 + sec) * 1000 + ms)
+}
+
 fn todos(input: &Value) -> Vec<PlanItem> {
     input["todos"]
         .as_array()
@@ -1346,6 +1471,68 @@ mod tests {
         assert_eq!(message_uuid("0F8FAD5B-D9CB-469F-A165-70867728950E"), "0f8fad5b-d9cb-469f-a165-70867728950e");
         let made = message_uuid("compact-1");
         assert_eq!((made.len(), &made[14..15]), (36, "4"));
+    }
+
+    #[test]
+    fn reads_timestamps() {
+        assert_eq!(iso_ms("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(iso_ms("2026-11-11T00:49:12.345Z"), Some(1_794_358_152_345));
+        assert_eq!(iso_ms("2024-02-29T12:00:00.5Z"), Some(1_709_208_000_500));
+        assert_eq!(iso_ms("yesterday"), None);
+    }
+
+    /// A session file as Claude Code writes it: what was said from a moment on, tools and
+    /// all, without what a slash command or a subagent left there.
+    #[test]
+    fn reads_what_was_said_in_a_session_file() {
+        let line = |ts: &str, v: Value| {
+            let mut v = v;
+            v["timestamp"] = json!(ts);
+            v.to_string()
+        };
+        let file = [
+            line("2026-11-11T00:00:01.000Z", json!({"type": "user", "uuid": "u0", "message": {"role": "user", "content": "from the chat"}})),
+            line("2026-11-11T00:00:02.000Z", json!({"type": "assistant", "uuid": "a0", "message": {"id": "m0", "content": [{"type": "text", "text": "before"}]}})),
+            // Still the earlier turn's, written after the CLI opened: not the CLI's.
+            line("2026-11-11T00:01:00.500Z", json!({"type": "assistant", "uuid": "a0b", "message": {"id": "m0", "content": [{"type": "text", "text": "late"}]}})),
+            line("2026-11-11T00:01:01.000Z", json!({"type": "user", "uuid": "c1", "isMeta": true, "message": {"role": "user", "content": "<local-command-caveat>x</local-command-caveat>"}})),
+            line("2026-11-11T00:01:02.000Z", json!({"type": "user", "uuid": "c2", "message": {"role": "user", "content": "<command-name>/model</command-name>"}})),
+            line("2026-11-11T00:01:05.000Z", json!({"type": "user", "uuid": "u1", "message": {"role": "user", "content": "run the tests"}})),
+            line("2026-11-11T00:01:06.000Z", json!({"type": "assistant", "uuid": "a1", "message": {"id": "m1", "content": [{"type": "thinking", "thinking": "hm"}]}})),
+            line("2026-11-11T00:01:07.000Z", json!({"type": "assistant", "uuid": "a2", "message": {"id": "m1", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "cargo test"}}]}})),
+            line("2026-11-11T00:01:08.000Z", json!({"type": "assistant", "uuid": "s1", "isSidechain": true, "message": {"id": "m9", "content": [{"type": "text", "text": "a subagent's"}]}})),
+            line("2026-11-11T00:01:09.000Z", json!({"type": "user", "uuid": "r1", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok: 3 passed"}]}})),
+            line("2026-11-11T00:01:10.000Z", json!({"type": "assistant", "uuid": "a3", "message": {"id": "m2", "content": [{"type": "text", "text": "All three pass."}]}})),
+            line("2026-11-11T00:02:00.000Z", json!({"type": "user", "uuid": "u2", "message": {"role": "user", "content": [{"type": "text", "text": "thanks"}]}})),
+            "{\"type\":\"tor".to_string(),
+        ]
+        .join("\n");
+        let ev = session_events(&file, iso_ms("2026-11-11T00:01:00.000Z").unwrap());
+        let kinds: Vec<String> = ev.iter().map(|e| serde_json::to_value(e).unwrap()["type"].as_str().unwrap().to_string()).collect();
+        assert_eq!(
+            kinds,
+            [
+                "userMessage",
+                "turnStarted",
+                "reasoning",
+                "toolStarted",
+                "toolFinished",
+                "text",
+                "turnFinished",
+                "userMessage",
+                "turnStarted",
+                "turnFinished"
+            ]
+        );
+        assert!(matches!(&ev[0], ChatEvent::UserMessage { id, text, .. } if id == "u1" && text == "run the tests"));
+        assert!(
+            matches!(&ev[3], ChatEvent::ToolStarted { item_id, tool } if item_id == "t1" && tool.kind == ToolKind::Bash && tool.title == "cargo test")
+        );
+        assert!(matches!(&ev[4], ChatEvent::ToolFinished { item_id, ok: true, output, .. } if item_id == "t1" && output == "ok: 3 passed"));
+        assert!(matches!(&ev[5], ChatEvent::Text { item_id, text } if item_id == "a3:t0" && text == "All three pass."));
+        assert!(matches!(&ev[7], ChatEvent::UserMessage { text, .. } if text == "thanks"));
+        // Nothing said since: nothing to add.
+        assert!(session_events(&file, iso_ms("2026-11-11T00:03:00.000Z").unwrap()).is_empty());
     }
 
     #[test]

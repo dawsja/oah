@@ -34,6 +34,8 @@ export function ChatScreen({ chatId }: { chatId: string }) {
   const meta = useMobile((s) => s.metas.find((m) => m.id === chatId))
   const transcript = useMobile((s) => s.transcripts[chatId])
   const link = useMobile((s) => s.link)
+  // Open in its agent's own CLI on the desktop: nothing can be sent until that ends.
+  const inCli = useMobile((s) => s.cli.includes(chatId))
   const queued = useMobile((s) => s.queued[chatId]) ?? NONE
   const agents = useMobile((s) => s.agents)
   const permission = useMobile((s) => s.permission[chatId])
@@ -96,10 +98,18 @@ export function ChatScreen({ chatId }: { chatId: string }) {
           </div>
         </ImageSourceContext.Provider>
       </CwdContext.Provider>
+      {inCli ? (
+        <div className="flex shrink-0 items-center gap-2 border-t px-4 py-2 text-[12.5px] text-muted-foreground" role="status">
+          <span className="min-w-0 flex-1 leading-snug">Open in {meta ? (agent?.name ?? AGENT_LABEL[meta.agent]) : "the agent"}'s own CLI on the computer. What's said there shows here when it's closed.</span>
+          <button className="rounded-md h-10 shrink-0 border px-3 font-medium text-foreground active:bg-accent disabled:opacity-50" disabled={link !== "connected"} onClick={() => void st.endCli(chatId)}>
+            Close it
+          </button>
+        </div>
+      ) : null}
       <MobileComposer
         running={t.running}
-        disabled={link !== "connected"}
-        placeholder={t.running ? "Queue a follow-up" : "Reply"}
+        disabled={link !== "connected" || inCli}
+        placeholder={inCli ? "Close the CLI to reply here" : t.running ? "Queue a follow-up" : "Reply"}
         onSend={(text, images, how) => {
           const running = useMobile.getState().transcripts[chatId]?.running
           // A command never goes into a turn that's running: it waits its turn.

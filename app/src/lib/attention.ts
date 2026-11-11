@@ -26,10 +26,7 @@ export function initAttention() {
     if (useApp.getState().view === "settings") useApp.getState().closeSettings()
     // Answer, or a click on a notification about a chat that still waits: straight to the card.
     if (action === "answer" || needsYou(chats).includes(chatId)) void chats.answerChat(chatId)
-    else {
-      useApp.getState().selectProject(meta.projectId)
-      void chats.open(chatId)
-    }
+    else void chats.open(chatId)
   })
 }
 

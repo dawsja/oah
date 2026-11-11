@@ -162,6 +162,8 @@ impl Host for AppHost {
     }
 
     fn close(&self, chat_id: &str) {
+        // Open in its agent's own CLI in the window: that's what has the session, and ends.
+        self.state().chats.cli_take(&self.app, chat_id);
         self.state().chats.close(chat_id);
         self.changed();
     }

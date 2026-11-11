@@ -3,6 +3,7 @@
 
 mod attention;
 mod chats;
+mod cli;
 mod git;
 mod mcp;
 mod remote;
@@ -30,6 +31,20 @@ pub(crate) struct AppState {
     terminals: terminal::Terminals,
     voice: voice::Voice,
     remote: remote::Remote,
+}
+
+#[cfg(all(test, target_os = "linux"))]
+impl AppState {
+    /// The app's state over `settings` and a chats folder, with nothing else running.
+    pub(crate) fn for_tests(settings: Settings, store: ChatStore) -> AppState {
+        AppState {
+            settings: Mutex::new(settings),
+            chats: chats::Chats::new(store),
+            terminals: terminal::Terminals::default(),
+            voice: voice::Voice::default(),
+            remote: remote::Remote::default(),
+        }
+    }
 }
 
 pub(crate) type CmdResult<T> = Result<T, String>;
@@ -713,6 +728,11 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            cli::chat_cli,
+            cli::cli_open,
+            cli::cli_write,
+            cli::cli_resize,
+            cli::cli_close,
             mcp::mcp_status,
             mcp::mcp_token,
             mcp::mcp_token_regenerate,

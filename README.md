@@ -29,6 +29,26 @@ Electron.
   message from the changes with the project agent's cheapest model: Haiku, Codex's fast model,
   a free OpenCode one, Antigravity's Flash, or Grok at low effort), History (graph), Pull Request (`gh`: open one,
   review state, checks).
+- **Two panes.** A second chat beside the first (the split button in the title bar, Ctrl+\,
+  Ctrl-click a chat or "Open to the side" in its menu, Ctrl+Enter in search): another chat of
+  the same project, another worktree, another project, another agent. Drag the divider between
+  them. The sidebar, the side panel, the terminal and the title bar follow the pane you're in
+  (Ctrl+1 and Ctrl+2 move between them, Ctrl+Shift+\ closes one). A chat is on screen once:
+  picking one that's in the other pane goes there.
+- **The agent's own CLI.** The Chat | CLI switch in a chat's header (Ctrl+Shift+M) opens the same
+  conversation in the agent's terminal interface (`claude --resume`, `codex resume`,
+  `opencode -s`, `agy --conversation`, `grok --resume`), with the chat's model, effort and
+  permission mode, where the project is (this computer, the WSL distro, the SSH host). The CLI
+  has the session while it's open: the chat's agent stops first (one that's working is asked
+  about), and nothing is sent to the chat until you switch back, leave the CLI, or take the
+  chat back from a phone ("Close it") or over MCP (`close_session`). Then what was said in the
+  CLI is read back from what it saved and becomes part of the chat: the messages, the answers,
+  the commands and edits, under a line saying how long the CLI had it; the next message
+  continues from there. Claude Code's `/clear` and `/resume` are followed (the chat moves to
+  the conversation the CLI ended on); the other CLIs don't say when they change conversation,
+  so the chat stays on the one it had. A new chat can start in the CLI with Claude Code and
+  Grok Build; the others open once the chat has a first message. On an SSH host the CLI runs
+  over its own `ssh -t`, so unlike a chat's agent it ends if the connection drops.
 - **Terminal.** A panel under the chat (Ctrl+` or the shell button in the title bar shows and
   hides it) with a shell where the project is: PowerShell (7 if installed) on Windows, your
   `$SHELL` on Linux, your login shell inside the distro for a WSL project, and over `ssh -t` for
@@ -111,7 +131,7 @@ crates/
                  one (`bun scripts/build-host.ts` builds the bundled Linux binaries)
   oah-agents     Claude Code (stream-json), Codex (app-server), OpenCode, Antigravity and Grok Build (ACP)
                  drivers → ChatEvent; sign-in, models and plan limits; a scripted mock
-                 (OAH_MOCK_AGENT=1)
+                 (OAH_MOCK_AGENT=1); what opens a chat's session in the agent's own CLI
   oah-git        git and gh: status, diffs, commits, branches, sync, graph, worktrees, PRs
   oah-voice      speech to text (transcribe.cpp; needs CMake to build)
   oah-mcp        the MCP server another agent drives oah's chats with (tools, live chat status,

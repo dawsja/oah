@@ -1,9 +1,14 @@
 // App-wide state: settings (saved through Rust), what's on screen, and the layout.
 
+import { createContext, useContext } from "react"
 import { create } from "zustand"
 import { toast } from "sonner"
 import { ipc } from "@/lib/ipc"
+import { closePane, draftSwaps, MAX_PANES, paneOf, patchPane, splitPanes, type Pane, type Panes, type PaneTarget } from "@/lib/panes"
 import { BASE_UI_SIZE, type AppInfo, type Appearance, type Location, type Settings } from "@/lib/types"
+import { drafts } from "./drafts"
+
+export { paneOf, type Pane, type PaneTarget } from "@/lib/panes"
 
 export type SettingsSection = "sessions" | "providers" | "voice" | "appearance" | "usage" | "ssh" | "projects" | "mcp" | "phone"
 export type RightTab = "files" | "scm" | "history" | "pr"
@@ -16,6 +21,8 @@ type Layout = {
   /** The terminal panel under the chat: shown, and its height. */
   terminalOpen: boolean
   terminalHeight: number
+  /** With two panes, the left one's share of the width. */
+  split: number
 }
 
 type AppStore = {
@@ -24,10 +31,10 @@ type AppStore = {
   error: string | null
   view: "chat" | "settings"
   section: SettingsSection
-  projectId: string | null
-  chatId: string | null
-  /** The folder a new (unsent) chat will work in: a worktree, or null for the project. */
-  draftCwd: string | null
+  /** What the main area shows: one pane, or two side by side (the left one first). */
+  panes: Pane[]
+  /** The pane the sidebar, the side panel, the terminal and the title bar follow. */
+  activePane: string
   layout: Layout
 
   load(): Promise<void>
@@ -38,12 +45,19 @@ type AppStore = {
   removeProject(id: string): Promise<void>
   openSettings(section?: SettingsSection): void
   closeSettings(): void
-  selectProject(id: string | null): void
+  /** Changes what a pane shows (the active one without an id). */
+  setPane(target: PaneTarget, pane?: string | null): void
+  focusPane(id: string): void
+  /** Shows `target` beside the active pane and moves there: in a second pane, or in the other
+   *  one when there are two. Without a target, a new chat in the same project. */
+  splitPane(target?: PaneTarget): void
+  /** Closes a pane (the active one without an id); the other fills the space. */
+  closePane(id?: string | null): void
   setLayout(patch: Partial<Layout>): void
 }
 
 const LAYOUT_KEY = "oah.layout"
-export const defaultLayout: Readonly<Layout> = { sidebarWidth: 272, rightWidth: 340, rightOpen: true, rightTab: "scm", terminalOpen: false, terminalHeight: 280 }
+export const defaultLayout: Readonly<Layout> = { sidebarWidth: 272, rightWidth: 340, rightOpen: true, rightTab: "scm", terminalOpen: false, terminalHeight: 280, split: 0.5 }
 
 function loadLayout(): Layout {
   try {
@@ -58,15 +72,31 @@ let lastSaved: Settings | null = null
 let saveSeq = 0
 let saving: Promise<void> = Promise.resolve()
 
+let paneCount = 1
+const emptyPane = (id: string, projectId: string | null = null): Pane => ({ id, projectId, chatId: null, draftCwd: null, viewer: null })
+
+/** Applies a change to the panes. A pane whose new-chat draft is kept elsewhere from now on
+ *  (the other pane closed, or came to the same new chat) keeps what was typed in it. */
+function commit(next: Panes, more: Partial<AppStore> = {}) {
+  for (const [a, b] of draftSwaps(useApp.getState().panes, next.panes)) drafts.swap(a, b)
+  useApp.setState({ panes: next.panes, activePane: next.activePane, ...more })
+  // The next start opens on the project last worked in.
+  const project = paneOf(next).projectId
+  try {
+    if (project) localStorage.setItem("oah.project", project)
+  } catch {
+    /* ignore */
+  }
+}
+
 export const useApp = create<AppStore>((set, get) => ({
   info: null,
   settings: null,
   error: null,
   view: "chat",
   section: "providers",
-  projectId: null,
-  chatId: null,
-  draftCwd: null,
+  panes: [emptyPane("p1")],
+  activePane: "p1",
   layout: loadLayout(),
 
   async load() {
@@ -75,7 +105,10 @@ export const useApp = create<AppStore>((set, get) => ({
       const last = localStorage.getItem("oah.project")
       const projectId = settings.projects.find((p) => p.id === last)?.id ?? settings.projects[0]?.id ?? null
       lastSaved = settings
-      set({ info, settings, projectId, error: null })
+      // Each pane keeps what it shows across a reload of the settings; a project that's gone
+      // gives way to the last one worked in.
+      const known = (id: string | null) => settings.projects.some((p) => p.id === id)
+      set((s) => ({ info, settings, error: null, panes: s.panes.map((p) => (known(p.projectId) ? p : emptyPane(p.id, projectId))) }))
       import("@/lib/updates").then((u) => u.updater.start(info.bundle))
       applyAppearance(settings.appearance)
       if (info.settingsProblem) toast.error("Settings were reset", { description: info.settingsProblem, duration: Infinity })
@@ -118,9 +151,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const [settings, project] = await ipc.projectAdd(location, path)
       lastSaved = settings
       // A new chat starts in the new project, not in a worktree of the one before.
-      set({ settings, projectId: project.id, chatId: null, draftCwd: null, view: "chat", error: null })
-      import("./git").then((m) => m.useGit.getState().open(null))
-      localStorage.setItem("oah.project", project.id)
+      commit(patchPane(get(), { projectId: project.id, chatId: null, draftCwd: null, viewer: null }), { settings, view: "chat", error: null })
       return true
     } catch (e) {
       toast.error("Couldn't add the project", { description: String(e) })
@@ -144,12 +175,9 @@ export const useApp = create<AppStore>((set, get) => ({
     try {
       const settings = await ipc.projectRemove(id)
       lastSaved = settings
-      if (get().projectId === id) {
-        import("./git").then((m) => m.useGit.getState().open(null))
-        set({ settings, projectId: settings.projects[0]?.id ?? null, chatId: null, draftCwd: null })
-      } else {
-        set({ settings })
-      }
+      // A pane that showed it shows the first project left.
+      const first = settings.projects[0]?.id ?? null
+      commit({ panes: get().panes.map((p) => (p.projectId === id ? emptyPane(p.id, first) : p)), activePane: get().activePane }, { settings })
     } catch (e) {
       toast.error("Couldn't remove the project", { description: String(e) })
     }
@@ -161,10 +189,17 @@ export const useApp = create<AppStore>((set, get) => ({
   closeSettings() {
     set({ view: "chat" })
   },
-  selectProject(id) {
-    if (id !== get().projectId) import("./git").then((m) => m.useGit.getState().open(null))
-    set({ projectId: id, view: "chat", draftCwd: id === get().projectId ? get().draftCwd : null })
-    if (id) localStorage.setItem("oah.project", id)
+  setPane(target, pane) {
+    commit(patchPane(get(), target, pane))
+  },
+  focusPane(id) {
+    if (id !== get().activePane && get().panes.some((p) => p.id === id)) commit({ panes: get().panes, activePane: id })
+  },
+  splitPane(target) {
+    commit(splitPanes(get(), `p${++paneCount}`, target), { view: "chat" })
+  },
+  closePane(id) {
+    commit(closePane(get(), id))
   },
   setLayout(patch) {
     const layout = { ...get().layout, ...patch }
@@ -176,6 +211,24 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 }))
+
+export { MAX_PANES }
+
+/** The pane a component is in; none outside the panes (the sidebar, the side panel…), where
+ *  the active pane is meant. */
+export const PaneContext = createContext<string | null>(null)
+
+/** The pane this component is in, or the active one outside the panes. */
+export function usePane(): Pane {
+  const id = useContext(PaneContext)
+  return useApp((s) => paneOf(s, id))
+}
+
+/** Whether this component's pane is the active one (always, outside the panes). */
+export function usePaneActive(): boolean {
+  const id = useContext(PaneContext)
+  return useApp((s) => !id || paneOf(s, id).id === s.activePane)
+}
 
 // ---- Appearance ------------------------------------------------------------------------------
 
@@ -210,6 +263,8 @@ export function applyAppearance(a: Appearance) {
   )
 }
 
+/** The project of this component's pane (the active pane's, outside the panes). */
 export function useProject() {
-  return useApp((s) => s.settings?.projects.find((p) => p.id === s.projectId) ?? null)
+  const id = useContext(PaneContext)
+  return useApp((s) => s.settings?.projects.find((p) => p.id === paneOf(s, id).projectId) ?? null)
 }

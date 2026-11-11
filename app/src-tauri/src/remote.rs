@@ -248,7 +248,10 @@ impl Host for AppHost {
                 let running = chats.running();
                 let waiting: serde_json::Map<String, Value> =
                     chats.waiting().into_iter().map(|(id, what)| (id, Value::from(what))).collect();
-                Ok(json!({ "metas": chats.store.list(), "running": running, "busy": chats.busy(), "waiting": waiting }))
+                // `cli`: open in their agent's CLI on the computer, so they take no messages now.
+                Ok(
+                    json!({ "metas": chats.store.list(), "running": running, "busy": chats.busy(), "waiting": waiting, "cli": chats.cli_ids() }),
+                )
             }
             "agents.list" => {
                 let s = settings();
@@ -291,6 +294,9 @@ impl Host for AppHost {
                 chats.compact(app, &settings(), &str_param(&p, "chatId")?, instructions, permission).map(|_| Value::Null)
             }
             "chat.clear" => chats.clear(app, &str_param(&p, "chatId")?).map(|_| Value::Null),
+            // The chat is open in its agent's CLI on the computer: that ends, and the chat
+            // takes messages (from here too) again.
+            "chat.endCli" => Ok(Value::Bool(chats.cli_take(app, &str_param(&p, "chatId")?))),
             "chat.readImage" => {
                 let meta = chats.store.get(&str_param(&p, "chatId")?).map_err(err)?;
                 let settings = settings();

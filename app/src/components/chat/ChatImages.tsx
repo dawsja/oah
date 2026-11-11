@@ -3,7 +3,7 @@ import { Image as ImageIcon, ImageOff } from "lucide-react"
 import { openImages, type ShownImage } from "@/components/ImageView"
 import { git } from "@/lib/git"
 import { ipc } from "@/lib/ipc"
-import { useApp } from "@/store/app"
+import { usePane } from "@/store/app"
 import { useScope } from "@/store/git"
 import { cn } from "@/lib/utils"
 
@@ -64,7 +64,7 @@ function Thumbs({ srcs, names, size = "size-20" }: { srcs: (string | null | "gon
 
 /** The images a message was sent with. Messages from before images were saved say how many. */
 export function MessageImages({ files, count }: { files: string[]; count: number }) {
-  const chatId = useApp((s) => s.chatId)
+  const chatId = usePane().chatId
   const source = useContext(ImageSourceContext)
   const srcs = useSources(
     files.map((f) => `${source?.key ?? chatId}/${f}`),

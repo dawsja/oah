@@ -34,6 +34,8 @@ export const ipc = {
   /** Chats with background work running. */
   chatBackground: () => call<string[]>("chat_background"),
   chatBusy: () => call<string[]>("chat_busy"),
+  /** Chats open in their agent's own CLI: they take no messages until it ends. */
+  chatCli: () => call<string[]>("chat_cli"),
   chatsStopAll: () => call<void>("chats_stop_all"),
   chatStopTask: (chatId: string, taskId: string) => call<void>("chat_stop_task", { chatId, taskId }),
   /** Chats whose text has every word of `query`, newest first. */
@@ -88,6 +90,21 @@ export const terminal = {
   close: (id: string) => call<void>("terminal_close", { id }),
 }
 
+/** A chat in its agent's own CLI, in a terminal on the chat's session. */
+export const cli = {
+  /** Opens it; its output arrives through `onEvent`. `force` stops an agent working in the chat first. */
+  async open(chatId: string, cols: number, rows: number, force: boolean, onEvent: (e: TerminalEvent) => void) {
+    const { Channel } = await import("@tauri-apps/api/core")
+    const channel = new Channel<TerminalEvent>()
+    channel.onmessage = onEvent
+    return call<void>("cli_open", { chatId, cols, rows, force, onEvent: channel })
+  },
+  write: (chatId: string, data: string) => call<void>("cli_write", { chatId, data }),
+  resize: (chatId: string, cols: number, rows: number) => call<void>("cli_resize", { chatId, cols, rows }),
+  /** Ends it; the chat takes messages again once this resolves. */
+  close: (chatId: string) => call<void>("cli_close", { chatId }),
+}
+
 /** Calls `fn` for every chat event the app emits (`seq`: its number in the chat, as in a
  *  snapshot); returns the unsubscribe. */
 export async function onChatEvent(fn: (chatId: string, event: ChatEvent, seq: number) => void): Promise<() => void> {
@@ -100,6 +117,13 @@ export async function onChatEvent(fn: (chatId: string, event: ChatEvent, seq: nu
 export async function onChatsChanged(fn: () => void): Promise<() => void> {
   const { listen } = await import("@tauri-apps/api/event")
   return listen("chats-changed", () => fn())
+}
+
+/** Calls `fn` when a chat was taken back from its agent's CLI from outside the window (a phone,
+ *  MCP): the CLI has ended. */
+export async function onCliTaken(fn: (chatId: string) => void): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event")
+  return listen<string>("chat-cli-taken", (e) => fn(e.payload))
 }
 
 /** Calls `fn` when a notification about a chat was clicked (`action`: `tap`, or `answer` for

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Copy, FileText, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, ListChecks, LoaderCircle, MessageCircleQuestion, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldQuestion, SquarePen, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Columns2, Copy, FileText, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, ListChecks, LoaderCircle, MessageCircleQuestion, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldQuestion, SquarePen, SquareTerminal, Trash2 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { AgentGlyph } from "@/components/icons"
 import { confirmAction, promptText } from "@/components/Prompt"
@@ -16,7 +16,7 @@ import { copyText } from "@/lib/clipboard"
 import type { Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import { useApp } from "@/store/app"
+import { useApp, usePane } from "@/store/app"
 import { copyChatMarkdown, needsYou, useChats, waitingOf } from "@/store/chats"
 import { openChatSearch } from "./ChatSearch"
 import { UpdateButton } from "./Updates"
@@ -45,7 +45,7 @@ export function Sidebar() {
   const settings = useApp((s) => s.settings)
   const view = useApp((s) => s.view)
   const openSettings = useApp((s) => s.openSettings)
-  const projectId = useApp((s) => s.projectId)
+  const projectId = usePane().projectId
   const projects = settings?.projects ?? []
 
 
@@ -55,7 +55,7 @@ export function Sidebar() {
         <button
           className="rounded-md flex h-8 w-full items-center gap-2 border border-input bg-background px-2.5 text-left text-[12.5px] font-medium hover:border-ring/60 hover:bg-accent disabled:opacity-50"
           disabled={!projectId}
-          onClick={() => newChat(projectId!, null)}
+          onClick={(e) => newChat(projectId!, null, toSide(e))}
         >
           <SquarePen className="size-3.5 text-muted-foreground" />
           New chat
@@ -107,12 +107,17 @@ export function Sidebar() {
   )
 }
 
-/** Opens an empty chat in a project, optionally in one of its worktrees. */
-function newChat(projectId: string, cwd: string | null) {
-  useApp.getState().selectProject(projectId)
-  useApp.setState({ chatId: null, draftCwd: cwd, view: "chat" })
-  useGit.getState().open(null)
+/** Opens an empty chat in a project, optionally in one of its worktrees: in the active pane,
+ *  or beside it (`side`: Ctrl/⌘ was held). */
+function newChat(projectId: string, cwd: string | null, side = false) {
+  const target = { projectId, chatId: null, draftCwd: cwd, viewer: null }
+  if (side) useApp.getState().splitPane(target)
+  else useApp.getState().setPane(target)
+  useApp.setState({ view: "chat" })
 }
+
+/** Ctrl or ⌘ held on a click: the row opens beside the active pane. */
+const toSide = (e: React.MouseEvent | React.KeyboardEvent) => e.ctrlKey || e.metaKey
 
 async function newWorktree(project: Project) {
   const branch = await promptText({
@@ -135,9 +140,7 @@ async function newWorktree(project: Project) {
 
 function ProjectGroup({ project }: { project: Project }) {
   const [open, setOpen] = useState(true)
-  const projectId = useApp((s) => s.projectId)
-  const chatId = useApp((s) => s.chatId)
-  const draftCwd = useApp((s) => s.draftCwd)
+  const { projectId, chatId, draftCwd } = usePane()
   const view = useApp((s) => s.view)
   const removeProject = useApp((s) => s.removeProject)
   const openSettings = useApp((s) => s.openSettings)
@@ -166,7 +169,7 @@ function ProjectGroup({ project }: { project: Project }) {
         className={cn("mx-1 rounded-md group flex h-8 cursor-pointer items-center gap-1.5 pr-1 pl-2 text-[12.5px] hover:bg-accent", ROW_FOCUS, active && "row-active")}
         aria-label={`New chat in ${project.name}`}
         {...rowKeys(() => (newChat(project.id, null), setOpen(true)))}
-        onClick={() => (newChat(project.id, null), setOpen(true))}
+        onClick={(e) => (newChat(project.id, null, toSide(e)), setOpen(true))}
       >
         <button
           className="grid size-4 place-items-center text-muted-foreground"
@@ -240,9 +243,7 @@ function ProjectGroup({ project }: { project: Project }) {
 /** A worktree (or the main checkout) and its chats. */
 function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktree | null; chats: ChatMeta[] }) {
   const [open, setOpen] = useState(true)
-  const projectId = useApp((s) => s.projectId)
-  const chatId = useApp((s) => s.chatId)
-  const draftCwd = useApp((s) => s.draftCwd)
+  const { projectId, chatId, draftCwd } = usePane()
   const main = !tree || tree.main
   const cwd = main ? null : tree.path
   const view = useApp((s) => s.view)
@@ -262,7 +263,8 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
       for (const c of chats) await useChats.getState().remove(c.id)
       await wt.remove(project.id, tree.path, true)
       await useGit.getState().loadWorktrees(project.id)
-      if (samePath(useApp.getState().draftCwd, tree.path)) useApp.setState({ draftCwd: null })
+      // A pane about to start a chat there starts it in the project instead.
+      for (const p of useApp.getState().panes) if (samePath(p.draftCwd, tree.path)) useApp.getState().setPane({ draftCwd: null }, p.id)
     } catch (e) {
       toast.error(String(e))
     }
@@ -274,7 +276,7 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
         className={cn("mx-1 rounded-md group/wt flex h-7 cursor-pointer items-center gap-1.5 pr-1 pl-6 text-[12.5px] hover:bg-accent", ROW_FOCUS, active && "row-active")}
         aria-label={`New chat in ${tree?.branch ?? "the main checkout"}`}
         {...rowKeys(() => newChat(project.id, cwd))}
-        onClick={() => newChat(project.id, cwd)}
+        onClick={(e) => newChat(project.id, cwd, toSide(e))}
       >
         <button
           className="grid size-4 place-items-center text-faint"
@@ -321,8 +323,12 @@ function WorktreeRow({ project, tree, chats }: { project: Project; tree: Worktre
 }
 
 function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
-  const chatId = useApp((s) => s.chatId)
+  const chatId = usePane().chatId
   const view = useApp((s) => s.view)
+  // On screen in the pane beside the active one.
+  const beside = useApp((s) => s.view === "chat" && s.panes.some((p) => p.id !== s.activePane && p.chatId === meta.id))
+  // Open in its agent's own CLI: it takes no messages until that ends.
+  const inCli = useChats((s) => s.cli.includes(meta.id))
   const t = useChats((s) => s.transcripts[meta.id])
   const waits = useChats((s) => waitingOf(s, meta.id))
   // This window's own view of it when it has the chat open, else what the app says.
@@ -342,23 +348,22 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
           className={cn(
             "mx-1 rounded-md flex h-7 cursor-pointer items-center gap-2 pr-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground",
             ROW_FOCUS,
-            active && "row-active"
+            active && "row-active",
+            beside && "bg-sidebar-accent/60 text-foreground"
           )}
           style={{ paddingLeft: indent }}
           aria-current={active ? "page" : undefined}
-          {...rowKeys(() => {
-            useApp.getState().selectProject(meta.projectId)
-            void useChats.getState().open(meta.id)
-          })}
-          onClick={() => {
-            useApp.getState().selectProject(meta.projectId)
-            useChats.getState().open(meta.id)
-          }}
+          {...rowKeys(() => void useChats.getState().open(meta.id))}
+          onClick={(e) => void useChats.getState().open(meta.id, toSide(e) ? "side" : undefined)}
         >
           {waits ? (
             <span className="rounded-full size-1.5 shrink-0 bg-primary" aria-label={`Waiting for your ${WAITING_LABEL[waits].toLowerCase()}`} />
           ) : meta.sleeping ? (
             <Moon className="size-3 shrink-0 text-faint" aria-label="Sleeping; send a message to resume" />
+          ) : inCli ? (
+            <Tip content="Open in the agent's CLI">
+              <SquareTerminal className="size-3 shrink-0 text-muted-foreground" aria-label="Open in the agent's CLI" />
+            </Tip>
           ) : running ? (
             <LoaderCircle className="size-3 shrink-0 animate-spin text-muted-foreground" />
           ) : background ? (
@@ -374,11 +379,15 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
         </div>
       </ContextMenuTrigger>
       {/* React bubbles portal clicks to the row, whose onClick would open the chat. */}
-      <ContextMenuContent className="w-44" onClick={(e) => e.stopPropagation()}>
+      <ContextMenuContent className="w-48" onClick={(e) => e.stopPropagation()}>
+        <ContextMenuItem onSelect={() => void useChats.getState().open(meta.id, "side")}>
+          <Columns2 /> Open to the side
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => useChats.getState().pin(meta.id, !meta.pinned)}>
           {meta.pinned ? <PinOff /> : <Pin />} {meta.pinned ? "Unpin" : "Pin"}
         </ContextMenuItem>
-        <ContextMenuItem disabled={meta.sleeping || running || background || !!waits || !meta.agentSessionId} onSelect={() => useChats.getState().sleep(meta.id)}>
+        <ContextMenuItem disabled={meta.sleeping || running || background || inCli || !!waits || !meta.agentSessionId} onSelect={() => useChats.getState().sleep(meta.id)}>
           <Moon /> {meta.sleeping ? "Sleeping" : "Sleep"}
         </ContextMenuItem>
         <ContextMenuItem onSelect={rename}>

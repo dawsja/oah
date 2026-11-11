@@ -26,6 +26,8 @@ type Store = {
   /** Chats with their agent running on the desktop, and those mid-turn. */
   running: string[]
   busy: string[]
+  /** Chats open in their agent's own CLI on the desktop: they take no messages until it ends. */
+  cli: string[]
   /** Chats waiting for an answer from you, and for what. */
   waiting: Record<string, Waiting>
   /** The chat open on screen. */
@@ -52,6 +54,8 @@ type Store = {
   unqueue(chatId: string, id: string): void
   sendQueued(chatId: string): Promise<void>
   interrupt(chatId: string): Promise<void>
+  /** Takes the chat back from the agent's CLI it's open in on the desktop. */
+  endCli(chatId: string): Promise<void>
   answer(chatId: string, requestId: string, decision: Decision): Promise<void>
   answerQuestion(chatId: string, requestId: string, answers: Record<string, string[]>): Promise<void>
   setModel(chatId: string, model: string, effort: string): Promise<void>
@@ -83,6 +87,7 @@ export const useMobile = create<Store>((set, get) => ({
   metas: [],
   running: [],
   busy: [],
+  cli: [],
   waiting: {},
   chatId: null,
   transcripts: {},
@@ -120,7 +125,7 @@ export const useMobile = create<Store>((set, get) => ({
     localStorage.setItem(LAST, id)
     const d = get().desktops.find((x) => x.id === id)
     // The last list seen from this desktop shows (read-only) until it answers.
-    set({ desktopId: id, link: "connecting", linkError: null, desktopName: d?.name ?? "", transcripts: {}, running: [], busy: [], waiting: {}, listed: false, ...cached(id) })
+    set({ desktopId: id, link: "connecting", linkError: null, desktopName: d?.name ?? "", transcripts: {}, running: [], busy: [], cli: [], waiting: {}, listed: false, ...cached(id) })
     await native.connect(id, onLink).catch((e) => set({ link: "offline", linkError: String(e) }))
   },
 
@@ -136,7 +141,7 @@ export const useMobile = create<Store>((set, get) => ({
       agents: agents.agents,
       defaultAgent: agents.defaultAgent,
     }
-    set({ ...next, running: chats.running, busy: chats.busy, waiting: chats.waiting ?? {}, listed: true })
+    set({ ...next, running: chats.running, busy: chats.busy, cli: chats.cli ?? [], waiting: chats.waiting ?? {}, listed: true })
     const id = get().desktopId
     if (id) cache(id, next)
   },
@@ -224,6 +229,11 @@ export const useMobile = create<Store>((set, get) => ({
 
   async interrupt(chatId) {
     await api.interrupt(chatId).catch(fail)
+  },
+  async endCli(chatId) {
+    await api.endCli(chatId).catch(fail)
+    // The desktop says so too; this just doesn't wait for it.
+    set((s) => ({ cli: s.cli.filter((id) => id !== chatId) }))
   },
   async answer(chatId, requestId, decision) {
     await api.answer(chatId, requestId, decision).catch(fail)

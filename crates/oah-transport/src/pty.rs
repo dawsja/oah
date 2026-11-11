@@ -115,6 +115,71 @@ exec "$oah_sh" -l"#
     )
 }
 
+/// A program in a terminal where its project is (an agent's own CLI, on a chat's session):
+/// `spec` as [`crate::spawn`] would run it, found the same way, with a terminal for its stdio.
+/// On an SSH host it gets its own `ssh -t` (a terminal is one connection, as for a shell), so
+/// unlike a program under `oah-host` it ends when the connection does.
+pub fn command_spec(spec: &crate::Spec) -> Result<ShellSpec, String> {
+    use oah_core::settings::EnvVar;
+    let var = |k: &str, v: &str| EnvVar { key: k.into(), value: v.into(), in_keychain: false };
+    // Remote: in the script's environment, after the provider's own.
+    let remote_env = || {
+        let mut env = spec.env.to_vec();
+        env.extend([var("TERM", "xterm-256color"), var("COLORTERM", "truecolor"), var("TERM_PROGRAM", "oah")]);
+        env
+    };
+    match spec.location {
+        Location::Local => {
+            let exe = crate::find_local(spec.program).ok_or_else(|| format!("{} isn't installed or isn't on PATH", spec.program))?;
+            let exe = exe.to_string_lossy().into_owned();
+            if !Path::new(spec.cwd).is_dir() {
+                return Err(format!("{} isn't there", spec.cwd));
+            }
+            let mut env: Vec<(String, String)> =
+                spec.env.iter().filter(|v| !v.key.is_empty()).map(|v| (v.key.clone(), v.value.clone())).collect();
+            env.push(("TERM_PROGRAM".into(), "oah".into()));
+            if !cfg!(windows) {
+                env.push(("TERM".into(), "xterm-256color".into()));
+                env.push(("COLORTERM".into(), "truecolor".into()));
+            }
+            // A `.cmd` shim (npm's `claude.cmd`) isn't a program Windows starts by itself.
+            let lower = exe.to_ascii_lowercase();
+            let (program, args) = if lower.ends_with(".cmd") || lower.ends_with(".bat") {
+                let cmd = std::env::var("ComSpec").ok().filter(|c| !c.is_empty()).unwrap_or_else(|| "cmd.exe".into());
+                (cmd, ["/d".to_string(), "/c".to_string(), exe].into_iter().chain(spec.args.iter().cloned()).collect())
+            } else {
+                (exe, spec.args.clone())
+            };
+            Ok(ShellSpec { program, args, cwd: Some(spec.cwd.to_string()), env, shell: None })
+        }
+        Location::Wsl { distro } => {
+            if !cfg!(windows) {
+                return Err("WSL projects open on Windows only".into());
+            }
+            if !valid_distro(distro) {
+                return Err(format!("not a valid WSL distro name: {distro:?}"));
+            }
+            let script = crate::remote_script(&crate::Spec { env: &remote_env(), ..spec.clone() }, true);
+            Ok(ShellSpec {
+                program: crate::wsl::exe().to_string_lossy().into_owned(),
+                args: ["-d", distro, "-e", "sh", "-lc", &script].map(String::from).to_vec(),
+                cwd: std::env::var("SystemRoot").ok(),
+                env: vec![("WSL_UTF8".into(), "1".into())],
+                shell: None,
+            })
+        }
+        Location::Ssh { host } => {
+            if !valid_host(host) {
+                return Err(format!("not a valid SSH host: {host:?}"));
+            }
+            let program = which::which("ssh").map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "ssh".into());
+            let line = crate::remote_line(&crate::Spec { env: &remote_env(), ..spec.clone() });
+            let args = ["-t", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=30", "--", host, &line].map(String::from).to_vec();
+            Ok(ShellSpec { program, args, cwd: None, env: vec![("TERM".into(), "xterm-256color".into())], shell: None })
+        }
+    }
+}
+
 /// What a terminal reports.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PtyEvent {
@@ -309,6 +374,58 @@ mod tests {
     }
 
     #[test]
+    fn a_program_over_ssh_gets_a_terminal_and_its_environment() {
+        use oah_core::settings::EnvVar;
+        let loc = Location::Ssh { host: "devbox".into() };
+        let env = [EnvVar { key: "API_KEY".into(), value: "a'b".into(), in_keychain: false }];
+        let spec =
+            crate::Spec { location: &loc, cwd: "~/code/my app", program: "claude", args: vec!["--resume".into(), "abc".into()], env: &env };
+        let s = command_spec(&spec).unwrap();
+        assert_eq!(&s.args[..7], ["-t", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=30", "--", "devbox"]);
+        let line = &s.args[7];
+        assert!(line.starts_with("sh -lc "), "{line}");
+        for part in ["API_KEY=a", "TERM=xterm-256color", "COLORTERM=truecolor", "--resume", "code/my app"] {
+            assert!(line.contains(part), "{part} in {line}");
+        }
+        let bad = Location::Ssh { host: "-oProxyCommand=x".into() };
+        assert!(command_spec(&crate::Spec { location: &bad, ..spec.clone() }).is_err());
+        let missing = crate::Spec { location: &Location::Local, cwd: "/", program: "oah-no-such-cli", args: vec![], env: &[] };
+        assert!(command_spec(&missing).unwrap_err().contains("isn't installed"));
+    }
+
+    /// A program found on PATH runs in a terminal, in its folder, with its arguments and
+    /// environment (quotes and spaces whole).
+    #[test]
+    #[cfg(unix)]
+    fn runs_a_program_in_a_pty() {
+        use oah_core::settings::EnvVar;
+        let dir = tempfile::tempdir().unwrap();
+        let env = [EnvVar { key: "OAH_X".into(), value: "a'b c".into(), in_keychain: false }];
+        let script = r#"[ -t 0 ] && printf 'tty '; printf '%s|%s|%s|%s' "$OAH_X" "$TERM" "$1" "$(pwd)""#;
+        let spec = crate::Spec {
+            location: &Location::Local,
+            cwd: dir.path().to_str().unwrap(),
+            program: "sh",
+            args: vec!["-c".into(), script.into(), "sh".into(), "it's \"x\"".into()],
+            env: &env,
+        };
+        let (tx, rx) = mpsc::channel();
+        let _pty = Pty::spawn(&command_spec(&spec).unwrap(), 80, 24, move |e| drop(tx.send(e))).unwrap();
+        let mut text = String::new();
+        let code = loop {
+            match rx.recv_timeout(Duration::from_secs(10)).expect("the program answers") {
+                PtyEvent::Data(d) => text.push_str(&d),
+                PtyEvent::Exit(c) => break c,
+            }
+        };
+        let here = std::fs::canonicalize(dir.path()).unwrap();
+        assert!(text.contains(&format!("tty a'b c|xterm-256color|it's \"x\"|{}", here.display())), "{text:?}");
+        assert_eq!(code, Some(0));
+        let gone = crate::Spec { cwd: "/no/such/oah folder", ..spec.clone() };
+        assert!(command_spec(&gone).unwrap_err().contains("isn't there"));
+    }
+
+    #[test]
     #[cfg(unix)]
     fn runs_a_shell_in_a_pty() {
         let spec = ShellSpec {
@@ -396,6 +513,57 @@ mod tests {
         until(&rx, "20 90").unwrap();
         sh.write(b"exit\r").unwrap();
         assert_eq!(exit_code(&rx), Some(0));
+    }
+
+    /// A program in a Windows pseudo console: a `.cmd` shim (as npm installs CLIs) with its
+    /// arguments and environment, and a program in a distro through wsl.exe:
+    /// `OAH_TEST_DISTRO=Ubuntu cargo test -p oah-transport real_windows_programs -- --ignored`
+    /// (on Windows).
+    #[test]
+    #[cfg(windows)]
+    #[ignore]
+    fn real_windows_programs() {
+        use oah_core::settings::EnvVar;
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("oah shim.cmd");
+        std::fs::write(&shim, "@echo off\r\necho shim:%1:%2:%OAH_X%:%CD%\r\nexit /b 5\r\n").unwrap();
+        let env = [EnvVar { key: "OAH_X".into(), value: "from env".into(), in_keychain: false }];
+        let cwd = dir.path().to_str().unwrap();
+        let spec = crate::Spec {
+            location: &Location::Local,
+            cwd,
+            program: shim.to_str().unwrap(),
+            args: vec!["--resume".into(), "abc-123".into()],
+            env: &env,
+        };
+        let s = command_spec(&spec).unwrap();
+        assert!(s.program.to_ascii_lowercase().ends_with("cmd.exe"), "{s:?}");
+        let (tx, rx) = mpsc::channel();
+        let p = Pty::spawn(&s, 200, 30, move |e| drop(tx.send(e))).unwrap();
+        until(&rx, "\x1b[6n").unwrap();
+        p.write(b"\x1b[1;1R").unwrap();
+        let said = until(&rx, "shim:--resume:abc-123:from env:").unwrap();
+        println!("{said:?}");
+        assert_eq!(exit_code(&rx), Some(5));
+
+        let distro = std::env::var("OAH_TEST_DISTRO").unwrap_or_else(|_| "Ubuntu".into());
+        let loc = Location::Wsl { distro };
+        let script = r#"[ -t 0 ] && printf 'tty '; printf '%s|%s|%s|%s' "$OAH_X" "$TERM" "$1" "$(pwd)"; exit 6"#;
+        let spec = crate::Spec {
+            location: &loc,
+            cwd: "/tmp",
+            program: "sh",
+            args: vec!["-c".into(), script.into(), "sh".into(), "it's \"x\"".into()],
+            env: &env,
+        };
+        let (tx, rx) = mpsc::channel();
+        let p = Pty::spawn(&command_spec(&spec).unwrap(), 200, 30, move |e| drop(tx.send(e))).unwrap();
+        until(&rx, "\x1b[6n").unwrap();
+        p.write(b"\x1b[1;1R").unwrap();
+        // (The pseudo console may put its own escape codes between the two prints.)
+        let said = until(&rx, "from env|xterm-256color|it's \"x\"|/tmp").unwrap();
+        assert!(said.contains("tty "), "{said:?}");
+        assert_eq!(exit_code(&rx), Some(6));
     }
 
     #[test]

@@ -9,7 +9,8 @@ export { needsYou, waitingOf } from "@/lib/chat"
 import { ipc, onChatEvent, onChatsChanged } from "@/lib/ipc"
 import { notify, setQueuedCheck } from "@/lib/notify"
 import { isAcp, type AgentKind, type PermissionMode } from "@/lib/types"
-import { useApp } from "./app"
+import { newChatKey, type PaneTarget } from "@/lib/panes"
+import { paneOf, useApp } from "./app"
 import { draftKey, drafts } from "./drafts"
 
 type Image = { mime: string; data: string; name?: string }
@@ -32,21 +33,29 @@ type ChatsStore = {
   /** Chats mid-turn, as the app last said (`chat_busy`): it knows about chats this window
    *  never opened (a phone or MCP runs them). */
   busy: string[]
+  /** Chats open in their agent's own CLI, as the app last said (`chat_cli`): they take no
+   *  messages until it ends. */
+  cli: string[]
   /** A chat opened to answer it: its waiting card takes the cursor once it shows. */
   focus: string | null
 
   init(): Promise<void>
   refresh(): Promise<void>
-  open(chatId: string): Promise<void>
+  /** Shows the chat: in the active pane, or beside it (`side`). One that's on screen already
+   *  is gone to instead, in whichever pane has it. */
+  open(chatId: string, where?: "side"): Promise<void>
+  /** Loads the chat's transcript (once), without showing it anywhere. */
+  load(chatId: string): Promise<void>
   /** Opens the chat on its approval or question, wherever the window was. */
   answerChat(chatId: string): Promise<void>
-  /** Sends a prompt; with no chat yet, creates one in the current project first. True once
-   *  it's sent; false (after saying why) when it wasn't. A new chat whose first message didn't
-   *  go is removed again, and the message goes back in the new-chat box. */
+  /** Sends a prompt; with no chat yet, creates one in the project of pane `pane` (the active
+   *  one without it) first, and shows it there. True once it's sent; false (after saying why)
+   *  when it wasn't. A new chat whose first message didn't go is removed again, and the message
+   *  goes back in the new-chat box. */
   send(
     chatId: string | null,
     text: string,
-    opts: { agent: AgentKind; model?: string; effort?: string; permission: PermissionMode; cwd?: string; images?: Image[] },
+    opts: { agent: AgentKind; model?: string; effort?: string; permission: PermissionMode; cwd?: string; images?: Image[]; pane?: string },
   ): Promise<boolean>
   /** `/compact`: the agent summarizes the conversation so far. */
   compact(chatId: string, instructions: string, permission: PermissionMode): Promise<void>
@@ -89,6 +98,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
   waiting: {},
   background: [],
   busy: [],
+  cli: [],
   focus: null,
 
   async init() {
@@ -98,21 +108,42 @@ export const useChats = create<ChatsStore>((set, get) => ({
     // A chat started, renamed or deleted elsewhere (a phone) shows up here too.
     await onChatsChanged(() => void get().refresh())
     await get().refresh()
+    // A CLI left running by the window before this one (it was reloaded) has no terminal here.
+    void import("./cli").then((m) => m.initCli())
   },
 
   async refresh() {
-    const [metas, waiting, background, busy] = await Promise.all([
+    const [metas, waiting, background, busy, cli] = await Promise.all([
       ipc.chatList().catch(() => [] as ChatMeta[]),
       ipc.chatWaiting().catch(() => ({})),
       ipc.chatBackground().catch(() => [] as string[]),
       ipc.chatBusy().catch(() => [] as string[]),
+      ipc.chatCli().catch(() => [] as string[]),
     ])
-    set({ metas, waiting, background, busy })
+    set({ metas, waiting, background, busy, cli })
   },
 
-  async open(chatId) {
-    useApp.setState({ chatId, view: "chat" })
-    import("./git").then((m) => m.useGit.getState().open(null))
+  async open(chatId, where) {
+    const app = useApp.getState()
+    const active = paneOf(app)
+    const shown = app.panes.find((p) => p.chatId === chatId)
+    const target = { projectId: get().metas.find((m) => m.id === chatId)?.projectId ?? active.projectId, chatId, viewer: null }
+    if (shown && shown.id !== active.id) {
+      // On screen in the other pane: that one, not a second copy.
+      app.focusPane(shown.id)
+      app.setPane({ viewer: null }, shown.id)
+    } else if (where === "side") {
+      // Moved beside the pane it was in, which goes back to a new chat.
+      if (shown) app.setPane({ chatId: null }, shown.id)
+      app.splitPane(target)
+    } else {
+      app.setPane(target)
+    }
+    useApp.setState({ view: "chat" })
+    await get().load(chatId)
+  },
+
+  async load(chatId) {
     if (get().transcripts[chatId] || loading.has(chatId)) return
     // Events that arrive while the snapshot loads wait, then the ones it doesn't have apply.
     loading.set(chatId, [])
@@ -127,21 +158,21 @@ export const useChats = create<ChatsStore>((set, get) => ({
   async answerChat(chatId) {
     const meta = get().metas.find((m) => m.id === chatId)
     if (!meta) return
-    useApp.getState().selectProject(meta.projectId)
     set({ focus: chatId })
     await get().open(chatId)
   },
 
   async send(chatId, text, opts) {
-    const app = useApp.getState()
+    // The pane it was typed in, which may not be the active one by the time the chat exists.
+    const from = paneOf(useApp.getState(), opts.pane)
     let id = chatId
     try {
       if (!id) {
-        if (!app.projectId) return false
-        const meta = await ipc.chatCreate(app.projectId, opts.agent, opts.model ?? null, opts.effort ?? null, opts.cwd ?? null)
+        if (!from.projectId) return false
+        const meta = await ipc.chatCreate(from.projectId, opts.agent, opts.model ?? null, opts.effort ?? null, opts.cwd ?? null)
         id = meta.id
         set((s) => ({ metas: [meta, ...s.metas], transcripts: { ...s.transcripts, [meta.id]: emptyTranscript() }, permission: { ...s.permission, [meta.id]: opts.permission } }))
-        useApp.setState({ chatId: meta.id })
+        showIn(from.id, { chatId: meta.id })
       }
       const chat = id
       set((s) => ({ transcripts: { ...s.transcripts, [chat]: { ...(s.transcripts[chat] ?? emptyTranscript()), running: true } } }))
@@ -155,7 +186,7 @@ export const useChats = create<ChatsStore>((set, get) => ({
       const login = msg.includes("isn't signed in") ? opts.agent : null
       // Sign in where the project is: this computer, or inside its WSL distro.
       const meta = get().metas.find((m) => m.id === id)
-      const project = useApp.getState().settings?.projects.find((p) => p.id === (meta?.projectId ?? useApp.getState().projectId))
+      const project = useApp.getState().settings?.projects.find((p) => p.id === (meta?.projectId ?? from.projectId))
       const where = project?.location.kind === "wsl" ? project.location : null
       const canSignIn = login && project?.location.kind !== "ssh"
       // Not installed: the install command is in Settings → Providers.
@@ -168,12 +199,15 @@ export const useChats = create<ChatsStore>((set, get) => ({
             ? { action: { label: "Providers", onClick: () => useApp.getState().openSettings("providers") } }
             : undefined,
       )
-      if (id && !chatId && app.projectId) {
+      if (id && !chatId) {
         // Its first message never went: no empty chat is left, and the message is back in the
-        // box it was typed in.
-        drafts.set(draftKey(null, app.projectId, opts.cwd), text, (opts.images ?? []).map((i) => ({ ...i, name: i.name ?? "image" })))
-        await get().remove(id)
-        useApp.setState({ chatId: null, draftCwd: opts.cwd ?? null })
+        // box it was typed in (when its pane still shows that chat).
+        const made = id
+        await get().remove(made)
+        const back = () => useApp.getState().panes.find((p) => p.id === from.id && p.chatId === null && p.projectId === from.projectId)
+        if (back()) showIn(from.id, { draftCwd: opts.cwd ?? null })
+        const pane = back() ?? { ...from, chatId: null, draftCwd: opts.cwd ?? null }
+        drafts.set(newChatKey(useApp.getState().panes, pane), text, (opts.images ?? []).map((i) => ({ ...i, name: i.name ?? "image" })))
       } else if (id) {
         apply(id, { type: "error", message: msg })
       }
@@ -241,7 +275,8 @@ export const useChats = create<ChatsStore>((set, get) => ({
       return { metas: s.metas.filter((m) => m.id !== chatId), transcripts: rest, queued }
     })
     drafts.drop(draftKey(chatId, ""))
-    if (useApp.getState().chatId === chatId) useApp.setState({ chatId: null })
+    // A pane that showed it shows a new chat.
+    for (const p of useApp.getState().panes) if (p.chatId === chatId) useApp.getState().setPane({ chatId: null }, p.id)
   },
 
   async confirmRemove(chatId) {
@@ -300,6 +335,13 @@ export const useChats = create<ChatsStore>((set, get) => ({
     if (!ok) set((s) => ({ queued: { ...s.queued, [chatId]: [item, ...(s.queued[chatId] ?? [])] } }))
   },
 }))
+
+/** Changes what pane `id` shows, if it's still open (a closed pane's chat isn't put in
+ *  whichever pane is active now). */
+function showIn(id: string, target: PaneTarget) {
+  const app = useApp.getState()
+  if (app.panes.some((p) => p.id === id)) app.setPane(target, id)
+}
 
 /** Copies the chat as Markdown (to paste into an issue or a PR description). */
 export async function copyChatMarkdown(chatId: string) {

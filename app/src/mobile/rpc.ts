@@ -50,7 +50,7 @@ const rpc = <T>(method: string, params: Record<string, unknown> = {}) => invoke<
 export const api = {
   projects: () => rpc<Project[]>("projects.list"),
   agents: () => rpc<{ agents: AgentInfo[]; defaultAgent: AgentKind }>("agents.list"),
-  chats: () => rpc<{ metas: ChatMeta[]; running: string[]; busy: string[]; waiting?: Record<string, Waiting> }>("chats.list"),
+  chats: () => rpc<{ metas: ChatMeta[]; running: string[]; busy: string[]; waiting?: Record<string, Waiting>; cli?: string[] }>("chats.list"),
   open: (chatId: string) => rpc<Snapshot>("chat.open", { chatId }),
   close: (chatId: string) => rpc<void>("chat.close", { chatId }),
   create: (projectId: string, agent: AgentKind, model: string | null) => rpc<ChatMeta>("chat.create", { projectId, agent, model }),
@@ -64,6 +64,8 @@ export const api = {
   setPermission: (chatId: string, mode: PermissionMode) => rpc<void>("chat.setPermission", { chatId, mode }),
   compact: (chatId: string, instructions: string, permission: PermissionMode | null) => rpc<void>("chat.compact", { chatId, instructions, permission }),
   clear: (chatId: string) => rpc<void>("chat.clear", { chatId }),
+  /** Ends the agent's CLI the chat is open in on the desktop; the chat takes messages again. */
+  endCli: (chatId: string) => rpc<boolean>("chat.endCli", { chatId }),
   readImage: (chatId: string, path: string) => rpc<string>("chat.readImage", { chatId, path }),
   image: (chatId: string, file: string) => rpc<string>("chat.image", { chatId, file }),
   rename: (chatId: string, title: string) => rpc<ChatMeta>("chat.rename", { chatId, title }),
