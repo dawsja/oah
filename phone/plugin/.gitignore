@@ -1,0 +1,4 @@
+# Tauri's Swift API, copied in for the Swift package by the build.
+.tauri/
+ios/.build/
+ios/Package.resolved

@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { create } from "zustand"
 import { emptyTranscript, reduce, replay, type ChatEvent, type ChatMeta, type Decision, type Transcript } from "@/lib/chat"
 import { isAcp, type AgentKind, type PermissionMode, type Project } from "@/lib/types"
+import { go } from "./route"
 import { api, native, phoneName, type AgentInfo, type Catalog, type Desktop, type Image, type LinkEvent, type LinkState, type Push, type Waiting } from "./rpc"
 
 /** A message typed while the agent worked: it goes when the turn ends, or now if asked. */
@@ -40,6 +41,8 @@ type Store = {
 
   init(): Promise<void>
   pair(o: { addresses: string[]; code: string; name?: string }): Promise<Desktop>
+  /** Starts the demo desktop (inside the app) and lists it. */
+  startDemo(): Promise<Desktop>
   forget(id: string): Promise<void>
   connect(id: string): Promise<void>
   refresh(): Promise<void>
@@ -103,9 +106,13 @@ export const useMobile = create<Store>((set, get) => ({
   async init() {
     const desktops = await native.desktops().catch(() => [] as Desktop[])
     set({ desktops, loaded: true })
+    // Asked to start in the demo, or on a screen (screenshots, tests driving the real app).
+    const launch = await native.launch().catch(() => null)
     const last = localStorage.getItem(LAST)
-    const pick = desktops.find((d) => d.id === last) ?? (desktops.length === 1 ? desktops[0] : null)
+    const demo = launch?.demo ? await get().startDemo().catch(() => null) : null
+    const pick = demo ?? desktops.find((d) => d.id === last) ?? (desktops.length === 1 ? desktops[0] : null)
     if (pick) await get().connect(pick.id)
+    if (launch?.route) go(launch.route, true)
     // Back from the background: check the link (the phone may have slept through it dropping).
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && get().desktopId) void native.wake().catch(() => {})
@@ -118,6 +125,12 @@ export const useMobile = create<Store>((set, get) => ({
     return d
   },
 
+  async startDemo() {
+    const d = await native.demo()
+    set((s) => ({ desktops: [...s.desktops.filter((x) => x.id !== d.id), d] }))
+    return d
+  },
+
   async forget(id) {
     await native.forget(id)
     if (localStorage.getItem(LAST) === id) localStorage.removeItem(LAST)
@@ -127,8 +140,9 @@ export const useMobile = create<Store>((set, get) => ({
 
   async connect(id) {
     if (get().desktopId === id && get().link !== "idle" && get().link !== "revoked") return
-    localStorage.setItem(LAST, id)
     const d = get().desktops.find((x) => x.id === id)
+    // The demo is gone when the app closes: not somewhere to come back to.
+    if (!d?.demo) localStorage.setItem(LAST, id)
     // The last list seen from this desktop shows (read-only) until it answers.
     set({ desktopId: id, link: "connecting", linkError: null, desktopName: d?.name ?? "", transcripts: {}, running: [], busy: [], cli: [], waiting: {}, listed: false, ...cached(id) })
     await native.connect(id, onLink).catch((e) => set({ link: "offline", linkError: String(e) }))
@@ -148,7 +162,7 @@ export const useMobile = create<Store>((set, get) => ({
     }
     set({ ...next, running: chats.running, busy: chats.busy, cli: chats.cli ?? [], waiting: chats.waiting ?? {}, listed: true })
     const id = get().desktopId
-    if (id) cache(id, next)
+    if (id && !get().desktops.find((d) => d.id === id)?.demo) cache(id, next)
   },
 
   async open(chatId) {

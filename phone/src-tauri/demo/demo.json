@@ -1,0 +1,544 @@
+{
+  "desktopName": "Demo computer",
+  "projects": [
+    {
+      "id": "p-store",
+      "name": "storefront",
+      "location": {
+        "kind": "local"
+      },
+      "path": "/home/you/code/storefront",
+      "defaultAgent": "claude",
+      "defaultModel": "",
+      "git": {
+        "baseBranch": "main",
+        "worktreeDir": "",
+        "deleteBranchOnRemove": false
+      }
+    },
+    {
+      "id": "p-billing",
+      "name": "billing-api",
+      "location": {
+        "kind": "ssh",
+        "host": "dev-box"
+      },
+      "path": "/srv/billing-api",
+      "defaultAgent": "codex",
+      "defaultModel": "",
+      "git": {
+        "baseBranch": "main",
+        "worktreeDir": "",
+        "deleteBranchOnRemove": false
+      }
+    }
+  ],
+  "agents": {
+    "agents": [
+      {
+        "kind": "claude",
+        "name": "Claude Code",
+        "defaultModel": "sonnet",
+        "permissionMode": "ask"
+      },
+      {
+        "kind": "codex",
+        "name": "Codex",
+        "defaultModel": "codex",
+        "permissionMode": "ask"
+      }
+    ],
+    "defaultAgent": "claude"
+  },
+  "models": {
+    "claude": [
+      {
+        "id": "sonnet",
+        "name": "Sonnet",
+        "description": "Quick, for everyday work",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "defaultEffort": "medium"
+      },
+      {
+        "id": "opus",
+        "name": "Opus",
+        "description": "For the hardest problems",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "defaultEffort": "medium"
+      }
+    ],
+    "codex": [
+      {
+        "id": "codex",
+        "name": "Codex",
+        "description": "The demo's Codex model",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "defaultEffort": "medium"
+      }
+    ]
+  },
+  "chats": [
+    {
+      "meta": {
+        "id": "c-checkout",
+        "projectId": "p-store",
+        "agent": "claude",
+        "effort": "",
+        "model": "sonnet",
+        "title": "Discount code at checkout",
+        "cwd": "/home/you/code/storefront",
+        "agentSessionId": null,
+        "ago": 2,
+        "tokens": 41200,
+        "costUsd": 0.12,
+        "pinned": false
+      },
+      "waiting": "approval",
+      "events": [
+        {
+          "type": "started",
+          "sessionId": "demo-1",
+          "model": "sonnet",
+          "cwd": "/home/you/code/storefront"
+        },
+        {
+          "type": "userMessage",
+          "id": "u1",
+          "text": "Add a discount code field to checkout. Codes are uppercase, and the total should update as soon as one is typed.",
+          "images": [],
+          "files": []
+        },
+        {
+          "type": "turnStarted",
+          "turnId": "t1"
+        },
+        {
+          "type": "reasoning",
+          "itemId": "r1",
+          "text": "The form lives in CheckoutForm.tsx and the total comes from useTotal. I should check how prices are computed before touching the form."
+        },
+        {
+          "type": "toolStarted",
+          "itemId": "k1",
+          "tool": {
+            "kind": "read",
+            "name": "Read",
+            "title": "src/checkout/CheckoutForm.tsx",
+            "input": {
+              "path": "src/checkout/CheckoutForm.tsx"
+            },
+            "path": "/home/you/code/storefront/src/checkout/CheckoutForm.tsx"
+          }
+        },
+        {
+          "type": "toolFinished",
+          "itemId": "k1",
+          "ok": true,
+          "output": "58 lines",
+          "diff": null
+        },
+        {
+          "type": "toolStarted",
+          "itemId": "k2",
+          "tool": {
+            "kind": "search",
+            "name": "Grep",
+            "title": "applyDiscount",
+            "input": {
+              "pattern": "applyDiscount"
+            },
+            "path": null
+          }
+        },
+        {
+          "type": "toolFinished",
+          "itemId": "k2",
+          "ok": true,
+          "output": "src/pricing/discounts.ts:12:export function applyDiscount(total: Money, code: string): Money",
+          "diff": null
+        },
+        {
+          "type": "text",
+          "itemId": "a1",
+          "text": "There's already an `applyDiscount` in `src/pricing/discounts.ts`, so the form only needs to collect the code:\n\n1. keep the code in state, trimmed and uppercased as it's typed\n2. show the total through `applyDiscount`\n\n```ts\nconst total = applyDiscount(useTotal(cart), code)\n```"
+        },
+        {
+          "type": "toolStarted",
+          "itemId": "k3",
+          "tool": {
+            "kind": "edit",
+            "name": "Edit",
+            "title": "src/checkout/CheckoutForm.tsx",
+            "input": {
+              "path": "src/checkout/CheckoutForm.tsx"
+            },
+            "path": "/home/you/code/storefront/src/checkout/CheckoutForm.tsx"
+          }
+        },
+        {
+          "type": "toolFinished",
+          "itemId": "k3",
+          "ok": true,
+          "output": "",
+          "diff": {
+            "path": "/home/you/code/storefront/src/checkout/CheckoutForm.tsx",
+            "patch": "--- a/src/checkout/CheckoutForm.tsx\n+++ b/src/checkout/CheckoutForm.tsx\n@@ -14,6 +14,7 @@ export function CheckoutForm({ cart }: Props) {\n   const [email, setEmail] = useState(\"\")\n   const [address, setAddress] = useState(emptyAddress)\n+  const [code, setCode] = useState(\"\")\n   const total = useTotal(cart)\n \n   return (\n@@ -31,6 +32,12 @@ export function CheckoutForm({ cart }: Props) {\n       <AddressFields value={address} onChange={setAddress} />\n+      <label htmlFor=\"discount\">Discount code</label>\n+      <input\n+        id=\"discount\"\n+        value={code}\n+        onChange={(e) => setCode(e.target.value.trim().toUpperCase())}\n+      />\n-      <Total amount={total} />\n+      <Total amount={applyDiscount(total, code)} />\n       <button type=\"submit\">Pay</button>\n",
+            "added": 8,
+            "removed": 1
+          }
+        },
+        {
+          "type": "context",
+          "usedTokens": 41200,
+          "windowTokens": 200000
+        },
+        {
+          "type": "text",
+          "itemId": "a2",
+          "text": "The field is in. I'd like to run the checkout tests to make sure the total still adds up."
+        },
+        {
+          "type": "approval",
+          "request": {
+            "requestId": "q1",
+            "itemId": "k4",
+            "kind": "command",
+            "title": "Run the checkout tests",
+            "detail": "bun test src/checkout",
+            "diff": null,
+            "canRemember": true
+          }
+        }
+      ]
+    },
+    {
+      "meta": {
+        "id": "c-dates",
+        "projectId": "p-store",
+        "agent": "claude",
+        "effort": "",
+        "model": "sonnet",
+        "title": "Order dates in the shopper's time zone",
+        "cwd": "/home/you/code/storefront",
+        "agentSessionId": null,
+        "ago": 14,
+        "tokens": 9800,
+        "costUsd": 0.03,
+        "pinned": false
+      },
+      "waiting": "question",
+      "events": [
+        {
+          "type": "started",
+          "sessionId": "demo-3",
+          "model": "sonnet",
+          "cwd": "/home/you/code/storefront"
+        },
+        {
+          "type": "userMessage",
+          "id": "u1",
+          "text": "Order dates show in UTC. Show them in the shopper's time zone.",
+          "images": [],
+          "files": []
+        },
+        {
+          "type": "turnStarted",
+          "turnId": "t1"
+        },
+        {
+          "type": "toolStarted",
+          "itemId": "k1",
+          "tool": {
+            "kind": "search",
+            "name": "Grep",
+            "title": "toISOString",
+            "input": {
+              "pattern": "toISOString"
+            },
+            "path": null
+          }
+        },
+        {
+          "type": "toolFinished",
+          "itemId": "k1",
+          "ok": true,
+          "output": "7 matches in 4 files",
+          "diff": null
+        },
+        {
+          "type": "text",
+          "itemId": "a1",
+          "text": "Dates are formatted by hand in four places. Before I change them I need to know how you'd like them formatted."
+        },
+        {
+          "type": "question",
+          "request": {
+            "requestId": "q1",
+            "questions": [
+              {
+                "id": "how",
+                "header": "Dates",
+                "question": "How should order dates be formatted?",
+                "options": [
+                  {
+                    "label": "The browser's own formatter",
+                    "description": "Intl.DateTimeFormat: no new dependency, follows the shopper's locale."
+                  },
+                  {
+                    "label": "date-fns",
+                    "description": "Already used in the admin app; adds about 6 kB here."
+                  },
+                  {
+                    "label": "Keep UTC, add the zone",
+                    "description": "Smallest change: append \"UTC\" so it's at least clear."
+                  }
+                ],
+                "multi": false,
+                "other": true,
+                "secret": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "meta": {
+        "id": "c-rename",
+        "projectId": "p-store",
+        "agent": "claude",
+        "effort": "",
+        "model": "sonnet",
+        "title": "Rename Cart to Basket",
+        "cwd": "/home/you/code/storefront",
+        "agentSessionId": null,
+        "ago": 190,
+        "tokens": 53940,
+        "costUsd": 0.21,
+        "pinned": true
+      },
+      "waiting": null,
+      "events": [
+        {
+          "type": "started",
+          "sessionId": "demo-4",
+          "model": "sonnet",
+          "cwd": "/home/you/code/storefront"
+        },
+        {
+          "type": "userMessage",
+          "id": "u1",
+          "text": "Rename Cart to Basket everywhere.",
+          "images": [],
+          "files": []
+        },
+        {
+          "type": "turnStarted",
+          "turnId": "t1"
+        },
+        {
+          "type": "plan",
+          "items": [
+            {
+              "text": "Rename the component and its file",
+              "status": "completed"
+            },
+            {
+              "text": "Update imports",
+              "status": "completed"
+            },
+            {
+              "text": "Run the type checker",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "type": "toolStarted",
+          "itemId": "k1",
+          "tool": {
+            "kind": "edit",
+            "name": "Edit",
+            "title": "src/cart/Basket.tsx",
+            "input": {
+              "path": "src/cart/Basket.tsx"
+            },
+            "path": "/home/you/code/storefront/src/cart/Basket.tsx"
+          }
+        },
+        {
+          "type": "toolFinished",
+          "itemId": "k1",
+          "ok": true,
+          "output": "",
+          "diff": {
+            "path": "/home/you/code/storefront/src/cart/Basket.tsx",
+            "patch": "--- a/src/cart/Basket.tsx\n+++ b/src/cart/Basket.tsx\n@@ -1,7 +1,7 @@\n-export function Cart({ items }: { items: Item[] }) {\n+export function Basket({ items }: { items: Item[] }) {\n   return (\n-    <section aria-label=\"Cart\">\n+    <section aria-label=\"Basket\">\n       {items.map((item) => (\n         <Row key={item.id} item={item} />\n       ))}\n",
+            "added": 2,
+            "removed": 2
+          }
+        },
+        {
+          "type": "toolStarted",
+          "itemId": "k2",
+          "tool": {
+            "kind": "bash",
+            "name": "Bash",
+            "title": "bun run typecheck",
+            "input": {
+              "command": "bun run typecheck"
+            },
+            "path": null
+          }
+        },
+        {
+          "type": "toolFinished",
+          "itemId": "k2",
+          "ok": true,
+          "output": "No errors.",
+          "diff": null
+        },
+        {
+          "type": "text",
+          "itemId": "a1",
+          "text": "`Cart` is `Basket` now: the component, its file and 11 imports. The type checker is clean."
+        },
+        {
+          "type": "turnFinished",
+          "turnId": "t1",
+          "usage": {
+            "inputTokens": 52100,
+            "outputTokens": 1840,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "costUsd": 0.21,
+          "durationMs": 96000,
+          "interrupted": false
+        }
+      ]
+    },
+    {
+      "meta": {
+        "id": "c-invoices",
+        "projectId": "p-billing",
+        "agent": "codex",
+        "effort": "",
+        "model": "codex",
+        "title": "Slow nightly invoice job",
+        "cwd": "/srv/billing-api",
+        "agentSessionId": null,
+        "ago": 1500,
+        "tokens": 19020,
+        "costUsd": 0.07,
+        "pinned": false
+      },
+      "waiting": null,
+      "events": [
+        {
+          "type": "started",
+          "sessionId": "demo-2",
+          "model": "codex",
+          "cwd": "/srv/billing-api"
+        },
+        {
+          "type": "userMessage",
+          "id": "u1",
+          "text": "Why is the nightly invoice job slow?",
+          "images": [],
+          "files": []
+        },
+        {
+          "type": "turnStarted",
+          "turnId": "t1"
+        },
+        {
+          "type": "toolStarted",
+          "itemId": "k1",
+          "tool": {
+            "kind": "bash",
+            "name": "Shell",
+            "title": "psql -c 'EXPLAIN ANALYZE …'",
+            "input": {
+              "command": "psql billing -c 'EXPLAIN ANALYZE SELECT * FROM line_items WHERE invoice_id = 1'"
+            },
+            "path": null
+          }
+        },
+        {
+          "type": "toolFinished",
+          "itemId": "k1",
+          "ok": true,
+          "output": "Seq Scan on line_items  (cost=0.00..48211.00 rows=14 width=96) (actual time=0.031..212.447 rows=14 loops=1)\n  Filter: (invoice_id = 1)\n  Rows Removed by Filter: 2399986\nExecution Time: 212.492 ms",
+          "diff": null
+        },
+        {
+          "type": "text",
+          "itemId": "a1",
+          "text": "Each invoice reads **all** of `line_items`: there's no index on `invoice_id`, so the job does one full scan per invoice.\n\n| Step | Time per invoice |\n|---|---|\n| Load line items | 212 ms |\n| Render PDF | 18 ms |\n| Send email | 9 ms |\n\nAn index removes almost all of it:\n\n```sql\nCREATE INDEX CONCURRENTLY line_items_invoice_id ON line_items (invoice_id);\n```\n\nWith about 9,000 invoices a night, that's roughly half an hour saved."
+        },
+        {
+          "type": "turnFinished",
+          "turnId": "t1",
+          "usage": {
+            "inputTokens": 18400,
+            "outputTokens": 620,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "costUsd": 0.07,
+          "durationMs": 48000,
+          "interrupted": false
+        }
+      ]
+    }
+  ],
+  "afterAllow": [
+    {
+      "type": "toolStarted",
+      "itemId": "k4",
+      "tool": {
+        "kind": "bash",
+        "name": "Bash",
+        "title": "bun test src/checkout",
+        "input": {
+          "command": "bun test src/checkout"
+        },
+        "path": null
+      }
+    },
+    {
+      "type": "toolFinished",
+      "itemId": "k4",
+      "ok": true,
+      "output": "bun test v1.3\n\n 12 pass\n 0 fail\n 31 expect() calls\nRan 12 tests across 3 files. [412.00ms]",
+      "diff": null
+    },
+    {
+      "type": "text",
+      "itemId": "a3",
+      "text": "All 12 checkout tests pass, including the two for totals with a discount."
+    }
+  ],
+  "afterDeny": [
+    {
+      "type": "text",
+      "itemId": "a3",
+      "text": "Okay, I haven't run them. The change is in `CheckoutForm.tsx` whenever you want to try it."
+    }
+  ],
+  "afterAnswer": "Thanks. I'll format order dates that way in the four places that print them.",
+  "reply": "This is oah's demo, so nothing ran on a real computer.\n\nOnce this phone is paired with oah on your desktop, a message you send here goes to the agent working in that project, and its answer streams in like this one:\n\n- tool calls and diffs show as it works\n- you approve or deny what it asks to run\n- you can stop it, or queue the next message"
+}

@@ -6,6 +6,7 @@ import { PERMISSION_ICON } from "@/components/permission"
 import { effortLabel, formatTokens, type ModelOption, type Transcript } from "@/lib/chat"
 import { PERMISSION_LABEL, type PermissionMode } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { fitImage } from "./photos"
 import { type Image } from "./rpc"
 import { attachmentMime, MAX_IMAGE, readAttachment } from "@/lib/attachments"
 import { openImages } from "@/components/ImageView"
@@ -78,7 +79,9 @@ export function MobileComposer(p: Props) {
     el.style.height = `${Math.min(el.scrollHeight, 150)}px`
   }, [text])
 
-  const addImages = async (files: File[]) => {
+  const addImages = async (picked: File[]) => {
+    // A camera's photos are larger than the desktop takes: those are scaled down first.
+    const files = await Promise.all(picked.slice(0, 8).map((f) => fitImage(f)))
     const valid = files.filter((f) => attachmentMime(f) && f.size <= MAX_IMAGE)
     if (files.some((f) => !attachmentMime(f))) toast.error("Only PNG, JPEG, GIF and WebP images can be attached")
     if (files.some((f) => f.size > MAX_IMAGE)) toast.error("Images must be 5 MB or smaller")
@@ -102,7 +105,7 @@ export function MobileComposer(p: Props) {
   const current = p.models.find((m) => m.id === p.model)
 
   return (
-    <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void addImages(Array.from(e.dataTransfer.files)) }} className="border-t bg-background px-2.5 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+    <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void addImages(Array.from(e.dataTransfer.files)) }} className="border-t bg-background px-2.5 pt-2 pb-[max(0.5rem,var(--safe-bottom))]">
       {dictation.status}
       {images.length ? (
         <div className="mb-2 flex gap-2.5 overflow-x-auto px-1 pt-1.5">
@@ -194,7 +197,7 @@ export function MobileComposer(p: Props) {
       </div>
 
       <Sheet open={sheet === "more"} onOpenChange={(o) => setSheet(o ? "more" : null)}>
-        <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="max-h-[85vh] gap-0 overflow-y-auto rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="max-h-[85vh] gap-0 overflow-y-auto rounded-t-2xl pb-[max(1rem,var(--safe-bottom))]">
           <SheetHeader>
             <SheetTitle>Chat options</SheetTitle>
           </SheetHeader>
@@ -288,7 +291,7 @@ export function MobileComposer(p: Props) {
       </Sheet>
 
       <Sheet open={sheet === "model"} onOpenChange={(o) => setSheet(o ? "model" : null)}>
-        <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="max-h-[85vh] gap-0 overflow-y-auto rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="max-h-[85vh] gap-0 overflow-y-auto rounded-t-2xl pb-[max(1rem,var(--safe-bottom))]">
           <SheetHeader>
             <SheetTitle>Model</SheetTitle>
           </SheetHeader>

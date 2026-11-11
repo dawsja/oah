@@ -46,7 +46,7 @@ export function DesktopsScreen() {
                   <Monitor className={cn("size-5 shrink-0", on && link === "connected" ? "text-green" : "text-muted-foreground")} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[14px] font-medium">{d.name}</div>
-                    <div className="truncate font-mono text-[11.5px] text-muted-foreground">{d.lastAddress ?? d.addresses[0]}</div>
+                    <div className={cn("truncate text-[11.5px] text-muted-foreground", !d.demo && "font-mono")}>{d.demo ? "A demo inside this app" : (d.lastAddress ?? d.addresses[0])}</div>
                   </div>
                   {on ? (
                     <span className={cn("text-[12px]", link === "connected" ? "text-green" : link === "connecting" ? "text-muted-foreground" : "text-red")}>

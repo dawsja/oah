@@ -3,7 +3,7 @@
 import type { ReactNode } from "react"
 import { ChevronLeft, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { native } from "./rpc"
+import { native, needsLocalNetwork } from "./rpc"
 import { back } from "./route"
 import { useMobile } from "./store"
 
@@ -48,10 +48,16 @@ export function LinkBanner() {
       : link === "revoked"
         ? "This phone was removed on the desktop. Pair it again."
         : `Can't reach ${name || "the desktop"}${error ? `: ${error}` : ""}`
+  const blocked = link === "offline" && needsLocalNetwork(error)
   return (
     <div className={cn("flex shrink-0 items-center gap-2 border-b px-4 py-1.5 text-[12.5px]", link === "connecting" ? "text-muted-foreground" : "bg-red/5 text-red")} role="status">
       {link === "connecting" ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : null}
-      <span className="line-clamp-3 min-w-0 flex-1 py-1 leading-snug">{text}</span>
+      <span className="line-clamp-3 min-w-0 flex-1 py-1 leading-snug">{blocked ? `${text}. If oah isn't allowed on the local network, turn it on in Settings.` : text}</span>
+      {blocked ? (
+        <button className="rounded-md h-10 shrink-0 border border-red/40 px-3 font-medium active:bg-red/10" onClick={() => void native.openSettings()}>
+          Settings
+        </button>
+      ) : null}
       {link === "offline" ? (
         <button className="rounded-md h-10 shrink-0 border border-red/40 px-3 font-medium active:bg-red/10" onClick={() => void native.wake()}>
           Retry

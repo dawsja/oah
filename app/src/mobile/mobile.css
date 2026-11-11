@@ -12,6 +12,20 @@ html.phone body {
 }
 html.phone {
   --oah-chat-size: 15px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+/* An iPhone's keyboard covers the page instead of resizing it, so the app fills what stays
+   visible (viewport.ts keeps these current). The transform also makes the body the box that
+   sheets, dialogs and toasts are placed in, so they stay above the keyboard too. */
+html.ios body {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: var(--app-height, 100%);
+  transform: translateY(var(--app-top, 0px));
+}
+/* With the keyboard up there's no home indicator to clear. */
+html.ios.keyboard {
+  --safe-bottom: 0px;
 }
 /* It's an app, not a page: no pinch or double-tap zoom (the viewport tag says so too). Panning
    and scrolling still work. */

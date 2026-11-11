@@ -59,7 +59,7 @@ describe("phone theme preference", () => {
     setPhoneTheme("light")
     expect(localStorage.setItem).toHaveBeenCalledWith("oah.phone.theme", "light")
     expect(usePhoneTheme.getState()).toEqual({ theme: "light", dark: false })
-    await vi.waitFor(() => expect(invoke).toHaveBeenLastCalledWith("phone_theme", { dark: false }))
+    await vi.waitFor(() => expect(invoke).toHaveBeenLastCalledWith("phone_theme", { dark: false, system: false }))
     cleanup()
     cleanup = initPhoneTheme()
     expect(usePhoneTheme.getState().theme).toBe("light")

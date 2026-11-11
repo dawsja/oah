@@ -6,6 +6,7 @@ import { AGENT_LABEL, type Project } from "@/lib/types"
 import type { ChatMeta } from "@/lib/chat"
 import { cn } from "@/lib/utils"
 import { go } from "./route"
+import { tap } from "./rpc"
 import { useMobile } from "./store"
 import { IconButton, LinkBanner, TopBar, ago } from "./ui"
 
@@ -35,7 +36,7 @@ function useLongPress(onLong: () => void, ms = 450) {
       timer.current = window.setTimeout(() => {
         fired.current = true
         from.current = null
-        navigator.vibrate?.(10)
+        tap()
         onLong()
       }, ms)
     },
@@ -117,7 +118,7 @@ function ChatMenu({ meta, onClose }: { meta: ChatMeta | null; onClose: () => voi
 
   return (
     <Sheet open={!!meta} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="gap-0 rounded-t-2xl pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <SheetContent side="bottom" onOpenAutoFocus={(e) => e.preventDefault()} className="gap-0 rounded-t-2xl pb-[max(0.75rem,var(--safe-bottom))]">
         <SheetHeader className="pb-2">
           <SheetTitle className="line-clamp-2 pr-8 leading-snug">{meta?.title || "New chat"}</SheetTitle>
           <SheetDescription>{meta ? AGENT_LABEL[meta.agent] : ""}</SheetDescription>
@@ -181,6 +182,7 @@ export function ChatsScreen() {
   const metas = useMobile((s) => s.metas)
   const waiting = useMobile((s) => s.waiting)
   const loadedOnce = useMobile((s) => s.listed || s.projects.length > 0 || s.metas.length > 0)
+  const demo = useMobile((s) => s.desktops.find((d) => d.id === s.desktopId)?.demo ?? false)
   const [menu, setMenu] = useState<ChatMeta | null>(null)
 
   // Projects with something waiting for you first, then recent ones; in each, the chats that
@@ -214,6 +216,14 @@ export function ChatsScreen() {
         }
       />
       <LinkBanner />
+      {demo ? (
+        <div className="flex shrink-0 items-center gap-2 border-b bg-card px-4 py-1.5 text-[12.5px] text-muted-foreground">
+          <span className="min-w-0 flex-1 py-1 leading-snug">This is a demo. Nothing here runs on a real computer.</span>
+          <button className="rounded-md h-10 shrink-0 border px-3 font-medium text-foreground active:bg-accent" onClick={() => go("/pair")}>
+            Pair a computer
+          </button>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto pb-6">
         {!loadedOnce ? (
           <div className="flex h-48 flex-col items-center justify-center gap-2 px-8 text-center text-[13px] text-muted-foreground">

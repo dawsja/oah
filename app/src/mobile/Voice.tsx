@@ -87,7 +87,7 @@ export function VoiceSettings() {
     <section className="px-4 py-4">
       <h3 className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Voice on this phone</h3>
       <p className="mb-2 text-[13px] text-muted-foreground">English dictation, processed on your phone. Download the 731 MB model once, then dictate offline. Record up to 30 seconds at a time.</p>
-      {!isTauri() ? <p className="text-[13px] text-muted-foreground">Available in the Android app.</p> : state.state === "unsupported" ? <p className="text-[13px] text-muted-foreground">{state.error}</p> : (
+      {!isTauri() ? <p className="text-[13px] text-muted-foreground">Available in the phone app.</p> : state.state === "unsupported" ? <p className="text-[13px] text-muted-foreground">{state.error}</p> : (
         <>
           {state.state === "error" ? <p className="mb-2 text-[13px] text-red" role="alert">{state.error}</p> : null}
           {state.state === "downloading" ? <p className="mb-2 text-[13px]" role="status">Downloading… {state.percent}%</p> : null}

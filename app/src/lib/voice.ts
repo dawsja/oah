@@ -60,6 +60,8 @@ export async function record(deviceId = ""): Promise<Recording> {
   try {
     ctx = new AudioContext()
     const audio = ctx
+    // Safari can hand back a suspended context when it's made after an await.
+    if (audio.state === "suspended") await audio.resume()
     const source = audio.createMediaStreamSource(stream)
     // ScriptProcessor rather than a worklet: a worklet needs a module URL the CSP doesn't allow.
     const node = audio.createScriptProcessor(4096, 1, 1)

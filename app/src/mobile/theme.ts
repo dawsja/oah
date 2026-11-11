@@ -4,6 +4,7 @@ import type { Theme } from "@/lib/types"
 const KEY = "oah.phone.theme"
 const QUERY = "(prefers-color-scheme: dark)"
 let media: MediaQueryList | null = null
+let core: Promise<typeof import("@tauri-apps/api/core")> | null = null
 
 export const usePhoneTheme = create<{ theme: Theme; dark: boolean }>(() => ({ theme: "system", dark: true }))
 
@@ -11,8 +12,11 @@ function apply(theme: Theme) {
   const dark = theme === "dark" || (theme === "system" && (media?.matches ?? true))
   document.documentElement.classList.toggle("dark", dark)
   usePhoneTheme.setState({ theme, dark })
-  // The WebView uses the shared desktop CSS; Android's system bars need matching icon colors.
-  void import("@tauri-apps/api/core").then(({ invoke }) => invoke("phone_theme", { dark })).catch(() => {})
+  // The WebView uses the shared desktop CSS; Android's system bars need matching icon colors,
+  // and an iPhone's window the same theme (or the phone's own, when following it).
+  // One import for every call, so they reach the phone in the order they were made.
+  core ??= import("@tauri-apps/api/core")
+  void core.then(({ invoke }) => invoke("phone_theme", { dark, system: theme === "system" })).catch(() => {})
 }
 
 export function setPhoneTheme(theme: Theme) {

@@ -1,4 +1,5 @@
-//! Keep Android's system-bar icons in step with the phone's selected CSS theme.
+//! Keep the phone's system bars in step with the app's selected CSS theme: Android's bar icons,
+//! the iPhone's window (and with it the status bar's text).
 #[cfg(target_os = "android")]
 use tauri::Manager;
 use tauri::{
@@ -20,7 +21,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 }
 
 #[tauri::command]
-pub async fn phone_theme(app: tauri::AppHandle, dark: bool) -> Result<(), String> {
+pub async fn phone_theme(app: tauri::AppHandle, dark: bool, system: Option<bool>) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         app.state::<Appearance<tauri::Wry>>()
@@ -30,6 +31,18 @@ pub async fn phone_theme(app: tauri::AppHandle, dark: bool) -> Result<(), String
             .map_err(|e| e.to_string())?;
     }
     #[cfg(not(target_os = "android"))]
-    let _ = (app, dark);
+    if cfg!(target_os = "ios") {
+        // Following the phone again hands the window back to it.
+        let style = if system == Some(true) {
+            "system"
+        } else if dark {
+            "dark"
+        } else {
+            "light"
+        };
+        crate::native::<serde_json::Value>(&app, "appearance", serde_json::json!({ "style": style })).await?;
+    }
+    #[cfg(target_os = "android")]
+    let _ = system;
     Ok(())
 }
