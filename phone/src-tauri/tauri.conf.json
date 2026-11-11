@@ -37,7 +37,8 @@
       "icons/icon.png"
     ],
     "iOS": {
-      "minimumSystemVersion": "17.0"
+      "minimumSystemVersion": "17.0",
+      "frameworks": ["Accelerate"]
     }
   }
 }
