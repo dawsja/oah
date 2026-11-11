@@ -286,10 +286,12 @@ export function openImages(images: ShownImage[], index = 0) {
 
 /** The viewer, closed with a message if showing an image fails, instead of taking the whole
  *  window down with it. */
-export function ImageLightbox() {
+/** The image viewer. `inWindow` (the desktop): a panel over the main area, under the title bar,
+ *  with the window still showing around it; otherwise (the phone) the whole screen. */
+export function ImageLightbox({ inWindow = false }: { inWindow?: boolean }) {
   return (
     <LightboxBoundary>
-      <Lightbox />
+      <Lightbox inWindow={inWindow} />
     </LightboxBoundary>
   )
 }
@@ -309,7 +311,7 @@ class LightboxBoundary extends Component<{ children: ReactNode }, { failed: bool
   }
 }
 
-function Lightbox() {
+function Lightbox({ inWindow }: { inWindow: boolean }) {
   const { images, index } = useLightbox()
   const close = () => useLightbox.setState({ images: [], index: 0 })
   const go = (d: number) => useLightbox.setState({ index: (index + d + images.length) % images.length })
@@ -328,8 +330,16 @@ function Lightbox() {
   })
   if (!images.length) return null
   const image = images[Math.min(index, images.length - 1)]
-  return (
-    <div className="safe fixed inset-0 z-50 flex flex-col bg-background/95 backdrop-blur-sm" role="dialog" aria-label={image.name} onClick={(e) => e.target === e.currentTarget && close()}>
+  const viewer = (
+    <div
+      className={cn(
+        "flex flex-col",
+        inWindow ? "h-[min(85%,56rem)] w-[min(85%,80rem)] overflow-hidden rounded-lg border bg-background shadow-2xl" : "safe fixed inset-0 z-50 bg-background/95 backdrop-blur-sm",
+      )}
+      role="dialog"
+      aria-label={image.name}
+      onClick={(e) => !inWindow && e.target === e.currentTarget && close()}
+    >
       <div className="flex h-10 [@media(pointer:coarse)]:h-12 shrink-0 items-center gap-2 border-b px-3 text-[12px]">
         <span className="text-muted-foreground">{images.length > 1 ? `${index + 1} of ${images.length}` : "Image"}</span>
         <button className="rounded-md ml-auto grid size-7 [@media(pointer:coarse)]:size-11 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Close" onClick={close}>
@@ -358,6 +368,14 @@ function Lightbox() {
           ))}
         </div>
       ) : null}
+    </div>
+  )
+  if (!inWindow) return viewer
+  // Below the title bar (its window buttons still work), over a dimmed window: a click outside
+  // the panel closes it.
+  return (
+    <div className="fixed inset-x-0 top-9 bottom-0 z-50 grid place-items-center bg-black/50 p-4" onClick={(e) => e.target === e.currentTarget && close()}>
+      {viewer}
     </div>
   )
 }

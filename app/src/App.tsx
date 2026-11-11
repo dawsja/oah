@@ -163,7 +163,7 @@ export function App() {
       <Toaster position="bottom-right" />
       <PromptHost />
       <PhonePairingHost />
-      <ImageLightbox />
+      <ImageLightbox inWindow />
       <ChatSearch />
       <RemoteFolderHost />
     </TooltipProvider>
