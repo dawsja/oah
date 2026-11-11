@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type DependencyList } from "react"
 import { ArrowDown, Check, ChevronRight, CircleAlert, Copy, Info, ListChecks } from "lucide-react"
 import { blocks, formatDuration, formatTokens, type Decision, type Item, type Transcript as T } from "@/lib/chat"
 import { copyText } from "@/lib/clipboard"
@@ -10,12 +10,41 @@ import { useTouch } from "./touch"
 
 /** Blocks mounted at once; older ones come in by this many. */
 const WINDOW = 150
+/** The edges fade in over this much scrolling past them: under the header, and at the end,
+ *  where the input floats on the transcript (`--dock`, its height, set by the chat around it). */
+const FADE_TOP = 32
+const FADE_END = 56
+/** The end's fade starts this far above the input and runs on under it, out at the pane's edge. */
+const FADE_ABOVE = 24
+/** "Jump to latest" shows this far from the end, not at the first nudge up. */
+const JUMP_AFTER = 360
+
+/** For an input that floats on the transcript's end: refs for the box holding both (`stage`) and
+ *  the input's (`tray`), whose height goes on the stage as `--dock`, the room the transcript
+ *  leaves at its end. `deps`: what puts a different tray on screen. */
+export function useDock(deps: DependencyList = []) {
+  const stage = useRef<HTMLDivElement>(null)
+  const tray = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const [box, el] = [stage.current, tray.current]
+    if (!box || !el) return
+    const size = () => box.style.setProperty("--dock", `${el.offsetHeight}px`)
+    size()
+    const watch = new ResizeObserver(size)
+    watch.observe(el)
+    return () => watch.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+  return { stage, tray }
+}
 
 /** The conversation: user prompts on the right, the agent's work and answers on the left. */
 export function Transcript({ transcript, className }: { transcript: T; className?: string }) {
   const scroller = useRef<HTMLDivElement>(null)
+  const frame = useRef<HTMLDivElement>(null)
   const touch = useTouch()
   const [stuck, setStuck] = useState(true)
+  const [far, setFar] = useState(false)
   const all = blocks(transcript.items)
   // Long chats mount only their latest blocks; older ones load on request.
   const [limit, setLimit] = useState(WINDOW)
@@ -49,7 +78,21 @@ export function Transcript({ transcript, className }: { transcript: T; className
     if (!el) return
     let previousTop = el.scrollTop
     let touchY = 0
+    // The fades show as much as there is past each edge, up to all of them: none at the very
+    // top or end, so there the transcript stops cleanly under the header and over the input.
+    const shade = () => {
+      const box = frame.current
+      if (!box) return
+      const top = Math.max(0, el.scrollTop)
+      const rest = Math.max(0, el.scrollHeight - top - el.clientHeight)
+      box.style.setProperty("--fade-top", String(Math.min(1, top / FADE_TOP)))
+      box.style.setProperty("--fade-end", String(Math.min(1, rest / FADE_END)))
+      box.style.setProperty("--scrollbar", `${el.offsetWidth - el.clientWidth}px`)
+      setFar(rest > JUMP_AFTER)
+    }
+    shade()
     const onScroll = () => {
+      shade()
       const top = Math.max(0, el.scrollTop)
       const atBottom = el.scrollHeight - top - el.clientHeight <= 2
       // Even a small move toward history releases the bottom lock. Only reaching
@@ -85,6 +128,7 @@ export function Transcript({ transcript, className }: { transcript: T; className
     // While at the bottom, stay there.
     const pin = new ResizeObserver(() => {
       if (stuckRef.current && !touching.current) el.scrollTop = el.scrollHeight
+      shade()
     })
     pin.observe(el)
     if (el.firstElementChild) pin.observe(el.firstElementChild)
@@ -100,9 +144,12 @@ export function Transcript({ transcript, className }: { transcript: T; className
   }, [])
 
   return (
-    <div className={cn("relative min-h-0", className)}>
+    <div ref={frame} className={cn("relative min-h-0", className)}>
       <div ref={scroller} className="h-full overflow-y-auto">
-        <div className={cn("mx-auto flex w-full max-w-[46rem] flex-col gap-4", touch ? "px-4 pt-4 pb-6" : "px-6 pt-6 pb-10")}>
+        <div
+          className={cn("mx-auto flex w-full max-w-[46rem] flex-col gap-4", touch ? "px-4 pt-4" : "px-6 pt-6")}
+          style={{ paddingBottom: `calc(var(--dock, 0px) + ${touch ? "1.5rem" : "2.5rem"})` }}
+        >
           {hidden ? (
             <button
               className="self-center rounded-full border px-3.5 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -127,9 +174,22 @@ export function Transcript({ transcript, className }: { transcript: T; className
           {transcript.running && !transcript.approvals.length && !transcript.questions.length && list[list.length - 1]?.kind !== "work" ? <span className="shimmer self-start text-[12.5px]">Working…</span> : null}
         </div>
       </div>
-      {!stuck ? (
+      {/* The scrollbar stays clear of them. The end's goes on behind the input, the transcript
+          still dimly there under it and gone by the pane's edge. */}
+      <div aria-hidden className="pointer-events-none absolute top-0 left-0 right-(--scrollbar)" style={{ height: FADE_TOP, opacity: "var(--fade-top, 0)", background: "linear-gradient(var(--background), transparent)" }} />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute bottom-0 left-0 right-(--scrollbar)"
+        style={{
+          height: `calc(var(--dock, 0px) + ${FADE_ABOVE}px)`,
+          opacity: "var(--fade-end, 0)",
+          background: "linear-gradient(transparent, color-mix(in srgb, var(--background) 55%, transparent) 70%, var(--background))",
+        }}
+      />
+      {!stuck && far ? (
         <button
-          className={cn("rounded-full absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 border bg-popover px-3 text-muted-foreground shadow-lg hover:text-foreground", touch ? "h-10 px-4 text-[13px]" : "h-7 text-[12px]")}
+          style={{ bottom: "calc(var(--dock, 0px) + 0.75rem)" }}
+          className={cn("rounded-full absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5 border bg-popover px-3 text-muted-foreground shadow-lg hover:text-foreground", touch ? "h-10 px-4 text-[13px]" : "h-7 text-[12px]")}
           onClick={() => {
             const el = scroller.current
             if (el) el.scrollTop = el.scrollHeight

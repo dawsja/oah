@@ -28,7 +28,7 @@ import { QuestionCard } from "./QuestionCard"
 import { Composer, editInComposer, STEER_KEY } from "./Composer"
 import { Tip } from "@/components/Tip"
 import { CwdContext } from "./cwd"
-import { Transcript } from "./Transcript"
+import { Transcript, useDock } from "./Transcript"
 import { CliView } from "./CliView"
 import { TasksDock } from "./TasksDock"
 
@@ -246,6 +246,8 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
   const active = usePaneActive()
   // Open in the agent's own CLI: a terminal on this chat's session, in the chat's place.
   const inCli = useCli((s) => !!s.sessions[meta.id])
+  // The input and what's docked over it float on the transcript, which scrolls under them.
+  const { stage, tray } = useDock([inCli])
   // Opened to answer it (the inbox, a notification): the waiting card takes the cursor.
   useEffect(() => {
     if (!focus) return
@@ -273,57 +275,67 @@ function OpenChat({ project, meta, transcript }: { project: Project; meta: ChatM
     <CwdContext.Provider value={transcript.cwd ?? meta.cwd}>
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
       <ChatHeader meta={meta} transcript={transcript} model={transcript.model || meta.model || d.model} inCli={false} />
-      <Transcript transcript={transcript} className="flex-1" />
-      {meta.sleeping && !transcript.running ? <p className="px-6 py-2 text-center text-[12px] text-muted-foreground">Sleeping · send a message to resume this session.</p> : null}
-      <div className="mx-auto flex max-h-[75%] min-h-0 w-full max-w-[46rem] shrink-0 flex-col gap-2 px-6 pb-4">
-        <div ref={dock} className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden">
-          {transcript.plan.length ? <PlanDock items={transcript.plan} /> : null}
-          {transcript.tasks.length ? <TasksDock agent={meta.agent} tasks={transcript.tasks} onStop={(id) => void chats.stopTask(meta.id, id)} /> : null}
-          {transcript.questions[0] ? (
-            <div data-waiting className="rounded-2xl flex min-h-0 flex-col">
-              <QuestionCard request={transcript.questions[0]} onAnswer={(a) => chats.answerQuestion(meta.id, transcript.questions[0].requestId, a)} />
-            </div>
-          ) : transcript.approvals[0] ? (
-            <div data-waiting className="rounded-2xl flex min-h-0 flex-col">
-              <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
-            </div>
+      <div ref={stage} className="relative min-h-0 flex-1">
+        <Transcript transcript={transcript} className="h-full" />
+        <div ref={tray} className="absolute inset-x-0 bottom-0 flex max-h-[75%] min-h-0 flex-col">
+          {meta.sleeping && !transcript.running ? (
+            <p className="px-6 py-2 text-center text-[12px] text-muted-foreground">
+              {/* Over the transcript, which scrolls on behind it. */}
+              <span className="rounded-full bg-background px-2 py-0.5">Sleeping · send a message to resume this session.</span>
+            </p>
           ) : null}
-        </div>
-        <div className="shrink-0">
-          {queued.length ? <QueueDock chatId={meta.id} items={queued} running={transcript.running} pane={pane.id} /> : null}
-          <Composer
-            history={transcript.items.filter((item) => item.kind === "user").map((item) => item.text)}
-            key={meta.id}
-            draftKey={draftKey(meta.id, project.id)}
-            agent={agent}
-            model={meta.model || transcript.model || d.model}
-            effort={meta.effort}
-            context={transcript.context}
-            models={models}
-            onModel={(id, e) => {
-              if (id !== meta.model) void chats.setModel(meta.id, id)
-              if (e !== meta.effort) void chats.setEffort(meta.id, e)
-            }}
-            onModelsOpen={load}
-            commands={commands}
-            onClear={() => chats.clear(meta.id)}
-            onCompact={(instructions) => chats.compact(meta.id, instructions, permission)}
-            permission={permission}
-            onPermission={(m) => chats.setPermission(meta.id, m)}
-            running={transcript.running}
-            onSend={(text, images, how) => {
-              const running = useChats.getState().transcripts[meta.id]?.running
-              // A command never goes into a turn that's running: it waits its turn.
-              if (running && how === "steer" && !text.startsWith("/")) return chats.steer(meta.id, text, images)
-              if (running) return void chats.enqueue(meta.id, text, images)
-              return chats.send(meta.id, text, { agent: meta.agent, permission, images })
-            }}
-            onSteerQueued={queued.length ? () => void chats.sendQueued(meta.id) : undefined}
-            onStop={() => chats.interrupt(meta.id)}
-            placeholder={transcript.running ? `Queue a follow-up, or ${STEER_KEY}+Enter to send it now` : "Reply, @ to add files, / for commands"}
-            lockAgent
-            autoFocus={active}
-          />
+          {/* A little wider than the transcript's text, which goes fully behind it. */}
+          <div className="mx-auto flex min-h-0 w-full max-w-[46rem] flex-col gap-2 px-3 pb-4">
+            <div ref={dock} className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden">
+              {transcript.plan.length ? <PlanDock items={transcript.plan} /> : null}
+              {transcript.tasks.length ? <TasksDock agent={meta.agent} tasks={transcript.tasks} onStop={(id) => void chats.stopTask(meta.id, id)} /> : null}
+              {transcript.questions[0] ? (
+                <div data-waiting className="rounded-2xl flex min-h-0 flex-col">
+                  <QuestionCard request={transcript.questions[0]} onAnswer={(a) => chats.answerQuestion(meta.id, transcript.questions[0].requestId, a)} />
+                </div>
+              ) : transcript.approvals[0] ? (
+                <div data-waiting className="rounded-2xl flex min-h-0 flex-col">
+                  <ApprovalCard request={transcript.approvals[0]} queued={transcript.approvals.length - 1} onAnswer={(dec) => chats.answer(meta.id, transcript.approvals[0].requestId, dec)} />
+                </div>
+              ) : null}
+            </div>
+            <div className="shrink-0">
+              {queued.length ? <QueueDock chatId={meta.id} items={queued} running={transcript.running} pane={pane.id} /> : null}
+              <Composer
+                history={transcript.items.filter((item) => item.kind === "user").map((item) => item.text)}
+                key={meta.id}
+                draftKey={draftKey(meta.id, project.id)}
+                agent={agent}
+                model={meta.model || transcript.model || d.model}
+                effort={meta.effort}
+                context={transcript.context}
+                models={models}
+                onModel={(id, e) => {
+                  if (id !== meta.model) void chats.setModel(meta.id, id)
+                  if (e !== meta.effort) void chats.setEffort(meta.id, e)
+                }}
+                onModelsOpen={load}
+                commands={commands}
+                onClear={() => chats.clear(meta.id)}
+                onCompact={(instructions) => chats.compact(meta.id, instructions, permission)}
+                permission={permission}
+                onPermission={(m) => chats.setPermission(meta.id, m)}
+                running={transcript.running}
+                onSend={(text, images, how) => {
+                  const running = useChats.getState().transcripts[meta.id]?.running
+                  // A command never goes into a turn that's running: it waits its turn.
+                  if (running && how === "steer" && !text.startsWith("/")) return chats.steer(meta.id, text, images)
+                  if (running) return void chats.enqueue(meta.id, text, images)
+                  return chats.send(meta.id, text, { agent: meta.agent, permission, images })
+                }}
+                onSteerQueued={queued.length ? () => void chats.sendQueued(meta.id) : undefined}
+                onStop={() => chats.interrupt(meta.id)}
+                placeholder={transcript.running ? `Queue a follow-up, or ${STEER_KEY}+Enter to send it now` : "Reply, @ to add files, / for commands"}
+                lockAgent
+                autoFocus={active}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>

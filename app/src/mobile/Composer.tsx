@@ -37,6 +37,8 @@ type Props = {
   context?: Transcript["context"]
   onCompact?: () => void
   onClear?: () => void
+  /** Over a chat that scrolls on behind it: only the box shows, no bar of its own. */
+  floating?: boolean
 }
 
 /** A dropdown sized for a thumb. */
@@ -105,7 +107,7 @@ export function MobileComposer(p: Props) {
   const current = p.models.find((m) => m.id === p.model)
 
   return (
-    <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void addImages(Array.from(e.dataTransfer.files)) }} className="border-t bg-background px-2.5 pt-2 pb-[max(0.5rem,var(--safe-bottom))]">
+    <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void addImages(Array.from(e.dataTransfer.files)) }} className={cn("px-2.5 pt-2 pb-[max(0.5rem,var(--safe-bottom))]", !p.floating && "border-t bg-background")}>
       {dictation.status}
       {images.length ? (
         <div className="mb-2 flex gap-2.5 overflow-x-auto px-1 pt-1.5">

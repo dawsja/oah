@@ -4,7 +4,7 @@ import { ApprovalCard } from "@/components/chat/Approval"
 import { ImageSourceContext, type ImageSource } from "@/components/chat/ChatImages"
 import { QuestionCard } from "@/components/chat/QuestionCard"
 import { TasksDock } from "@/components/chat/TasksDock"
-import { Transcript } from "@/components/chat/Transcript"
+import { Transcript, useDock } from "@/components/chat/Transcript"
 import { CwdContext } from "@/components/chat/cwd"
 import { emptyTranscript, type ModelOption } from "@/lib/chat"
 import { AGENT_LABEL, type PermissionMode } from "@/lib/types"
@@ -57,6 +57,8 @@ export function ChatScreen({ chatId }: { chatId: string }) {
   )
   const model = meta?.model || t.model || agent?.defaultModel || ""
   const modelName = models.find((m) => m.id === model)?.name ?? model
+  // The input and what's docked over it float on the transcript, which scrolls under them.
+  const { stage, tray } = useDock()
 
   return (
     <div className="safe flex h-full flex-col bg-background">
@@ -69,67 +71,72 @@ export function ChatScreen({ chatId }: { chatId: string }) {
       <LinkBanner />
       <CwdContext.Provider value={t.cwd ?? meta?.cwd ?? null}>
         <ImageSourceContext.Provider value={source}>
-          {transcript ? <Transcript transcript={t} className="flex-1" /> : <div className="grid flex-1 place-items-center text-[13px] text-muted-foreground">{link === "connected" ? "Loading…" : ""}</div>}
-          <div className="flex flex-col gap-2 px-2.5 pt-1 [&:not(:empty)]:pb-2">
-            {t.tasks.length && meta ? <TasksDock agent={meta.agent} tasks={t.tasks} /> : null}
-            {t.questions[0] ? (
-              <QuestionCard request={t.questions[0]} onAnswer={(a) => st.answerQuestion(chatId, t.questions[0].requestId, a)} />
-            ) : t.approvals[0] ? (
-              <ApprovalCard request={t.approvals[0]} queued={t.approvals.length - 1} onAnswer={(d) => st.answer(chatId, t.approvals[0].requestId, d)} />
-            ) : null}
-            {queued.length ? (
-              <div className="rounded-2xl divide-y border bg-card">
-                {queued.map((q, i) => (
-                  <div key={q.id} className="flex items-center gap-2 py-1 pr-1 pl-3 text-[13px]">
-                    <span className="text-[11px] text-faint">{i === 0 ? "Next" : "Queued"}</span>
-                    <span className="min-w-0 flex-1 truncate">{q.text || `${q.images.length} image${q.images.length > 1 ? "s" : ""}`}</span>
-                    {i === 0 ? (
-                      <button className="rounded-md h-8 px-2 text-[12px] font-medium text-primary active:bg-accent" onClick={() => void st.sendQueued(chatId)}>
-                        Send now
-                      </button>
-                    ) : null}
-                    <button className="rounded-md grid size-8 place-items-center text-muted-foreground active:bg-accent" aria-label="Remove" onClick={() => st.unqueue(chatId, q.id)}>
-                      <X className="size-4" />
-                    </button>
+          <div ref={stage} className="relative min-h-0 flex-1">
+            {transcript ? <Transcript transcript={t} className="h-full" /> : <div className="grid h-full place-items-center text-[13px] text-muted-foreground">{link === "connected" ? "Loading…" : ""}</div>}
+            <div ref={tray} className="absolute inset-x-0 bottom-0 flex max-h-full flex-col">
+              <div className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain px-2.5 pt-1 [&:not(:empty)]:pb-2">
+                {t.tasks.length && meta ? <TasksDock agent={meta.agent} tasks={t.tasks} /> : null}
+                {t.questions[0] ? (
+                  <QuestionCard request={t.questions[0]} onAnswer={(a) => st.answerQuestion(chatId, t.questions[0].requestId, a)} />
+                ) : t.approvals[0] ? (
+                  <ApprovalCard request={t.approvals[0]} queued={t.approvals.length - 1} onAnswer={(d) => st.answer(chatId, t.approvals[0].requestId, d)} />
+                ) : null}
+                {queued.length ? (
+                  <div className="rounded-2xl divide-y border bg-card">
+                    {queued.map((q, i) => (
+                      <div key={q.id} className="flex items-center gap-2 py-1 pr-1 pl-3 text-[13px]">
+                        <span className="text-[11px] text-faint">{i === 0 ? "Next" : "Queued"}</span>
+                        <span className="min-w-0 flex-1 truncate">{q.text || `${q.images.length} image${q.images.length > 1 ? "s" : ""}`}</span>
+                        {i === 0 ? (
+                          <button className="rounded-md h-8 px-2 text-[12px] font-medium text-primary active:bg-accent" onClick={() => void st.sendQueued(chatId)}>
+                            Send now
+                          </button>
+                        ) : null}
+                        <button className="rounded-md grid size-8 place-items-center text-muted-foreground active:bg-accent" aria-label="Remove" onClick={() => st.unqueue(chatId, q.id)}>
+                          <X className="size-4" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ) : null}
               </div>
-            ) : null}
+              {inCli ? (
+                <div className="flex shrink-0 items-center gap-2 border-t bg-background px-4 py-2 text-[12.5px] text-muted-foreground" role="status">
+                  <span className="min-w-0 flex-1 leading-snug">Open in {meta ? (agent?.name ?? AGENT_LABEL[meta.agent]) : "the agent"}'s own CLI on the computer. What's said there shows here when it's closed.</span>
+                  <button className="rounded-md h-10 shrink-0 border px-3 font-medium text-foreground active:bg-accent disabled:opacity-50" disabled={link !== "connected"} onClick={() => void st.endCli(chatId)}>
+                    Close it
+                  </button>
+                </div>
+              ) : null}
+              <MobileComposer
+                floating
+                running={t.running}
+                disabled={link !== "connected" || inCli}
+                placeholder={inCli ? "Close the CLI to reply here" : t.running ? "Queue a follow-up" : "Reply"}
+                onSend={(text, images, how) => {
+                  const running = useMobile.getState().transcripts[chatId]?.running
+                  // A command never goes into a turn that's running: it waits its turn.
+                  if (running && how === "now" && !text.startsWith("/")) return st.steer(chatId, text, images).then(Boolean)
+                  if (running) return void st.enqueue(chatId, text, images)
+                  return st.send(chatId, text, images).then(Boolean)
+                }}
+                onStop={() => void st.interrupt(chatId)}
+                models={models}
+                modelsFailed={modelsFailed}
+                model={model}
+                effort={meta?.effort ?? ""}
+                onModel={(m, e) => void st.setModel(chatId, m, e)}
+                onModelsOpen={load}
+                permission={permission ?? meta?.permission ?? agent?.permissionMode ?? null}
+                onPermission={(m) => st.setPermission(chatId, m)}
+                context={t.context}
+                onCompact={() => void st.compact(chatId)}
+                onClear={() => void st.clear(chatId)}
+              />
+            </div>
           </div>
         </ImageSourceContext.Provider>
       </CwdContext.Provider>
-      {inCli ? (
-        <div className="flex shrink-0 items-center gap-2 border-t px-4 py-2 text-[12.5px] text-muted-foreground" role="status">
-          <span className="min-w-0 flex-1 leading-snug">Open in {meta ? (agent?.name ?? AGENT_LABEL[meta.agent]) : "the agent"}'s own CLI on the computer. What's said there shows here when it's closed.</span>
-          <button className="rounded-md h-10 shrink-0 border px-3 font-medium text-foreground active:bg-accent disabled:opacity-50" disabled={link !== "connected"} onClick={() => void st.endCli(chatId)}>
-            Close it
-          </button>
-        </div>
-      ) : null}
-      <MobileComposer
-        running={t.running}
-        disabled={link !== "connected" || inCli}
-        placeholder={inCli ? "Close the CLI to reply here" : t.running ? "Queue a follow-up" : "Reply"}
-        onSend={(text, images, how) => {
-          const running = useMobile.getState().transcripts[chatId]?.running
-          // A command never goes into a turn that's running: it waits its turn.
-          if (running && how === "now" && !text.startsWith("/")) return st.steer(chatId, text, images).then(Boolean)
-          if (running) return void st.enqueue(chatId, text, images)
-          return st.send(chatId, text, images).then(Boolean)
-        }}
-        onStop={() => void st.interrupt(chatId)}
-        models={models}
-        modelsFailed={modelsFailed}
-        model={model}
-        effort={meta?.effort ?? ""}
-        onModel={(m, e) => void st.setModel(chatId, m, e)}
-        onModelsOpen={load}
-        permission={permission ?? meta?.permission ?? agent?.permissionMode ?? null}
-        onPermission={(m) => st.setPermission(chatId, m)}
-        context={t.context}
-        onCompact={() => void st.compact(chatId)}
-        onClear={() => void st.clear(chatId)}
-      />
     </div>
   )
 }
