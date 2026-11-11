@@ -1,12 +1,12 @@
 [package]
-name = "oah-android"
-description = "oah for Android: pair with the oah desktop app and continue its chats on the phone"
+name = "oah-phone"
+description = "oah for phones: pair with the oah desktop app and continue its chats on the phone"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "oah_android_lib"
+name = "oah_phone_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -1,4 +1,4 @@
-// The phone app's calls: its own Rust side (android/src-tauri: pairing, the session) and, through
+// The phone app's calls: its own Rust side (phone/src-tauri: pairing, the session) and, through
 // it, the desktop's methods (crates/oah-remote/src/proto.rs).
 
 import type { ChatEvent, ChatMeta, Decision, ModelOption, SlashCommand, Snapshot } from "@/lib/chat"

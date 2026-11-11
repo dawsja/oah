@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    oah_android_lib::run()
+    oah_phone_lib::run()
 }

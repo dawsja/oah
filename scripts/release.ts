@@ -18,7 +18,7 @@
 // release of each app.
 
 import { $ } from "bun"
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, normalize } from "node:path"
 
 type App = "desktop" | "android"
@@ -99,27 +99,78 @@ async function realChanges(tag: string, file: string): Promise<string[]> {
     .filter((l) => !/^[+-]\s*("version":\s*"[^"]*",?|version = "[^"]*")\s*$/.test(l))
 }
 
+/** Cargo.lock's packages by name, each as its entry's text (a workspace crate's without its
+ *  version, which every release bumps). */
+function lockPackages(lock: string): Map<string, string> {
+  const packages = new Map<string, string>()
+  for (const entry of lock.split(/\n(?=\[\[package\]\]\n)/).slice(1)) {
+    const name = entry.match(/^name = "([^"]+)"$/m)?.[1]
+    if (!name) continue
+    const text = /^source = /m.test(entry) ? entry : entry.replace(/^version = "[^"]*"\n/m, "")
+    packages.set(name, `${packages.get(name) ?? ""}${text.trim()}\n`)
+  }
+  return packages
+}
+
+/** The workspace's crates: name → directory. */
+function workspaceCrates(): Map<string, string> {
+  const members = readFileSync("Cargo.toml", "utf8").match(/^members = \[([^\]]*)\]/m)?.[1].match(/"[^"]+"/g) ?? []
+  const crates = new Map<string, string>()
+  for (const member of members.map((m) => m.slice(1, -1))) {
+    const dirs = member.endsWith("/*") ? readdirSync(member.slice(0, -2)).map((d) => join(member.slice(0, -2), d)) : [member]
+    for (const dir of dirs) {
+      if (!existsSync(join(dir, "Cargo.toml"))) continue
+      const name = readFileSync(join(dir, "Cargo.toml"), "utf8").match(/^name = "([^"]+)"$/m)?.[1]
+      if (name) crates.set(name, dir)
+    }
+  }
+  return crates
+}
+
+/** Who ships what changed in Cargo.lock. A workspace crate's entry (its dependencies) counts for
+ *  whoever ships that crate; any other package could be linked into every app. */
+async function lockApps(tag: string): Promise<App[]> {
+  const before = lockPackages(await $`git show ${`${tag}:Cargo.lock`}`.text())
+  const after = lockPackages(await $`git show HEAD:Cargo.lock`.text())
+  const crates = workspaceCrates()
+  const apps = new Set<App>()
+  for (const name of new Set([...before.keys(), ...after.keys()])) {
+    if (before.get(name) === after.get(name)) continue
+    const dir = crates.get(name)
+    // oah-android: what the phone shell's crate (oah-phone) was called until 0.3.13.
+    const ships = dir ? await appsFor(`${dir}/Cargo.toml`, tag) : name === "oah-android" ? (["android"] as App[]) : BOTH
+    for (const a of ships) apps.add(a)
+  }
+  return APPS.filter((a) => apps.has(a))
+}
+
 /** Which apps a changed file ships in. */
 async function appsFor(file: string, tag: string): Promise<App[]> {
-  // The phone's native voice build runs these through android/.cargo/config.toml.
+  // The phone's native voice build runs these through phone/.cargo/config.toml.
   if (/^scripts\/android-/.test(file)) return ["android"]
   // Never shipped: docs, tests, CI and the release pipeline itself.
   if (/(^|\/)(README|CHANGELOG|LICENSE)[^/]*$|\.md$/.test(file)) return NOTHING
   if (/^\.github\/|^scripts\/|^rustfmt\.toml$|^\.gitignore$|^assets\//.test(file)) return NOTHING
   if (/(^|\/)tests?\/|\.test\.tsx?$|^app\/vitest\.config\.ts$/.test(file)) return NOTHING
 
-  // Version bumps alone don't count.
-  if (file === "Cargo.toml" || file === "app/package.json" || file === "Cargo.lock") {
-    const lines = await realChanges(tag, file)
-    if (file === "Cargo.lock") {
-      // A workspace crate's version line changes with no checksum line: that's just the bump.
-      const other = lines.filter((l) => !/^[+-]version = "/.test(l))
-      return other.length ? BOTH : NOTHING
-    }
+  // Version bumps alone don't count, nor does the workspace's list of members (a member's own
+  // files say who ships it).
+  if (file === "Cargo.toml") {
+    const lines = (await realChanges(tag, file)).filter((l) => !/^[+-]members = \[/.test(l))
     return lines.length ? BOTH : NOTHING
   }
+  // Nor do its scripts, which are tooling: what it installs is what ships.
+  if (file === "app/package.json") {
+    const shipped = async (rev: string) => {
+      const { version: _version, scripts: _scripts, ...rest } = JSON.parse(await $`git show ${`${rev}:${file}`}`.text())
+      return JSON.stringify(rest)
+    }
+    return (await shipped(tag)) === (await shipped("HEAD")) ? NOTHING : BOTH
+  }
+  if (file === "Cargo.lock") return lockApps(tag)
 
-  if (file.startsWith("android/")) return ["android"]
+  // The phone shell (android/ until 0.3.13).
+  if (file.startsWith("phone/") || file.startsWith("android/")) return ["android"]
   if (file === "app/mobile.html" || file === "app/vite.mobile.config.ts") return ["android"]
   if (file === "app/index.html" || file === "app/vite.config.ts") return ["desktop"]
   if (file.startsWith("app/src-tauri/") || file.startsWith("app/scripts/") || file.startsWith("app/public/")) return ["desktop"]

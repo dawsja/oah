@@ -145,8 +145,8 @@ app/
   src            React + Tailwind (shadcn primitives, 6px radius scale)
   src/mobile     the phone app's UI (mobile.html, built to dist-mobile/), sharing the chat
                  components and `reduce` with the desktop
-android/
-  src-tauri      the Android app (Tauri 2): the phone's key, paired desktops, the session that
+phone/
+  src-tauri      the phone app (Tauri 2): the phone's key, paired desktops, the session that
                  reconnects by itself; gen/android is the Gradle project
 ```
 
@@ -170,7 +170,7 @@ The phone app builds on Linux/macOS with Bash, CMake 3.19+, JDK 17, the Android 
 ```sh
 # Point to your installed NDK; the voice build uses its CMake toolchain.
 export NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
-cd android
+cd phone
 bun install
 bun tauri android dev                # on a connected phone or emulator
 bun tauri android build --apk        # signed when gen/android/keystore.properties exists

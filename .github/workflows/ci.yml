@@ -24,7 +24,7 @@ jobs:
       - name: Typecheck and build
         working-directory: app
         run: bun run web:build
-      - name: Phone app build (android/)
+      - name: Phone app build (phone/)
         working-directory: app
         run: bun run mobile:build
       - name: Tests

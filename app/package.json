@@ -14,9 +14,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "tauri build",
-    "android:init": "cd ../android && bun tauri android init",
-    "android:dev": "cd ../android && bun tauri android dev",
-    "android:build": "cd ../android && bun tauri android build --apk",
+    "android:init": "cd ../phone && bun tauri android init",
+    "android:dev": "cd ../phone && bun tauri android dev",
+    "android:build": "cd ../phone && bun tauri android build --apk",
     "icons": "tauri icon ../assets/png/icon/oah-icon-dark-1024.png -o src-tauri/icons",
     "tauri": "tauri"
   },

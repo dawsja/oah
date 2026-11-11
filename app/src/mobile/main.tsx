@@ -1,4 +1,4 @@
-// The oah phone app (android/): pairs with the desktop and drives its chats.
+// The oah phone app (phone/): pairs with the desktop and drives its chats.
 
 import "@fontsource-variable/inter"
 import "@fontsource-variable/jetbrains-mono"

@@ -14,7 +14,7 @@ val tauriProperties = Properties().apply {
     }
 }
 
-// Release signing: android/src-tauri/gen/android/keystore.properties (never committed) or, in CI,
+// Release signing: phone/src-tauri/gen/android/keystore.properties (never committed) or, in CI,
 // ANDROID_KEYSTORE_PATH / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS. Without either, the
 // release APK is unsigned.
 val keystoreProperties = Properties().apply {

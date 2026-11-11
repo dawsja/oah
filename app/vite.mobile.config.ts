@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react"
 import { fileURLToPath } from "node:url"
 import { defineConfig } from "vite"
 
-// The phone app (android/): the same src/, entered at mobile.html, built to dist-mobile/.
+// The phone app (phone/): the same src/, entered at mobile.html, built to dist-mobile/.
 // `tauri android dev` sets TAURI_DEV_HOST so the phone reaches this server.
 const host = process.env.TAURI_DEV_HOST
 
@@ -16,7 +16,7 @@ export default defineConfig({
     strictPort: true,
     host: host || false,
     hmr: host ? { protocol: "ws", host, port: 1423 } : undefined,
-    watch: { ignored: ["**/src-tauri/**", "**/android/**"] },
+    watch: { ignored: ["**/src-tauri/**", "**/phone/**"] },
   },
   envPrefix: ["VITE_", "TAURI_ENV_*"],
   build: {

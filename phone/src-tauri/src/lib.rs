@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     fn keeps_its_key() {
-        let dir = std::env::temp_dir().join(format!("oah-android-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oah-phone-test-{}", std::process::id()));
         let path = dir.join("desktops.json");
         let a = AppState::load(path.clone());
         let b = AppState::load(path);

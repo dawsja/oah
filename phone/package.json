@@ -1,7 +1,7 @@
 {
-  "name": "oah-android",
+  "name": "oah-phone",
   "private": true,
-  "description": "oah for Android: the Tauri shell around the phone UI in ../app/src/mobile",
+  "description": "oah for phones: the Tauri shell around the phone UI in ../app/src/mobile",
   "type": "module",
   "scripts": {
     "tauri": "tauri",

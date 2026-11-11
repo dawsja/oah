@@ -2847,22 +2847,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "oah-android"
-version = "0.3.13"
-dependencies = [
- "base64 0.22.1",
- "oah-remote",
- "oah-voice",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-opener",
- "tokio",
-]
-
-[[package]]
 name = "oah-app"
 version = "0.3.13"
 dependencies = [
@@ -2943,6 +2927,22 @@ dependencies = [
  "subtle",
  "tempfile",
  "uuid",
+]
+
+[[package]]
+name = "oah-phone"
+version = "0.3.13"
+dependencies = [
+ "base64 0.22.1",
+ "oah-remote",
+ "oah-voice",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-opener",
+ "tokio",
 ]
 
 [[package]]
