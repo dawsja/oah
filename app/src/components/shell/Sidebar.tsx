@@ -51,24 +51,25 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full min-w-0 flex-col bg-sidebar text-sidebar-foreground">
-      <div className="p-2">
+      <div className="flex gap-1 p-2">
         <button
-          className="rounded-md flex h-8 w-full items-center gap-2 border border-input bg-background px-2.5 text-left text-[12.5px] font-medium hover:border-ring/60 hover:bg-accent disabled:opacity-50"
+          className="rounded-md flex h-8 min-w-0 flex-1 items-center gap-2 border border-input bg-background px-2.5 text-left text-[12.5px] font-medium hover:border-ring/60 hover:bg-accent disabled:opacity-50"
           disabled={!projectId}
           onClick={(e) => newChat(projectId!, null, toSide(e))}
         >
-          <SquarePen className="size-3.5 text-muted-foreground" />
-          New chat
-          <span className="ml-auto font-mono text-[10.5px] text-faint">Ctrl N</span>
+          <SquarePen className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">New chat</span>
+          <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint">Ctrl N</span>
         </button>
-        <button
-          className="rounded-md mt-1 flex h-8 w-full items-center gap-2 px-2.5 text-left text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
-          onClick={() => openChatSearch()}
-        >
-          <Search className="size-3.5" />
-          Search chats
-          <span className="ml-auto font-mono text-[10.5px] text-faint">Ctrl K</span>
-        </button>
+        <Tip content="Search chats (Ctrl K)">
+          <button
+            className="rounded-md grid size-8 shrink-0 place-items-center border border-input bg-background text-muted-foreground hover:border-ring/60 hover:bg-accent hover:text-foreground"
+            aria-label="Search chats"
+            onClick={() => openChatSearch()}
+          >
+            <Search className="size-3.5" />
+          </button>
+        </Tip>
       </div>
 
       <Inbox />
