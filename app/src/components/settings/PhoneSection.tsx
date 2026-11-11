@@ -128,7 +128,7 @@ export function PhoneSection() {
   return (
     <Section
       title="Phone"
-      description="Continue your chats from the oah Android app: watch answers stream in, reply, approve and stop turns. The phone connects to this computer directly, on the same Wi-Fi or a VPN such as Tailscale; everything is end-to-end encrypted, and only phones you pair can connect."
+      description="Continue your chats from the oah phone app: watch answers stream in, reply, approve and stop turns. The phone connects to this computer directly, on the same Wi-Fi or a VPN such as Tailscale; everything is end-to-end encrypted, and only phones you pair can connect."
     >
       <Group>
         <Row

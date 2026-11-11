@@ -13,6 +13,7 @@ fn configure() -> Result<(), String> {
     use base64::Engine;
     use std::os::windows::process::CommandExt;
     // The rule follows the executable, including when the user changes the listening port.
+    // UDP: the broadcast Android phones find the desktop with (7788), and Bonjour for iPhones (5353).
     // Restrict it to Private profiles and local subnet peers.
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let program = exe.to_string_lossy().replace('\'', "''");
@@ -24,7 +25,7 @@ foreach ($protocol in @('TCP', 'UDP')) {{
   $rule = 'oah-phone-' + $protocol
   Get-NetFirewallRule -Name $rule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
   if ($protocol -eq 'UDP') {{
-    New-NetFirewallRule -Name $rule -DisplayName 'oah nearby discovery' -Direction Inbound -Action Allow -Program $program -Protocol UDP -LocalPort 7788 -Profile Private -RemoteAddress LocalSubnet | Out-Null
+    New-NetFirewallRule -Name $rule -DisplayName 'oah nearby discovery' -Direction Inbound -Action Allow -Program $program -Protocol UDP -LocalPort 7788,5353 -Profile Private -RemoteAddress LocalSubnet | Out-Null
   }} else {{
     New-NetFirewallRule -Name $rule -DisplayName 'oah phone connections' -Direction Inbound -Action Allow -Program $program -Protocol TCP -Profile Private -RemoteAddress LocalSubnet | Out-Null
   }}

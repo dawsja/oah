@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Advertising the desktop over Bonjour, for phones that can't broadcast (iPhones). Only the
+# desktop app turns it on: phones never advertise.
+mdns = ["dep:mdns-sd"]
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
@@ -17,6 +22,7 @@ spake2 = "0.4"
 chacha20poly1305 = "0.10"
 getrandom = "0.3"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
+mdns-sd = { version = "0.21", default-features = false, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "time"] }

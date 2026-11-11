@@ -93,7 +93,7 @@ export type Project = {
   git: ProjectGit
 }
 
-/** A phone paired with this desktop (the oah Android app). */
+/** A phone paired with this desktop (the oah phone app). */
 export type PairedDevice = { id: string; name: string; publicKey: string; pairedAt: number; lastSeen: number }
 /** Phones controlling this app. Changed only through `remote_*` commands, never `settings_set`. */
 export type Remote = { enabled: boolean; port: number; devices: PairedDevice[] }
