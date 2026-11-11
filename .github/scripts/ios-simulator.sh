@@ -73,9 +73,6 @@ xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
 SIMCTL_CHILD_OAH_DEMO=1 SIMCTL_CHILD_OAH_DEBUG=1 SIMCTL_CHILD_OAH_ROUTE=/chat/c-invoices xcrun simctl launch "$udid" "$bundle"
 sleep 8
 xcrun simctl io "$udid" screenshot "$out/14-sizes.png"
-# Ten seconds in, the app lays its web view out afresh and shows the sizes again.
-sleep 7
-xcrun simctl io "$udid" screenshot "$out/15-sizes-after-layout.png"
 
 xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
 # What the app said, and any crash.

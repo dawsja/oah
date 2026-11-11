@@ -26,11 +26,6 @@ struct PathArgs: Decodable {
   let path: String
 }
 
-struct LayoutArgs: Decodable {
-  /// Also lay the web view out over its whole parent again, before reporting.
-  let fix: Bool?
-}
-
 struct Layout: Encodable {
   let lines: [String]
 }
@@ -204,10 +199,22 @@ class OahPhonePlugin: Plugin {
     }
   }
 
+  /// Lays the web view out again. WebKit sizes the page while the scroll view still keeps it
+  /// clear of the notch and the home indicator, and keeps that size once the page says it
+  /// covers them itself (viewport-fit=cover): the page stays that much shorter than the screen
+  /// until something makes the web view work its size out again. The page asks for this when
+  /// it sees it's short (viewport.ts).
+  @objc public func relayout(_ invoke: Invoke) {
+    DispatchQueue.main.async {
+      self.web?.setNeedsLayout()
+      self.web?.layoutIfNeeded()
+      invoke.resolve()
+    }
+  }
+
   /// The web view's place in its window, in words: for looking into a layout that came out
   /// wrong, from a simulator where nothing else can be asked (OAH_DEBUG=1 shows it).
-  @objc public func layout(_ invoke: Invoke) throws {
-    let args = try invoke.parseArgs(LayoutArgs.self)
+  @objc public func layout(_ invoke: Invoke) {
     DispatchQueue.main.async {
       guard let web = self.web else {
         invoke.resolve(Layout(lines: ["no web view was given to the plugin"]))
@@ -220,14 +227,6 @@ class OahPhonePlugin: Plugin {
         return "\(Int(i.top)) \(Int(i.left)) \(Int(i.bottom)) \(Int(i.right))"
       }
       let scroll = web.scrollView
-      if args.fix == true {
-        scroll.contentInsetAdjustmentBehavior = .never
-        if let parent = web.superview {
-          web.frame = parent.bounds
-        }
-        web.setNeedsLayout()
-        web.layoutIfNeeded()
-      }
       var lines = [
         "web \(rect(web.frame)) safe \(insets(web.safeAreaInsets))",
         "scroll \(rect(scroll.frame)) inset \(insets(scroll.contentInset)) adj \(insets(scroll.adjustedContentInset))",

@@ -16,13 +16,29 @@ export function visibleBox(pageHeight: number, visual: { height: number; offsetT
   return { height, top: Math.max(0, Math.round(visual.offsetTop)) }
 }
 
+/** The page came out shorter than the screen with no keyboard to blame: by the notch and the
+ *  home indicator, which WebKit kept it clear of before the page said it covers them itself
+ *  (viewport-fit=cover), and it holds on to that size until the web view is laid out again. */
+export function shortOfTheScreen(screenHeight: number, pageHeight: number): boolean {
+  const missing = screenHeight - pageHeight
+  return missing > 1 && missing <= 150
+}
+
 /** Install once at startup. Does nothing on Android. */
 export function initViewport(): () => void {
   const visual = window.visualViewport
   if (!isIOS() || !visual) return () => {}
   const root = document.documentElement
   root.classList.add("ios")
+  // A few times at most: if laying out again doesn't help, asking forever won't either.
+  let asked = 0
+  const fit = () => {
+    if (asked >= 5 || !shortOfTheScreen(screen.height, root.clientHeight)) return
+    asked++
+    void import("@tauri-apps/api/core").then(({ invoke }) => invoke("relayout")).catch(() => {})
+  }
   const update = () => {
+    fit()
     const box = visibleBox(root.clientHeight, visual)
     root.classList.toggle("keyboard", !!box)
     if (box) {
@@ -36,9 +52,14 @@ export function initViewport(): () => void {
   update()
   visual.addEventListener("resize", update)
   visual.addEventListener("scroll", update)
+  window.addEventListener("resize", update)
+  // The size settles a moment after the page starts: look again then.
+  const later = [100, 400, 1200].map((ms) => window.setTimeout(update, ms))
   return () => {
     visual.removeEventListener("resize", update)
     visual.removeEventListener("scroll", update)
+    window.removeEventListener("resize", update)
+    later.forEach((t) => window.clearTimeout(t))
   }
 }
 
@@ -50,16 +71,15 @@ export function showViewportNumbers() {
   const out = document.createElement("pre")
   out.style.cssText = "position:absolute;top:22%;left:8px;right:8px;z-index:9999;margin:0;padding:8px;font:11px/1.45 ui-monospace,monospace;background:#000d;color:#7f7;white-space:pre-wrap;pointer-events:none"
   document.body.append(probe, out)
-  // The native side's view of the same thing (an iPhone's web view in its window), and what a
-  // fresh layout of it changes: asked once at the start, then again with the fix after a while.
+  // The native side's view of the same thing: an iPhone's web view in its window.
   let native: string[] = []
-  const ask = (fix: boolean) =>
+  const ask = () =>
     void import("@tauri-apps/api/core")
-      .then(({ invoke }) => invoke<{ lines: string[] }>("debug_layout", { fix }))
-      .then((l) => (native = [fix ? "after a fresh layout:" : "native:", ...l.lines]))
+      .then(({ invoke }) => invoke<{ lines: string[] }>("debug_layout"))
+      .then((l) => (native = ["native:", ...l.lines]))
       .catch((e) => (native = [`native: ${e}`]))
-  ask(false)
-  setTimeout(() => ask(true), 10000)
+  ask()
+  setInterval(ask, 2000)
   const show = () => {
     const visual = window.visualViewport
     const pad = getComputedStyle(probe)

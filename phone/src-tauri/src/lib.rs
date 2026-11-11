@@ -203,12 +203,21 @@ async fn haptic(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Where the iPhone's web view sits in its window, in lines of text (`OAH_DEBUG=1` shows them);
-/// `fix` lays it out over its whole parent again first.
+/// Has an iPhone's web view work its size out again: the page asks when it finds itself
+/// shorter than the screen (the plugin's `relayout` says why that happens).
 #[tauri::command]
-async fn debug_layout(app: tauri::AppHandle, fix: bool) -> Result<Value, String> {
+async fn relayout(app: tauri::AppHandle) -> Result<(), String> {
     if cfg!(target_os = "ios") {
-        return native(&app, "layout", json!({ "fix": fix })).await;
+        native::<Value>(&app, "relayout", Value::Null).await?;
+    }
+    Ok(())
+}
+
+/// Where the iPhone's web view sits in its window, in lines of text (`OAH_DEBUG=1` shows them).
+#[tauri::command]
+async fn debug_layout(app: tauri::AppHandle) -> Result<Value, String> {
+    if cfg!(target_os = "ios") {
+        return native(&app, "layout", Value::Null).await;
     }
     Ok(json!({ "lines": [] }))
 }
@@ -466,6 +475,7 @@ pub fn run() {
             launch,
             discover,
             haptic,
+            relayout,
             debug_layout,
             open_settings,
             request_pairing,
