@@ -26,6 +26,15 @@ struct PathArgs: Decodable {
   let path: String
 }
 
+struct LayoutArgs: Decodable {
+  /// Also lay the web view out over its whole parent again, before reporting.
+  let fix: Bool?
+}
+
+struct Layout: Encodable {
+  let lines: [String]
+}
+
 struct Saved: Encodable {
   let saved: Bool
 }
@@ -44,7 +53,10 @@ struct Nearby: Encodable {
 let policyDenied: Int32 = -65570
 
 class OahPhonePlugin: Plugin {
+  private weak var web: WKWebView?
+
   @objc public override func load(webview: WKWebView) {
+    web = webview
     DispatchQueue.main.async {
       // The page fills the whole screen and keeps clear of the notch and the home indicator
       // itself (CSS safe-area insets). Left to itself the scroll view insets it as well, and
@@ -189,6 +201,45 @@ class OahPhonePlugin: Plugin {
       invoke.resolve()
     } catch {
       invoke.reject(error.localizedDescription)
+    }
+  }
+
+  /// The web view's place in its window, in words: for looking into a layout that came out
+  /// wrong, from a simulator where nothing else can be asked (OAH_DEBUG=1 shows it).
+  @objc public func layout(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(LayoutArgs.self)
+    DispatchQueue.main.async {
+      guard let web = self.web else {
+        invoke.resolve(Layout(lines: ["no web view was given to the plugin"]))
+        return
+      }
+      func rect(_ r: CGRect) -> String {
+        return "\(Int(r.origin.x)),\(Int(r.origin.y)) \(Int(r.size.width))x\(Int(r.size.height))"
+      }
+      func insets(_ i: UIEdgeInsets) -> String {
+        return "\(Int(i.top)) \(Int(i.left)) \(Int(i.bottom)) \(Int(i.right))"
+      }
+      let scroll = web.scrollView
+      if args.fix == true {
+        scroll.contentInsetAdjustmentBehavior = .never
+        if let parent = web.superview {
+          web.frame = parent.bounds
+        }
+        web.setNeedsLayout()
+        web.layoutIfNeeded()
+      }
+      var lines = [
+        "web \(rect(web.frame)) safe \(insets(web.safeAreaInsets))",
+        "scroll \(rect(scroll.frame)) inset \(insets(scroll.contentInset)) adj \(insets(scroll.adjustedContentInset))",
+        "scroll behavior \(scroll.contentInsetAdjustmentBehavior.rawValue) offset \(Int(scroll.contentOffset.y)) content \(Int(scroll.contentSize.height))",
+      ]
+      if let parent = web.superview {
+        lines.append("parent \(rect(parent.frame)) safe \(insets(parent.safeAreaInsets))")
+      }
+      if let window = web.window {
+        lines.append("window \(rect(window.frame)) safe \(insets(window.safeAreaInsets)) screen \(rect(window.screen.bounds))")
+      }
+      invoke.resolve(Layout(lines: lines))
     }
   }
 

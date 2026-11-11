@@ -203,6 +203,16 @@ async fn haptic(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Where the iPhone's web view sits in its window, in lines of text (`OAH_DEBUG=1` shows them);
+/// `fix` lays it out over its whole parent again first.
+#[tauri::command]
+async fn debug_layout(app: tauri::AppHandle, fix: bool) -> Result<Value, String> {
+    if cfg!(target_os = "ios") {
+        return native(&app, "layout", json!({ "fix": fix })).await;
+    }
+    Ok(json!({ "lines": [] }))
+}
+
 /// Opens this app's page in the phone's Settings (an iPhone's Local Network switch is there).
 #[tauri::command]
 async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
@@ -456,6 +466,7 @@ pub fn run() {
             launch,
             discover,
             haptic,
+            debug_layout,
             open_settings,
             request_pairing,
             pair,

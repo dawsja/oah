@@ -48,8 +48,18 @@ export function showViewportNumbers() {
   const probe = document.createElement("div")
   probe.style.cssText = "position:absolute;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)"
   const out = document.createElement("pre")
-  out.style.cssText = "position:absolute;top:35%;left:8px;right:8px;z-index:9999;margin:0;padding:8px;font:11px/1.45 ui-monospace,monospace;background:#000d;color:#7f7;white-space:pre-wrap;pointer-events:none"
+  out.style.cssText = "position:absolute;top:22%;left:8px;right:8px;z-index:9999;margin:0;padding:8px;font:11px/1.45 ui-monospace,monospace;background:#000d;color:#7f7;white-space:pre-wrap;pointer-events:none"
   document.body.append(probe, out)
+  // The native side's view of the same thing (an iPhone's web view in its window), and what a
+  // fresh layout of it changes: asked once at the start, then again with the fix after a while.
+  let native: string[] = []
+  const ask = (fix: boolean) =>
+    void import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke<{ lines: string[] }>("debug_layout", { fix }))
+      .then((l) => (native = [fix ? "after a fresh layout:" : "native:", ...l.lines]))
+      .catch((e) => (native = [`native: ${e}`]))
+  ask(false)
+  setTimeout(() => ask(true), 10000)
   const show = () => {
     const visual = window.visualViewport
     const pad = getComputedStyle(probe)
@@ -61,6 +71,7 @@ export function showViewportNumbers() {
       `body ${body.width.toFixed(1)}x${body.height.toFixed(1)} at ${body.top.toFixed(1)} ${getComputedStyle(document.body).position}`,
       `safe ${pad.paddingTop} ${pad.paddingRight} ${pad.paddingBottom} ${pad.paddingLeft}`,
       `app-height ${document.documentElement.style.getPropertyValue("--app-height") || "-"} app-top ${document.documentElement.style.getPropertyValue("--app-top") || "-"}`,
+      ...native,
     ].join("\n")
   }
   show()
