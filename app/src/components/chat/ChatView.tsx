@@ -14,7 +14,8 @@ import { ipc, type Catalog } from "@/lib/ipc"
 import { AGENT_LABEL, isOpencode, locationLabel, type AgentKind, type Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { newChatKey } from "@/lib/panes"
-import { PaneClose } from "@/components/shell/pane"
+import { PaneClose, SplitItems } from "@/components/shell/pane"
+import { TerminalItem } from "@/components/terminal/TerminalPanel"
 import { useApp, usePane, usePaneActive, useProject } from "@/store/app"
 import { copyChatMarkdown, useChats, type Queued } from "@/store/chats"
 import { enterCli, leaveCli, STARTS_IN_CLI, startsInCli, useCli } from "@/store/cli"
@@ -141,7 +142,21 @@ function NewChat({ project }: { project: Project }) {
 
   return (
     <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-clip bg-background">
-      <PaneClose className="absolute top-1.5 right-2 z-10" />
+      <div className="absolute top-1.5 right-2 z-10 flex items-center">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="rounded-md grid size-7 place-items-center text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Pane menu">
+              <MoreHorizontal className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-56">
+            <SplitItems />
+            <DropdownMenuSeparator />
+            <TerminalItem />
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <PaneClose />
+      </div>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-[12vh]">
         <div className="w-full max-w-[46rem]">
           <div className="mb-6 flex items-end gap-3">
@@ -330,6 +345,9 @@ function ChatHeader({ meta, transcript, model, inCli }: { meta: ChatMeta; transc
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-auto min-w-56">
+          <SplitItems />
+          <DropdownMenuSeparator />
+          <TerminalItem />
           <ModeItem meta={meta} inCli={inCli} />
           <DropdownMenuSeparator />
           <DropdownMenuItem

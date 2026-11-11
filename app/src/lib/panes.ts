@@ -1,6 +1,6 @@
-// The main area's panes: one, or two side by side, each showing a chat (or a new one) in any
-// project. One of them is active: the sidebar, the side panel, the terminal and the title bar
-// follow it. A chat is on screen in one pane at most.
+// The main area's panes: one, or two side by side or one above the other, each showing a chat
+// (or a new one) in any project. One of them is active: the sidebar, the side panel, the
+// terminal and the title bar follow it. A chat is on screen in one pane at most.
 
 import type { Viewer } from "@/store/git"
 
@@ -21,6 +21,9 @@ export type PaneTarget = Partial<Omit<Pane, "id">>
 export type Panes = { panes: Pane[]; activePane: string }
 
 export const MAX_PANES = 2
+
+/** How two panes share the main area: side by side, or one above the other. */
+export type SplitDir = "right" | "down"
 
 /** The pane with `id`; the active one without an id, or when that pane has closed. */
 export function paneOf(s: Panes, id?: string | null): Pane {
@@ -55,6 +58,13 @@ export function splitPanes(s: Panes, newId: string, target: PaneTarget = {}): Pa
   if (other && s.panes.length >= MAX_PANES) return { panes: s.panes.map((p) => (p.id === other.id ? { ...p, ...fresh } : p)), activePane: other.id }
   const pane: Pane = { id: newId, projectId: null, chatId: null, draftCwd: null, viewer: null, ...fresh }
   return { panes: [...s.panes, pane], activePane: pane.id }
+}
+
+/** The panes with `id`'s last: to the right of the other, or under it. */
+export function placeLast(s: Panes, id: string): Panes {
+  const pane = s.panes.find((p) => p.id === id)
+  if (!pane) return s
+  return { ...s, panes: [...s.panes.filter((p) => p.id !== id), pane] }
 }
 
 /** Closes a pane (the active one without an id); the last one stays. */

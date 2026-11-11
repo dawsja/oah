@@ -87,8 +87,16 @@ export function App() {
         e.preventDefault()
         const other = s.panes.find((p) => p.id !== s.activePane)
         if (other) s.focusPane(other.id)
-        else s.splitPane()
+        else s.splitPane(undefined, "right")
         focusPaneInput(useApp.getState().activePane)
+      } else if (e.ctrlKey && e.altKey && !e.shiftKey && !e.getModifierState("AltGraph") && e.code === "Backslash" && s.view === "chat") {
+        // A second pane below, or two turned the other way (side by side ⇄ one above the other).
+        e.preventDefault()
+        if (s.panes.length > 1) s.setLayout({ splitDir: s.layout.splitDir === "down" ? "right" : "down" })
+        else {
+          s.splitPane(undefined, "down")
+          focusPaneInput(useApp.getState().activePane)
+        }
       } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "k" || e.key === "K")) {
         e.preventDefault()
         openChatSearch()

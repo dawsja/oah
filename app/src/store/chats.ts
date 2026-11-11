@@ -9,7 +9,7 @@ export { needsYou, waitingOf } from "@/lib/chat"
 import { ipc, onChatEvent, onChatsChanged } from "@/lib/ipc"
 import { notify, setQueuedCheck } from "@/lib/notify"
 import { isAcp, type AgentKind, type PermissionMode } from "@/lib/types"
-import { newChatKey, type PaneTarget } from "@/lib/panes"
+import { newChatKey, type PaneTarget, type SplitDir } from "@/lib/panes"
 import { paneOf, useApp } from "./app"
 import { draftKey, drafts } from "./drafts"
 
@@ -43,7 +43,9 @@ type ChatsStore = {
   refresh(): Promise<void>
   /** Shows the chat: in the active pane, or beside it (`side`). One that's on screen already
    *  is gone to instead, in whichever pane has it. */
-  open(chatId: string, where?: "side"): Promise<void>
+  /** Opens a chat in the active pane, or beside it: "side" the way the panes go now, or
+   *  "right" or "down". */
+  open(chatId: string, where?: "side" | SplitDir): Promise<void>
   /** Loads the chat's transcript (once), without showing it anywhere. */
   load(chatId: string): Promise<void>
   /** Opens the chat on its approval or question, wherever the window was. */
@@ -132,10 +134,10 @@ export const useChats = create<ChatsStore>((set, get) => ({
       // On screen in the other pane: that one, not a second copy.
       app.focusPane(shown.id)
       app.setPane({ viewer: null }, shown.id)
-    } else if (where === "side") {
+    } else if (where) {
       // Moved beside the pane it was in, which goes back to a new chat.
       if (shown) app.setPane({ chatId: null }, shown.id)
-      app.splitPane(target)
+      app.splitPane(target, where === "side" ? undefined : where)
     } else {
       app.setPane(target)
     }

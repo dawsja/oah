@@ -4,11 +4,11 @@ import { createContext, useContext } from "react"
 import { create } from "zustand"
 import { toast } from "sonner"
 import { ipc } from "@/lib/ipc"
-import { closePane, draftSwaps, MAX_PANES, paneOf, patchPane, splitPanes, type Pane, type Panes, type PaneTarget } from "@/lib/panes"
+import { closePane, draftSwaps, MAX_PANES, paneOf, patchPane, placeLast, splitPanes, type Pane, type Panes, type PaneTarget, type SplitDir } from "@/lib/panes"
 import { BASE_UI_SIZE, type AppInfo, type Appearance, type Location, type Settings } from "@/lib/types"
 import { drafts } from "./drafts"
 
-export { paneOf, type Pane, type PaneTarget } from "@/lib/panes"
+export { paneOf, type Pane, type PaneTarget, type SplitDir } from "@/lib/panes"
 
 export type SettingsSection = "sessions" | "providers" | "voice" | "appearance" | "usage" | "ssh" | "projects" | "mcp" | "phone"
 export type RightTab = "files" | "scm" | "history" | "pr"
@@ -21,8 +21,10 @@ type Layout = {
   /** The terminal panel under the chat: shown, and its height. */
   terminalOpen: boolean
   terminalHeight: number
-  /** With two panes, the left one's share of the width. */
+  /** With two panes, the first one's share: of the width side by side, of the height stacked. */
   split: number
+  /** Two panes side by side, or one above the other. */
+  splitDir: SplitDir
 }
 
 type AppStore = {
@@ -31,7 +33,7 @@ type AppStore = {
   error: string | null
   view: "chat" | "settings"
   section: SettingsSection
-  /** What the main area shows: one pane, or two side by side (the left one first). */
+  /** What the main area shows: one pane, or two (the left or top one first). */
   panes: Pane[]
   /** The pane the sidebar, the side panel, the terminal and the title bar follow. */
   activePane: string
@@ -49,15 +51,18 @@ type AppStore = {
   setPane(target: PaneTarget, pane?: string | null): void
   focusPane(id: string): void
   /** Shows `target` beside the active pane and moves there: in a second pane, or in the other
-   *  one when there are two. Without a target, a new chat in the same project. */
-  splitPane(target?: PaneTarget): void
+   *  one when there are two. Without a target, a new chat in the same project. With `dir`, the
+   *  panes go that way (otherwise the way they went last). */
+  splitPane(target?: PaneTarget, dir?: SplitDir): void
+  /** Puts a pane (the active one without an id) to the right of the other, or under it. */
+  placePane(dir: SplitDir, id?: string | null): void
   /** Closes a pane (the active one without an id); the other fills the space. */
   closePane(id?: string | null): void
   setLayout(patch: Partial<Layout>): void
 }
 
 const LAYOUT_KEY = "oah.layout"
-export const defaultLayout: Readonly<Layout> = { sidebarWidth: 272, rightWidth: 340, rightOpen: true, rightTab: "scm", terminalOpen: false, terminalHeight: 280, split: 0.5 }
+export const defaultLayout: Readonly<Layout> = { sidebarWidth: 272, rightWidth: 340, rightOpen: true, rightTab: "scm", terminalOpen: false, terminalHeight: 280, split: 0.5, splitDir: "right" }
 
 function loadLayout(): Layout {
   try {
@@ -195,8 +200,16 @@ export const useApp = create<AppStore>((set, get) => ({
   focusPane(id) {
     if (id !== get().activePane && get().panes.some((p) => p.id === id)) commit({ panes: get().panes, activePane: id })
   },
-  splitPane(target) {
+  splitPane(target, dir) {
+    if (dir) get().setLayout({ splitDir: dir })
     commit(splitPanes(get(), `p${++paneCount}`, target), { view: "chat" })
+  },
+  placePane(dir, id) {
+    const next = placeLast(get(), paneOf(get(), id).id)
+    // Each pane keeps its size when they swap places.
+    const swapped = next.panes[0].id !== get().panes[0].id
+    get().setLayout({ splitDir: dir, ...(swapped ? { split: 1 - get().layout.split } : {}) })
+    commit(next)
   },
   closePane(id) {
     commit(closePane(get(), id))

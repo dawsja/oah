@@ -2,6 +2,7 @@ import "@xterm/xterm/css/xterm.css"
 import { useEffect, useLayoutEffect, useRef } from "react"
 import { ChevronDown, MessageSquareShare, Plus, SquareTerminal, X } from "lucide-react"
 import { Tip } from "@/components/Tip"
+import { DropdownMenuItem, DropdownMenuShortcut } from "@/components/ui/dropdown-menu"
 import { Resizer } from "@/components/shell/Resizer"
 import { baseName, locationKey, shellLabel } from "@/lib/terminal"
 import { isRemote, locationLabel, type Location, type Project } from "@/lib/types"
@@ -26,27 +27,23 @@ export function shellWhere(shell: string | null, location: Location): string {
   return location.kind === "wsl" ? `${name} in ${location.distro}` : location.kind === "ssh" ? `${name} on ${location.host}` : name
 }
 
-/** The title bar's terminal button: shows and hides the panel. */
-export function TerminalButton() {
+/** A menu's terminal item: shows and hides the panel (opening a shell when there's none). */
+export function TerminalItem() {
   const project = useProject()
-  const view = useApp((s) => s.view)
   const open = useApp((s) => s.layout.terminalOpen)
   const has = useTerminals((s) => (project ? s.tabs.some((t) => t.projectId === project.id) : false))
   const shell = useProjectShell(project)
-  if (!project || view !== "chat") return null
+  if (!project) return null
   const shown = open && has
-  const tip = shown ? "Hide terminal (Ctrl+`)" : `${has ? "Show terminal" : "Open a terminal"}: ${shellWhere(shell, project.location)} (Ctrl+\`)`
   return (
-    <Tip content={tip} side="bottom">
-      <button
-        className={cn("rounded-md grid size-7 place-items-center hover:bg-accent", shown ? "bg-accent text-foreground" : "text-muted-foreground")}
-        aria-label={shown ? "Hide terminal" : "Open terminal"}
-        aria-pressed={shown}
-        onClick={() => useTerminals.getState().toggle()}
-      >
-        <SquareTerminal className="size-3.5" />
-      </button>
-    </Tip>
+    <DropdownMenuItem onSelect={() => useTerminals.getState().toggle()}>
+      <SquareTerminal />
+      <span className="flex-1 whitespace-nowrap">
+        {shown ? "Hide terminal" : has ? "Show terminal" : "Open a terminal"}
+        {shown ? null : <span className="ml-1.5 text-muted-foreground">{shellWhere(shell, project.location)}</span>}
+      </span>
+      <DropdownMenuShortcut className="pl-4">Ctrl+`</DropdownMenuShortcut>
+    </DropdownMenuItem>
   )
 }
 

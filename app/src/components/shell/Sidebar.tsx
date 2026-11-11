@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Columns2, Copy, FileText, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, ListChecks, LoaderCircle, MessageCircleQuestion, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldQuestion, SquarePen, SquareTerminal, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Columns2, Copy, FileText, FolderOpen, FolderPlus, GitBranch, GitBranchPlus, ListChecks, LoaderCircle, MessageCircleQuestion, MoreHorizontal, Moon, Pencil, Pin, PinOff, Plus, Rows2, Search, Settings, ShieldQuestion, SquarePen, SquareTerminal, Trash2 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { AgentGlyph } from "@/components/icons"
 import { confirmAction, promptText } from "@/components/Prompt"
@@ -381,8 +381,11 @@ function ChatRow({ meta, indent }: { meta: ChatMeta; indent: number }) {
       </ContextMenuTrigger>
       {/* React bubbles portal clicks to the row, whose onClick would open the chat. */}
       <ContextMenuContent className="w-48" onClick={(e) => e.stopPropagation()}>
-        <ContextMenuItem onSelect={() => void useChats.getState().open(meta.id, "side")}>
-          <Columns2 /> Open to the side
+        <ContextMenuItem onSelect={() => void useChats.getState().open(meta.id, "right")}>
+          <Columns2 /> Open to the right
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void useChats.getState().open(meta.id, "down")}>
+          <Rows2 /> Open below
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => useChats.getState().pin(meta.id, !meta.pinned)}>

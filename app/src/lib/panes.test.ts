@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { closePane, draftSwaps, newChatKey, paneOf, patchPane, splitPanes, type Pane, type Panes } from "./panes"
+import { closePane, draftSwaps, newChatKey, paneOf, patchPane, placeLast, splitPanes, type Pane, type Panes } from "./panes"
 
 const pane = (id: string, p: Partial<Pane> = {}): Pane => ({ id, projectId: "A", chatId: null, draftCwd: null, viewer: null, ...p })
 const one = (p: Partial<Pane> = {}): Panes => ({ panes: [pane("p1", p)], activePane: "p1" })
@@ -34,6 +34,13 @@ describe("panes", () => {
     const again = splitPanes(two, "p3", { projectId: "B", chatId: "c7" })
     expect(again.panes).toEqual([pane("p1", { projectId: "B", chatId: "c7" }), pane("p2")])
     expect(again.activePane).toBe("p1")
+  })
+
+  it("puts a pane last, keeping which one is active", () => {
+    const s: Panes = { panes: [pane("p1"), pane("p2")], activePane: "p1" }
+    expect(placeLast(s, "p1")).toEqual({ panes: [pane("p2"), pane("p1")], activePane: "p1" })
+    expect(placeLast(s, "p2")).toEqual(s)
+    expect(placeLast(s, "gone")).toBe(s)
   })
 
   it("closes a pane, never the last, and keeps the ids of the ones that stay", () => {

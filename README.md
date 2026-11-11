@@ -29,12 +29,14 @@ Electron.
   message from the changes with the project agent's cheapest model: Haiku, Codex's fast model,
   a free OpenCode one, Antigravity's Flash, or Grok at low effort), History (graph), Pull Request (`gh`: open one,
   review state, checks).
-- **Two panes.** A second chat beside the first (the split button in the title bar, Ctrl+\,
-  Ctrl-click a chat or "Open to the side" in its menu, Ctrl+Enter in search): another chat of
-  the same project, another worktree, another project, another agent. Drag the divider between
-  them. The sidebar, the side panel, the terminal and the title bar follow the pane you're in
-  (Ctrl+1 and Ctrl+2 move between them, Ctrl+Shift+\ closes one). A chat is on screen once:
-  picking one that's in the other pane goes there.
+- **Two panes.** A second chat beside the first, to the right or below ("Split right" or
+  "Split down" in a chat's ⋯ menu, Ctrl+\ or Ctrl+Alt+\, Ctrl-click a chat or "Open to the
+  right"/"Open below" in its menu, Ctrl+Enter in search): another chat of the same project,
+  another worktree, another project, another agent. Drag the divider between them; a pane's ⋯
+  menu moves it to the right or below the other, and Ctrl+Alt+\ turns them. The sidebar,
+  the side panel, the terminal and the title bar follow the pane you're in (Ctrl+1 and
+  Ctrl+2 move between them, Ctrl+Shift+\ closes one). A chat is on screen once: picking one
+  that's in the other pane goes there.
 - **The agent's own CLI.** "Open in CLI" in a chat's ··· menu (Ctrl+Shift+M) opens the same
   conversation in the agent's terminal interface (`claude --resume`, `codex resume`,
   `opencode -s`, `agy --conversation`, `grok --resume`), with the chat's model, effort and
@@ -49,8 +51,8 @@ Electron.
   so the chat stays on the one it had. A new chat can start in the CLI with Claude Code and
   Grok Build; the others open once the chat has a first message. On an SSH host the CLI runs
   over its own `ssh -t`, so unlike a chat's agent it ends if the connection drops.
-- **Terminal.** A panel under the chat (Ctrl+` or the shell button in the title bar shows and
-  hides it) with a shell where the project is: PowerShell (7 if installed) on Windows, your
+- **Terminal.** A panel under the chat (Ctrl+` or "Open a terminal" in a chat's ⋯ menu shows
+  and hides it) with a shell where the project is: PowerShell (7 if installed) on Windows, your
   `$SHELL` on Linux, your login shell inside the distro for a WSL project, and over `ssh -t` for
   an SSH project, so it's already connected. Each tab says which shell it is (PowerShell,
   bash, zsh…) and where it runs. Terminals open in the chat's worktree, several per project in
