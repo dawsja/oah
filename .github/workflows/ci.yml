@@ -46,8 +46,8 @@ jobs:
       - name: Linux packages
         if: runner.os == 'Linux'
         # A slow Ubuntu mirror can stall this: retry, then give up.
-        timeout-minutes: 8
-        run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev libxdo-dev libayatana-appindicator3-dev libdbus-1-dev cmake
+        timeout-minutes: 15
+        run: .github/scripts/apt-install.sh libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev libxdo-dev libayatana-appindicator3-dev libdbus-1-dev cmake
       - name: Format
         run: cargo fmt --all --check
       - name: Frontend dist for tauri::generate_context

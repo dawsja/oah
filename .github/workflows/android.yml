@@ -38,8 +38,10 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
+      # The runner image has CMake already; only a runner without it needs the package.
       - name: Native voice build tools
-        run: sudo apt-get update && sudo apt-get install -y cmake
+        timeout-minutes: 15
+        run: command -v cmake >/dev/null && cmake --version || .github/scripts/apt-install.sh cmake
       - name: NDK
         run: |
           sdkmanager --install "ndk;27.2.12479018"
