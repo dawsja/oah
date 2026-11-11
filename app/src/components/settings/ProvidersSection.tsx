@@ -1,7 +1,12 @@
-import { useEffect, useState } from "react"
-import { Check, ChevronRight, Copy, ExternalLink, Plus, RefreshCw, X } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
+import { Check, ChevronDown, ChevronRight, Copy, EyeOff, ExternalLink, Plus, RefreshCw, X } from "lucide-react"
 import { AgentGlyph } from "@/components/icons"
 import { Button } from "@/components/ui/button"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Tip } from "@/components/Tip"
+import { listed, loadChoices, saveChoices, type ListChoice } from "@/lib/provider-list"
+import { useChats } from "@/store/chats"
+import { useShallow } from "zustand/react/shallow"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
@@ -69,9 +74,62 @@ const INSTALL: Partial<Record<AgentKind, { url: string; options: Installer[] }>>
   },
 }
 
+/** Each provider's CLI on this computer, looked for once and again when the window comes back
+ *  (after installing one in a terminal). */
+function useProbes(providers: Settings["providers"]) {
+  const [probes, setProbes] = useState<Partial<Record<AgentKind, Probe>>>({})
+  const [checking, setChecking] = useState<Partial<Record<AgentKind, boolean>>>({})
+  const check = useCallback(
+    async (kind: AgentKind) => {
+      setChecking((c) => ({ ...c, [kind]: true }))
+      try {
+        const p = await ipc.providerProbe(kind, providers[kind].binary)
+        setProbes((ps) => ({ ...ps, [kind]: p }))
+      } finally {
+        setChecking((c) => ({ ...c, [kind]: false }))
+      }
+    },
+    [providers],
+  )
+  const binaries = AGENTS.map((a) => providers[a].binary).join("\n")
+  useEffect(() => {
+    for (const a of AGENTS) void check(a)
+    // Again when an executable path changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [binaries])
+  // What wasn't found is looked for again when the user comes back from the terminal: an agent
+  // installed meanwhile shows up by itself.
+  useEffect(() => {
+    const again = () => {
+      for (const a of AGENTS) if (probes[a] && !probes[a]!.found) void check(a)
+    }
+    window.addEventListener("focus", again)
+    return () => window.removeEventListener("focus", again)
+  }, [probes, check])
+  return { probes, checking, check }
+}
+
 export function ProvidersSection() {
   const settings = useApp((s) => s.settings)!
   const update = useApp((s) => s.update)
+  const { probes, checking, check } = useProbes(settings.providers)
+  // The agents chats use (one per agent, sorted, so it only changes when that does).
+  const used = useChats(useShallow((s) => AGENTS.filter((a) => s.metas.some((m) => m.agent === a))))
+  const [choices, setChoices] = useState(loadChoices)
+  const choose = (kind: AgentKind, choice: ListChoice) => {
+    const next = { ...choices, [kind]: choice }
+    setChoices(next)
+    saveChoices(next)
+  }
+  const shown = (kind: AgentKind) =>
+    listed(choices[kind], {
+      installed: probes[kind] ? probes[kind]!.found : null,
+      isDefault: settings.providers.defaultAgent === kind,
+      inUse: used.includes(kind),
+    })
+  const listedAgents = AGENTS.filter(shown)
+  const others = AGENTS.filter((a) => !shown(a))
+  const looking = AGENTS.some((a) => !probes[a])
   return (
     <Section title="Providers" description="The agent CLIs oah chats through. Each one runs on the machine the project is on, with its own sign-in.">
       <Group>
@@ -93,41 +151,59 @@ export function ProvidersSection() {
           </Select>
         </Row>
       </Group>
-      {AGENTS.map((a) => (
-        <ProviderCard key={a} kind={a} provider={settings.providers[a]} />
+      {listedAgents.map((a) => (
+        <ProviderCard
+          key={a}
+          kind={a}
+          provider={settings.providers[a]}
+          probe={probes[a] ?? null}
+          checking={!!checking[a]}
+          onCheck={() => void check(a)}
+          onHide={() => choose(a, "hidden")}
+        />
       ))}
+      {others.length ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="self-start border-dashed text-muted-foreground hover:text-foreground">
+              <Plus /> Add provider <ChevronDown className="opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-72">
+            <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+              {looking ? "Looking for installed agents…" : "Installed agents show up here by themselves."}
+            </DropdownMenuLabel>
+            {others.map((a) => (
+              <DropdownMenuItem key={a} onSelect={() => choose(a, "shown")}>
+                <AgentGlyph agent={a} className="size-4" />
+                <span className="flex-1">{AGENT_LABEL[a]}</span>
+                <span className="text-[11px] text-faint">{!probes[a] ? "Checking…" : probes[a]!.found ? "Hidden" : "Not installed"}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </Section>
   )
 }
 
-function ProviderCard({ kind, provider }: { kind: AgentKind; provider: Provider }) {
+function ProviderCard({
+  kind,
+  provider,
+  probe,
+  checking,
+  onCheck,
+  onHide,
+}: {
+  kind: AgentKind
+  provider: Provider
+  probe: Probe | null
+  checking: boolean
+  onCheck: () => void
+  onHide: () => void
+}) {
   const update = useApp((s) => s.update)
-  const [probe, setProbe] = useState<Probe | null>(null)
-  const [checking, setChecking] = useState(false)
   const edit = (f: (p: Provider) => void) => update((s) => f(s.providers[kind]))
-
-  const check = async () => {
-    setChecking(true)
-    try {
-      setProbe(await ipc.providerProbe(kind, provider.binary))
-    } finally {
-      setChecking(false)
-    }
-  }
-  useEffect(() => {
-    check()
-    // Re-check when the binary path changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider.binary])
-  // Not installed: look again when the user comes back from the terminal they installed it in.
-  const missing = probe !== null && !probe.found
-  useEffect(() => {
-    if (!missing) return
-    const again = () => void check()
-    window.addEventListener("focus", again)
-    return () => window.removeEventListener("focus", again)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missing, provider.binary])
 
   const status = !probe ? (
     <span className="text-faint">Checking…</span>
@@ -164,9 +240,14 @@ function ProviderCard({ kind, provider }: { kind: AgentKind; provider: Provider 
             Docs <ExternalLink className="size-3" />
           </Button>
         ) : null}
-        <Button variant="ghost" size="icon-sm" aria-label="Check again" onClick={check} disabled={checking}>
+        <Button variant="ghost" size="icon-sm" aria-label="Check again" onClick={onCheck} disabled={checking}>
           <RefreshCw className={checking ? "animate-spin" : undefined} />
         </Button>
+        <Tip content="Hide from this list (Add provider brings it back)">
+          <Button variant="ghost" size="icon-sm" aria-label={`Hide ${AGENT_LABEL[kind]}`} onClick={onHide}>
+            <EyeOff />
+          </Button>
+        </Tip>
         <Switch checked={provider.enabled} onCheckedChange={(v) => edit((p) => void (p.enabled = v))} aria-label={`Use ${AGENT_LABEL[kind]}`} />
       </div>
       {probe?.outdated ? <div className="border-t border-warn/30 bg-warn/10 px-4 py-2.5 text-[12px] text-warn">{probe.outdated}</div> : null}
