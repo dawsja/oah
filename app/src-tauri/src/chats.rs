@@ -1478,6 +1478,13 @@ mod tests {
     /// it prints its arguments and answers what's typed, saves the conversation in a file
     /// named after its session once something is said, starts a new session on `/clear`, and
     /// notes each session it's on where its settings' hook says to.
+    ///
+    /// On Linux only, and not for want of trying. A test that builds an app on Windows makes
+    /// this test binary import `TaskDialogIndirect`, which only version 6 of the common
+    /// controls has; the app gets that from the manifest its build embeds, a test binary has
+    /// none, and Windows then refuses to start it at all, behind an "Entry Point Not Found"
+    /// dialog that waits for a click. What's under `Chats` there is run by oah-agents'
+    /// `real_windows_cli_round_trip` and oah-transport's `real_windows_programs`.
     #[test]
     #[cfg(target_os = "linux")]
     fn the_cli_takes_a_chat_over_and_hands_it_back() {
