@@ -7,7 +7,7 @@ import { TasksDock } from "@/components/chat/TasksDock"
 import { Transcript } from "@/components/chat/Transcript"
 import { CwdContext } from "@/components/chat/cwd"
 import { emptyTranscript, type ModelOption } from "@/lib/chat"
-import { AGENT_LABEL } from "@/lib/types"
+import { AGENT_LABEL, type PermissionMode } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { MobileComposer } from "./Composer"
 import { api, type AgentInfo } from "./rpc"
@@ -145,6 +145,8 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
   const agent = agents.find((a) => a.kind === pick) ?? agents.find((a) => a.kind === preferred) ?? agents[0]
   const [model, setModel] = useState("")
   const [effort, setEffort] = useState("")
+  // None picked: the agent's own default on the desktop.
+  const [permission, setPermission] = useState<PermissionMode | null>(null)
   const { models, load, failed: modelsFailed } = useModels(agent, projectId, NONE)
   const [sending, setSending] = useState(false)
 
@@ -160,7 +162,7 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
               <button
                 key={a.kind}
                 className={cn("rounded-md h-10 border px-3 text-[13px]", agent?.kind === a.kind ? "border-primary bg-primary text-primary-foreground" : "active:bg-accent")}
-                onClick={() => (setPick(a.kind), setModel(""), setEffort(""))}
+                onClick={() => (setPick(a.kind), setModel(""), setEffort(""), setPermission(null))}
               >
                 {a.name}
               </button>
@@ -178,7 +180,7 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
         placeholder="What should it do?"
         onSend={async (text, images) => {
           setSending(true)
-          const id = await useMobile.getState().send(null, text, images, { projectId, agent, model, effort })
+          const id = await useMobile.getState().send(null, text, images, { projectId, agent, model, effort, permission: permission ?? undefined })
           setSending(false)
           if (id) go(`/chat/${encodeURIComponent(id)}`, true)
           return !!id
@@ -189,7 +191,8 @@ export function NewChatScreen({ projectId }: { projectId: string }) {
         effort={effort}
         onModel={(m, e) => (setModel(m), setEffort(e))}
         onModelsOpen={load}
-        permission={null}
+        permission={permission ?? agent?.permissionMode ?? null}
+        onPermission={setPermission}
       />
     </div>
   )

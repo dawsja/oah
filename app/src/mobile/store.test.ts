@@ -36,4 +36,17 @@ describe("a new chat from the phone", () => {
     await useMobile.getState().send(null, "hi", [], { projectId: "p1", agent, model: "opus" })
     expect(invoke.mock.calls.map(([, a]) => a.method)).not.toContain("chat.setEffort")
   })
+
+  it("sends its first message with the permission mode picked before it, and keeps it", async () => {
+    const id = await useMobile.getState().send(null, "hi", [], { projectId: "p1", agent, permission: "plan" })
+    const send = invoke.mock.calls.find(([, a]) => a.method === "chat.send")!
+    expect(send[1].params.permission).toBe("plan")
+    expect(useMobile.getState().permission[id!]).toBe("plan")
+  })
+
+  it("leaves the agent's default mode to the desktop when none was picked", async () => {
+    useMobile.setState({ permission: {} })
+    await useMobile.getState().send(null, "hi", [], { projectId: "p1", agent })
+    expect(invoke.mock.calls.find(([, a]) => a.method === "chat.send")![1].params.permission).toBeNull()
+  })
 })
