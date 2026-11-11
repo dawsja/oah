@@ -67,6 +67,12 @@ xcrun simctl ui "$udid" appearance dark || true
 shot 11-dark-chats /
 shot 12-dark-chat-approval /chat/c-checkout
 shot 13-dark-chat-finished /chat/c-invoices
+# The page's own sizes, on the screen (there's no console to read here).
+xcrun simctl ui "$udid" appearance light || true
+xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+SIMCTL_CHILD_OAH_DEMO=1 SIMCTL_CHILD_OAH_DEBUG=1 SIMCTL_CHILD_OAH_ROUTE=/chat/c-invoices xcrun simctl launch "$udid" "$bundle"
+sleep 8
+xcrun simctl io "$udid" screenshot "$out/14-sizes.png"
 
 xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
 # What the app said, and any crash.

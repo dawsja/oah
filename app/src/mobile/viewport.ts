@@ -1,7 +1,8 @@
 // The on-screen keyboard on an iPhone. Android's WebView resizes the page for it (the viewport
 // tag's interactive-widget=resizes-content). Safari's lays it over the page instead: only the
 // visual viewport shrinks, and it slides down the page to show the focused field. So there the
-// app (mobile.css: html.ios body) is sized and moved to fill the visual viewport itself.
+// app (mobile.css: html.ios.keyboard body) is sized and moved to fill the visual viewport itself
+// while the keyboard is up.
 
 import { isIOS } from "./rpc"
 
@@ -39,4 +40,29 @@ export function initViewport(): () => void {
     visual.removeEventListener("resize", update)
     visual.removeEventListener("scroll", update)
   }
+}
+
+/** `OAH_DEBUG=1`: the numbers this file works from, on the screen, for a screenshot from a
+ *  simulator (there's no console to read there). */
+export function showViewportNumbers() {
+  const probe = document.createElement("div")
+  probe.style.cssText = "position:absolute;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)"
+  const out = document.createElement("pre")
+  out.style.cssText = "position:absolute;top:35%;left:8px;right:8px;z-index:9999;margin:0;padding:8px;font:11px/1.45 ui-monospace,monospace;background:#000d;color:#7f7;white-space:pre-wrap;pointer-events:none"
+  document.body.append(probe, out)
+  const show = () => {
+    const visual = window.visualViewport
+    const pad = getComputedStyle(probe)
+    const body = document.body.getBoundingClientRect()
+    out.textContent = [
+      `html.${document.documentElement.className.replace(/ /g, ".")}`,
+      `inner ${window.innerWidth}x${window.innerHeight}  client ${document.documentElement.clientWidth}x${document.documentElement.clientHeight}  screen ${screen.width}x${screen.height}`,
+      `visual ${visual ? `${visual.width.toFixed(1)}x${visual.height.toFixed(1)} top ${visual.offsetTop.toFixed(1)} page ${visual.pageTop.toFixed(1)} scale ${visual.scale}` : "none"}`,
+      `body ${body.width.toFixed(1)}x${body.height.toFixed(1)} at ${body.top.toFixed(1)} ${getComputedStyle(document.body).position}`,
+      `safe ${pad.paddingTop} ${pad.paddingRight} ${pad.paddingBottom} ${pad.paddingLeft}`,
+      `app-height ${document.documentElement.style.getPropertyValue("--app-height") || "-"} app-top ${document.documentElement.style.getPropertyValue("--app-top") || "-"}`,
+    ].join("\n")
+  }
+  show()
+  setInterval(show, 300)
 }

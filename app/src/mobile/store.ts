@@ -113,6 +113,7 @@ export const useMobile = create<Store>((set, get) => ({
     const pick = demo ?? desktops.find((d) => d.id === last) ?? (desktops.length === 1 ? desktops[0] : null)
     if (pick) await get().connect(pick.id)
     if (launch?.route) go(launch.route, true)
+    if (launch?.debug) void import("./viewport").then((v) => v.showViewportNumbers())
     // Back from the background: check the link (the phone may have slept through it dropping).
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && get().desktopId) void native.wake().catch(() => {})

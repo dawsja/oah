@@ -12,7 +12,7 @@ final class KeyboardTests: XCTestCase {
 
   func testTheComposerWithTheKeyboardUp() {
     let app = XCUIApplication(bundleIdentifier: "dev.oah.mobile")
-    app.launchEnvironment = ["OAH_DEMO": "1", "OAH_ROUTE": "/chat/c-invoices"]
+    app.launchEnvironment = ["OAH_DEMO": "1", "OAH_ROUTE": "/chat/c-invoices", "OAH_DEBUG": "1"]
     app.launch()
 
     // The composer is the page's one text area.

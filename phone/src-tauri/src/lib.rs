@@ -181,11 +181,12 @@ async fn demo_start(state: State<'_, AppState>) -> Result<Desktop, String> {
 }
 
 /// How the app was asked to start: `OAH_DEMO=1` opens the demo, `OAH_ROUTE` a screen (`/settings`,
-/// `/chat/<id>`). For screenshots and tests that drive the real app.
+/// `/chat/<id>`), `OAH_DEBUG=1` shows the page's sizes on it. For screenshots and tests that
+/// drive the real app.
 #[tauri::command]
 fn launch() -> Value {
-    let demo = std::env::var("OAH_DEMO").is_ok_and(|v| !v.is_empty() && v != "0");
-    json!({ "demo": demo, "route": std::env::var("OAH_ROUTE").ok().filter(|r| r.starts_with('/')) })
+    let on = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
+    json!({ "demo": on("OAH_DEMO"), "route": std::env::var("OAH_ROUTE").ok().filter(|r| r.starts_with('/')), "debug": on("OAH_DEBUG") })
 }
 
 #[tauri::command]

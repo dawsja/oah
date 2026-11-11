@@ -36,7 +36,7 @@ export const native = {
   /** Starts the demo desktop inside the app and pairs with it. */
   demo: () => invoke<Desktop>("demo_start"),
   /** How the app was asked to start (screenshots and tests): in the demo, on a screen. */
-  launch: () => invoke<{ demo: boolean; route: string | null }>("launch"),
+  launch: () => invoke<{ demo: boolean; route: string | null; debug?: boolean }>("launch"),
   /** With the address and code the desktop shows. */
   pair: (o: { addresses: string[]; code: string; name: string }) => invoke<Desktop>("pair", { addresses: o.addresses, code: o.code, name: o.name }),
   forget: (id: string) => invoke<void>("forget", { id }),
