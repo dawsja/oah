@@ -6,7 +6,7 @@ let package = Package(
   name: "tauri-plugin-oah-phone",
   platforms: [
     .macOS(.v10_15),
-    .iOS(.v15),
+    .iOS(.v14),
   ],
   products: [
     .library(

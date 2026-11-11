@@ -2,27 +2,21 @@ name: iOS
 
 # The iPhone app (phone/, built for iOS). No Mac stands behind this repository, so everything
 # that needs Xcode happens here, and for now only when asked (Actions → iOS → Run workflow):
+# it builds the app for the iPhone simulator, runs it there in its demo, and uploads a
+# screenshot of each screen (.github/scripts/ios-simulator.sh). That's how the app is looked
+# at without a Mac or an iPhone at hand.
 #
-#   project   generates the Xcode project (`tauri ios init` → phone/src-tauri/gen/apple) and
-#             uploads it as an artifact. It's generated once and then committed, like
-#             gen/android; this is how it gets made without a Mac. It also tries a simulator
-#             build and prints the tools' versions and options, so the log says what the next
-#             step needs.
+# The Xcode project (phone/src-tauri/gen/apple) was made by `tauri ios init` on a runner and is
+# committed, like gen/android. Its project.pbxproj comes from project.yml (XcodeGen): after
+# editing project.yml, the regenerated project is in this job's artifact, to commit.
 on:
   workflow_dispatch:
-    inputs:
-      job:
-        description: "What to run"
-        type: choice
-        options: [project]
-        default: project
 
 permissions:
   contents: read
 
 jobs:
-  project:
-    if: inputs.job == 'project'
+  simulator:
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -30,7 +24,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
         with:
           key: ios
@@ -38,35 +32,41 @@ jobs:
         run: |
           (cd app && bun install --frozen-lockfile)
           (cd phone && bun install --frozen-lockfile)
-      - name: Tools
-        working-directory: phone
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+      - name: Xcode project from project.yml
+        working-directory: phone/src-tauri/gen/apple
         run: |
-          sw_vers
-          xcodebuild -version
-          swift --version
-          cmake --version || true
-          xcrun simctl list devices available | grep -i iphone | head -n 20 || true
-          bun tauri --version
-          bun tauri ios init --help
-          bun tauri ios build --help
-      - name: Generate the Xcode project
+          # Folders the project refers to that git doesn't keep (ignored, or empty).
+          mkdir -p Externals assets
+          xcodegen generate --spec project.yml
+          git status --short .
+      - name: Build for the simulator
         working-directory: phone
-        run: bun tauri ios init
-      - name: Icons
-        working-directory: phone
-        # An iPhone's icon can't be transparent: the mark goes on the brand's ink.
+        # Building is what's wanted here; packaging an IPA for a simulator isn't a thing, so
+        # the command's own verdict comes second to whether the app is there (next step).
+        run: bun tauri ios build --debug --target aarch64-sim || echo "::warning::tauri ios build exited with $?"
+      - name: The app
         run: |
-          bun tauri icon ../assets/png/icon/oah-icon-dark-1024.png --ios-color '#0E0E0F' -o "$RUNNER_TEMP/icons"
-          ls -R "$RUNNER_TEMP/icons" | head -n 80
-      - name: What was generated
-        working-directory: phone/src-tauri
-        run: |
-          find gen/apple -type f -not -path '*/build/*' -not -path '*/Externals/*' | sort
-          echo "--- project.yml"; cat gen/apple/project.yml
-          echo "--- Info.plist"; cat gen/apple/*_iOS/Info.plist
-          echo "--- entitlements"; cat gen/apple/*_iOS/*.entitlements || true
-          echo "--- .gitignore"; cat gen/apple/.gitignore || true
+          app=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 6 -type d -path '*-iphonesimulator/oah.app' | head -n 1)
+          if [ -z "$app" ]; then
+            echo "::error::no oah.app was built"
+            exit 1
+          fi
+          echo "APP=$app" >> "$GITHUB_ENV"
+          du -sh "$app"
+          plutil -p "$app/Info.plist"
+          echo "--- what the build changed in the committed project"
+          git status --short phone/src-tauri/gen/apple
+      - name: Run it in the simulator
+        run: .github/scripts/ios-simulator.sh "$APP" "$RUNNER_TEMP/oah-ios-screens"
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oah-ios-screens
+          path: ${{ runner.temp }}/oah-ios-screens
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: oah-ios-project
           include-hidden-files: true
@@ -74,13 +74,5 @@ jobs:
             phone/src-tauri/gen/apple
             !phone/src-tauri/gen/apple/build
             !phone/src-tauri/gen/apple/Externals
-            ${{ runner.temp }}/icons
-          if-no-files-found: error
-      # Not expected to pass first time: its log is what's wanted (does the Swift plugin
-      # compile, does the voice engine build for iOS, where does the app end up).
-      - name: Simulator build (to see how far it gets)
-        working-directory: phone
-        continue-on-error: true
-        run: |
-          bun tauri ios build --debug --target aarch64-sim
-          find src-tauri/gen/apple/build -maxdepth 4 -name '*.app' -o -maxdepth 4 -name '*.ipa' | head -n 20
+            !phone/src-tauri/gen/apple/assets
+          if-no-files-found: warn
