@@ -1,22 +1,63 @@
 name: iOS
 
 # The iPhone app (phone/, built for iOS). No Mac stands behind this repository, so everything
-# that needs Xcode happens here, and for now only when asked (Actions → iOS → Run workflow):
-# it builds the app for the iPhone simulator, runs it there in its demo, and uploads a
-# screenshot of each screen (.github/scripts/ios-simulator.sh). That's how the app is looked
-# at without a Mac or an iPhone at hand.
+# that needs Xcode happens here:
+#
+#   check      on a push that touches the phone app or what it's built from: the app's Rust,
+#              iOS-only parts included, and its Swift plugin still compile for iOS.
+#   simulator  when asked (Actions → iOS → Run workflow): builds the app for the iPhone
+#              simulator, runs it there in its demo, and uploads a screenshot of each screen
+#              (.github/scripts/ios-simulator.sh), the keyboard included (a UI test,
+#              .github/ios-uitest). That's how the app is looked at without a Mac or an iPhone
+#              at hand.
 #
 # The Xcode project (phone/src-tauri/gen/apple) was made by `tauri ios init` on a runner and is
 # committed, like gen/android. Its project.pbxproj comes from project.yml (XcodeGen): after
-# editing project.yml, the regenerated project is in this job's artifact, to commit.
+# editing project.yml, the regenerated project is in the simulator job's artifact, to commit.
 on:
+  push:
+    branches: ["**"]
+    paths:
+      - "phone/**"
+      - "crates/oah-remote/**"
+      - "crates/oah-voice/**"
+      - "crates/oah-core/**"
+      - "Cargo.lock"
+      - ".github/workflows/ios.yml"
   workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  check:
+    if: github.event_name == 'push'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-check
+      - name: Frontend dist for tauri::generate_context
+        run: |
+          mkdir -p app/dist-mobile
+          echo '<!doctype html>' > app/dist-mobile/mobile.html
+      # From phone/, as the app's own build runs it (phone/.cargo/config.toml).
+      - name: Clippy, for iOS
+        working-directory: phone
+        run: cargo clippy -p oah-phone --target aarch64-apple-ios-sim -- -D warnings
+
   simulator:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     timeout-minutes: 90
     steps:

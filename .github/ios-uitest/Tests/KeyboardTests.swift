@@ -12,7 +12,7 @@ final class KeyboardTests: XCTestCase {
 
   func testTheComposerWithTheKeyboardUp() {
     let app = XCUIApplication(bundleIdentifier: "dev.oah.mobile")
-    app.launchEnvironment = ["OAH_DEMO": "1", "OAH_ROUTE": "/chat/c-invoices", "OAH_DEBUG": "1"]
+    app.launchEnvironment = ["OAH_DEMO": "1", "OAH_ROUTE": "/chat/c-invoices"]
     app.launch()
 
     // The composer is the page's one text area.
@@ -24,6 +24,12 @@ final class KeyboardTests: XCTestCase {
       app.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.9)).tap()
     }
     sleep(2)
+    // A fresh simulator shows how to slide-type in place of the keys, once.
+    let tutorial = app.buttons["Continue"]
+    if tutorial.waitForExistence(timeout: 2) {
+      tutorial.tap()
+      sleep(1)
+    }
     save("20-keyboard")
 
     let keyboardUp = app.keyboards.firstMatch.waitForExistence(timeout: 5)
