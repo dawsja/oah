@@ -30,8 +30,6 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
@@ -40,5 +38,19 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>CFBundleDisplayName</key>
+	<string>oah</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>oah finds and connects to the oah app on your computer over your local network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_oah._tcp</string>
+	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Dictate messages by voice. The audio is turned into text on this iPhone and never leaves it.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo to attach to a message.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save images from your chats to Photos.</string>
 </dict>
 </plist>

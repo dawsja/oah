@@ -12,6 +12,7 @@
 		47A3BAB29E7CD650B8CC3380 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 211F98A8526304545C6CFBFA /* Metal.framework */; };
 		4EF7FE8518C8F21CFC374B28 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3F2E1C95E1DA9832855E4C60 /* main.mm */; };
 		867281067DE8883A4F1420C3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AC7D1DAAE5CAC07592E8A168 /* Assets.xcassets */; };
+		955593C7B0D05A062351EB7E /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8F014605093CC93A9B485C5F /* Accelerate.framework */; };
 		B82B76A1D119407A0B0E562D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = BB32360883C2F5272F9B02DE /* LaunchScreen.storyboard */; };
 		BAA34784FF6619D75C8F6F04 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 32972616658982D7606E9EE0 /* WebKit.framework */; };
 		C1C66C32E1A9F51B89C42467 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = EB354BD290BE98A65DBDCEFA /* libapp.a */; };
@@ -32,6 +33,7 @@
 		510FC4D14E278BE15647E023 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		58946F85E030A0524753D5E2 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		67DBA5A68C2079EB4ACD6D5F /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
+		8F014605093CC93A9B485C5F /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
 		9B446F6F8DCE110862E6AF9D /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		A702DCDAD4FC8BC701E1BA12 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		A84AF13FF7600B39B9E613FC /* images.rs */ = {isa = PBXFileReference; path = images.rs; sourceTree = "<group>"; };
@@ -60,6 +62,7 @@
 				F58A87BB9358F305CC9E7244 /* Security.framework in Frameworks */,
 				0CB7ED83688DA39DA52DF4DE /* UIKit.framework in Frameworks */,
 				BAA34784FF6619D75C8F6F04 /* WebKit.framework in Frameworks */,
+				955593C7B0D05A062351EB7E /* Accelerate.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -69,6 +72,7 @@
 		0F3315D7F4F7730D842FFF4E /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				8F014605093CC93A9B485C5F /* Accelerate.framework */,
 				B3CF27B45B3B201F4BA4F8C5 /* CoreGraphics.framework */,
 				EB354BD290BE98A65DBDCEFA /* libapp.a */,
 				211F98A8526304545C6CFBFA /* Metal.framework */,
@@ -286,9 +290,9 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.oah.mobile;
-				PRODUCT_NAME = oah;
+				PRODUCT_NAME = "oah";
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				VALID_ARCHS = arm64;
 			};
 			name = release;
@@ -380,9 +384,9 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.oah.mobile;
-				PRODUCT_NAME = oah;
+				PRODUCT_NAME = "oah";
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				VALID_ARCHS = arm64;
 			};
 			name = debug;

@@ -31,6 +31,9 @@ if best is None:
 print(best[2], "on", best[3], file=sys.stderr)
 print(best[1])
 ')
+# The on-screen keyboard, not a Mac's (for the UI test that looks at it).
+defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false || true
+echo "$udid" > "$out/udid"
 xcrun simctl boot "$udid" || true
 xcrun simctl bootstatus "$udid" -b
 xcrun simctl status_bar "$udid" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true

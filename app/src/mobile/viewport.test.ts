@@ -2,18 +2,20 @@ import { describe, expect, it } from "vitest"
 import { visibleBox } from "./viewport"
 
 describe("the app's box on an iPhone", () => {
-  it("fills the screen when no keyboard is up", () => {
-    expect(visibleBox(844, { height: 844, offsetTop: 0 })).toEqual({ height: 844, top: 0, keyboard: false })
+  it("is the whole page when no keyboard is up", () => {
+    expect(visibleBox(874, { height: 874, offsetTop: 0 })).toBeNull()
     // Rounding in the visual viewport isn't a keyboard.
-    expect(visibleBox(844, { height: 843.6, offsetTop: 0 }).keyboard).toBe(false)
+    expect(visibleBox(874, { height: 873.6, offsetTop: 0 })).toBeNull()
+    // Nor is a visual viewport that leaves out the notch and the home indicator (62 + 34).
+    expect(visibleBox(874, { height: 778, offsetTop: 0 })).toBeNull()
   })
 
   it("shrinks to what the keyboard leaves", () => {
-    expect(visibleBox(844, { height: 508, offsetTop: 0 })).toEqual({ height: 508, top: 0, keyboard: true })
+    expect(visibleBox(874, { height: 538, offsetTop: 0 })).toEqual({ height: 538, top: 0 })
   })
 
   it("follows the viewport when Safari slides it down to the focused field", () => {
-    expect(visibleBox(844, { height: 508, offsetTop: 211.5 })).toEqual({ height: 508, top: 212, keyboard: true })
-    expect(visibleBox(844, { height: 508, offsetTop: -3 }).top).toBe(0)
+    expect(visibleBox(874, { height: 538, offsetTop: 211.5 })).toEqual({ height: 538, top: 212 })
+    expect(visibleBox(874, { height: 538, offsetTop: -3 })?.top).toBe(0)
   })
 })

@@ -59,6 +59,19 @@ jobs:
           git status --short phone/src-tauri/gen/apple
       - name: Run it in the simulator
         run: .github/scripts/ios-simulator.sh "$APP" "$RUNNER_TEMP/oah-ios-screens"
+      # Screens that need a finger: a UI test (.github/ios-uitest) taps the composer and saves
+      # what the screen shows with the keyboard up. Its pictures matter more than its verdict.
+      - name: With the keyboard up
+        continue-on-error: true
+        working-directory: .github/ios-uitest
+        run: |
+          xcodegen generate
+          out="$RUNNER_TEMP/oah-ios-screens"
+          TEST_RUNNER_SHOT_DIR="$out" xcodebuild test -project OahUITest.xcodeproj -scheme OahUITests \
+            -destination "platform=iOS Simulator,id=$(cat "$out/udid")" > "$out/uitest.log" 2>&1 && verdict=passed || verdict=failed
+          grep -E "Test Case|error:|\*\* TEST|Assertion|failed" "$out/uitest.log" | tail -n 30
+          echo "UI test $verdict"
+          ls -la "$out"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

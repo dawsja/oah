@@ -44,10 +44,16 @@ struct Nearby: Encodable {
 let policyDenied: Int32 = -65570
 
 class OahPhonePlugin: Plugin {
-  /// A swipe from the left edge goes back a screen (the screens are entries in the webview's
-  /// history).
   @objc public override func load(webview: WKWebView) {
     DispatchQueue.main.async {
+      // The page fills the whole screen and keeps clear of the notch and the home indicator
+      // itself (CSS safe-area insets). Left to itself the scroll view insets it as well, and
+      // the page comes out shorter than the screen.
+      webview.scrollView.contentInsetAdjustmentBehavior = .never
+      // An app, not a page: no rubber band around it.
+      webview.scrollView.bounces = false
+      // A swipe from the left edge goes back a screen (the screens are entries in the
+      // webview's history).
       webview.allowsBackForwardNavigationGestures = true
     }
   }

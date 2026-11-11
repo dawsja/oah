@@ -5,12 +5,14 @@
 
 import { isIOS } from "./rpc"
 
-/** Where the app sits: the visual viewport's height and offset in the page, and whether a
- *  keyboard is taking the rest. */
-export function visibleBox(pageHeight: number, visual: { height: number; offsetTop: number }): { height: number; top: number; keyboard: boolean } {
+/** Where the app sits while a keyboard is up: the visual viewport's height and offset in the
+ *  page. Null with no keyboard: the app is the page, all of it. */
+export function visibleBox(pageHeight: number, visual: { height: number; offsetTop: number }): { height: number; top: number } | null {
   const height = Math.round(visual.height)
-  // A keyboard takes far more than the pixel or two rounding can.
-  return { height, top: Math.max(0, Math.round(visual.offsetTop)), keyboard: pageHeight - height > 100 }
+  // A keyboard takes a third of the screen. Less than that is rounding, or the notch and home
+  // indicator, which some WebViews leave out of the visual viewport.
+  if (pageHeight - height <= 150) return null
+  return { height, top: Math.max(0, Math.round(visual.offsetTop)) }
 }
 
 /** Install once at startup. Does nothing on Android. */
@@ -21,9 +23,14 @@ export function initViewport(): () => void {
   root.classList.add("ios")
   const update = () => {
     const box = visibleBox(root.clientHeight, visual)
-    root.style.setProperty("--app-height", `${box.height}px`)
-    root.style.setProperty("--app-top", `${box.top}px`)
-    root.classList.toggle("keyboard", box.keyboard)
+    root.classList.toggle("keyboard", !!box)
+    if (box) {
+      root.style.setProperty("--app-height", `${box.height}px`)
+      root.style.setProperty("--app-top", `${box.top}px`)
+    } else {
+      root.style.removeProperty("--app-height")
+      root.style.removeProperty("--app-top")
+    }
   }
   update()
   visual.addEventListener("resize", update)
